@@ -145,7 +145,30 @@ log "migratsiya qollanadi"
 "${YANGI}/.venv/bin/python" "${YANGI}/migratsiya.py" --qolla --dsn "$XT_DB_DSN_OWNER"
 
 # --- 7) ALMASHTIRISH (atomar) ------------------------------------------------
-ESKI="$(readlink -f "$JORIY" 2>/dev/null || true)"
+# BIRINCHI JOYLASHTIRUVDA `current` HALI YO'Q. O'shanda `readlink -f`
+# BO'SH QAYTARMAYDI: u yo'lning FAQAT OXIRGI qismi yetishmasa ham
+# kanonik yo'lni chop etadi va nol kod bilan tugaydi. Ya'ni
+#
+#     ESKI="/opt/tenderai/<muhit>/current"
+#
+# bo'lib qolardi -- "eski reliz" emas, `current` ning O'ZI.
+#
+# O'LCHANGAN OQIBAT (2026-09-04, bo'sh serverga birinchi joylashtiruv):
+# sog'liq tekshiruvi o'tmagach 9-bo'lim `[ -n "$ESKI" ] && [ -d "$ESKI" ]`
+# ni TEKSHIRDI va u O'TDI -- chunki almashtirishdan keyin `current`
+# haqiqatan katalogga (yangi relizga) ko'rsatayotgan edi. Keyin:
+#
+#     ln -sfn /opt/tenderai/staging/current /opt/tenderai/staging/current
+#     current -> current          (O'ZI-O'ZIGA)
+#
+# Xizmat shundan keyin `203/EXEC` bilan yiqiladi va sabab jurnalda
+# "Too many levels of symbolic links" bo'lib turadi -- ya'ni ASL
+# nosozlik (nima uchun sog'liq tekshiruvi o'tmagani) BUTUNLAY
+# KO'MILADI. O'rnatma esa tuzatib bo'lmaydigan holatga tushadi.
+ESKI=""
+if [ -L "$JORIY" ]; then
+    ESKI="$(readlink -f "$JORIY" 2>/dev/null || true)"
+fi
 ln -sfn "$YANGI" "$JORIY"
 # ALMASHTIRILDI: bundan keyin reliz TIRIK, o'chirib bo'lmaydi.
 # Keyingi qadamlar yiqilsa 9-bo'lim ORQAGA QAYTARADI -- bu boshqa
@@ -162,7 +185,10 @@ sudo systemctl enable --now "tenderai-restore-test@${MUHIT}.timer" >/dev/null
 # --- 9) SOGLIQ TEKSHIRUVI — otmasa AVTOMATIK QAYTARILADI ---------------------
 if ! "${YANGI}/deploy/bin/health-check.sh" "$MUHIT"; then
     log "sogliq tekshiruvi OTMADI — orqaga qaytarilmoqda"
-    if [ -n "$ESKI" ] && [ -d "$ESKI" ]; then
+    # `"$ESKI" != "$JORIY"` -- IKKINCHI QO'RIQCHI. Yuqoridagi `-L`
+    # tekshiruvi sababni yopadi, bu esa OQIBATNI: qaytarish nishoni
+    # hech qachon `current` ning o'zi bo'lib qolmasin.
+    if [ -n "$ESKI" ] && [ -d "$ESKI" ] && [ "$ESKI" != "$JORIY" ]; then
         ln -sfn "$ESKI" "$JORIY"
         sudo systemctl restart "tenderai-api@${MUHIT}"
         xato "qaytarildi -> $ESKI"
