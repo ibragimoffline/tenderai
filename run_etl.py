@@ -333,6 +333,12 @@ def _uzilish_qabul(signum, frame):        # noqa: ARG001
 UZILISH_KODI = 3221225786
 
 
+#: Bola stderr idan jurnalga o'tadigan qator soni. Cheklov KERAK:
+#: yozuv darajasidagi xato minglab bo'lishi mumkin va ular jurnalni
+#: to'ldirsa, boshqa qadamlarning holati ko'rinmay qolardi.
+_STDERR_QATOR = 12
+
+
 def _fail_reason(res: "subprocess.CompletedProcess") -> str:
     """Muvaffaqiyatsiz bola uchun O'QILADIGAN sabab.
 
@@ -496,6 +502,33 @@ def run_script(script: str, extra_args: List[str],
             tail = "\n".join((res.stdout or "").strip().splitlines()[-4:])
             if tail:
                 out.extend(f"    {ln}" for ln in tail.splitlines())
+            # STDERR — `ok` bo'lganda ham. `_fail_reason()` uni faqat
+            # xato kodida o'qiydi, bolalar esa YOZUV darajasidagi
+            # sabablarni AYNAN stderr ga yozadi va QISMAN kodi bilan
+            # tugaydi — u esa `_KOD_MANOSI` da, ya'ni "xato emas".
+            #
+            # O'LCHANGAN NUQSON (2026-09-04). `etl_uzex.py` 655 ta
+            # yozuvni yiqitdi va har biri uchun sabab yozdi:
+            #
+            #     ! #509465 DB xato: insert or update on table "tender"
+            #       violates foreign key constraint "tender_area_leaf_id_fkey"
+            #
+            # Jurnalda esa FAQAT "655 ta yozuv yiqildi" qoldi. Sabab
+            # topilishi uchun ETL ni qo'lda, orkestratordan TASHQARIDA
+            # yurgizish kerak bo'ldi — ya'ni jurnal o'z vazifasini
+            # bajarmadi.
+            #
+            # OXIRGI QATORLAR olinadi va SON CHEKLANGAN: 655 ta bir xil
+            # xato jurnalni to'ldirardi va boshqa hamma narsani ko'mib
+            # tashlardi — aynan shu nuqsonning ikkinchi ko'rinishi.
+            xato_matn = (res.stderr or "").strip()
+            if xato_matn:
+                qatorlar = xato_matn.splitlines()
+                for ln in qatorlar[-_STDERR_QATOR:]:
+                    out.append(f"    [err] {ln}")
+                if len(qatorlar) > _STDERR_QATOR:
+                    out.append(f"    [err] ... yana {len(qatorlar) - _STDERR_QATOR} "
+                               f"qator (to'liq chiqish uchun skriptni qo'lda yurgizing)")
             # Chiqish umuman bo'lmasa ham xato SABABSIZ qolmasin: kod har
             # doim yoziladi (0xC000013A = majburiy to'xtatish, 1 = Python).
             err = None if ok else _fail_reason(res)
