@@ -86,3 +86,4 @@
 670	0067_audit_tuzatish	schema_patch_audit_tuzatish.sql
 680	0068_inson_halqasi	schema_patch_inson_halqasi.sql
 690	0069_huquq_2	schema_patch_huquq_2.sql
+700	0070_dim_area_seed	schema_patch_dim_area_seed.sql
