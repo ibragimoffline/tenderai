@@ -102,6 +102,31 @@ set -a
 set +a
 export APP_ENV="$MUHIT"
 
+# --- 4b) EMBEDDING BOG'LIQLIKLARI — IXTIYORIY --------------------------------
+# `EMBED_PROVIDER=local` (STANDART qiymat) ishlashi uchun `torch` va
+# `sentence-transformers` kerak. Ular `requirements-api.txt` da yo'q va
+# bu ataylab: venv ni ~100 MB dan ~1.5 GB ga oshiradi, `api/ai_chat.py`
+# esa ularni funksiya ichida import qiladi — yo'q bo'lsa chat LEKSIK
+# qidiruvga tushadi va xizmat yiqilmaydi.
+#
+# NEGA MUHIT FAYLIDAN BOSHQARILADI: bu QAROR har o'rnatmada bir xil
+# emas. Faqat ETL yoki faqat dashboard uchun ko'tarilgan nusxaga 1.4 GB
+# ni majburlash noo'rin; semantik qidiruv kerak bo'lgan nusxada esa u
+# SHART. `EMBED_INSTALL` shu tanlovni AYTILGAN qiladi.
+#
+# DIQQAT — DISK. Har reliz o'z venv iga ega va oxirgi 5 tasi saqlanadi
+# (11-bo'lim). `EMBED_INSTALL=1` da bu muhit boshiga ~7 GB demak.
+# Joy tor bo'lsa 11-bo'limdagi saqlanadigan reliz sonini kamaytiring.
+if [ "${EMBED_INSTALL:-0}" = "1" ]; then
+    log "embedding bog'liqliklari (torch CPU + sentence-transformers, ~1.4 GB)"
+    "${YANGI}/.venv/bin/pip" install --quiet -r "${YANGI}/requirements-embed.txt"
+    # QAYD: model FAYLLARI bu yerda tushmaydi — ular birinchi
+    # ishlatishda `HF_HOME` ga (`var/hf`) keladi, ya'ni RELIZDAN
+    # TASHQARIDA va joylashtirishlar orasida saqlanadi.
+else
+    log "embedding bog'liqliklari O'TKAZILDI (EMBED_INSTALL=0)"
+fi
+
 # --- 5) Frontend QURILADI (dev-server ISHLATILMAYDI) -------------------------
 # Vite dev-server 0.0.0.0 ga boglanadi va uning zaifliklari bor
 # (docs/xavfsizlik.md M-9). Joylashtirishda faqat statik qurilma.
