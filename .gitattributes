@@ -1,0 +1,15 @@
+# QATOR OXIRI — skriptlar uchun HAR DOIM LF.
+#
+# Ishlab chiqish Windows da yuriladi, joylashtirish esa Linux da.
+# `core.autocrlf=true` bo'lgan mashinada `.sh` fayl CRLF bilan
+# saqlansa, `#!/usr/bin/env bash\r` qatoridagi `\r` interpretator
+# nomining bir qismi bo'lib qoladi va yadro `bash\r` ni topa olmaydi:
+#
+#     bash: ./deploy.sh: /usr/bin/env^M: bad interpreter
+#
+# Xato joylashtirish paytida, serverda chiqadi — ya'ni eng qimmat
+# joyda. Shuning uchun qator oxiri repozitoriyda QOTIRILADI.
+*.sh    text eol=lf
+*.service text eol=lf
+*.timer   text eol=lf
+Caddyfile text eol=lf
