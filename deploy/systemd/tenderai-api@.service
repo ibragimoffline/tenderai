@@ -25,6 +25,25 @@ Wants=network-online.target
 # operatorga xabar yuboradi (Telegram yoki email — `.env` da).
 OnFailure=tenderai-ogohlantirish@%i:%n.service
 
+# QAYTA URINISH CHEGARASI — `[Unit]` DA, `[Service]` DA EMAS.
+# systemd bu ikki kalitni faqat shu bo'limda o'qiydi; `[Service]` da
+# turganda u ularni JIMGINA emas, lekin ZARARSIZ ko'rinadigan xabar
+# bilan tashlab yuboradi:
+#
+#     /etc/systemd/system/tenderai-api@.service:58: Unknown key
+#     'StartLimitIntervalSec' in section [Service], ignoring.
+#
+# Ya'ni chegara UMUMAN yo'q edi va `Restart=always` cheksiz sikl
+# berardi. O'LCHANDI (2026-09-04): ishga tushmaydigan sozlama bilan
+# hisoblagich 53 ga yetdi, `journalctl -n 60` esa faqat siklning
+# o'zini ko'rsatardi — ASL xato (nima uchun yiqilgani) undan ancha
+# oldin edi va ko'rinmasdi.
+#
+# Aynan shu narsadan himoya qilish uchun yozilgan qoida ishlamagani
+# uchun, u himoya qilishi kerak bo'lgan holat yuz berdi.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=exec
 User=tenderai
@@ -53,10 +72,8 @@ ExecStart=/opt/tenderai/%i/current/.venv/bin/uvicorn api.main:app \
 # QAYTA ISHGA TUSHIRISH SIYOSATI
 Restart=always
 RestartSec=5
-# 5 daqiqada 5 martadan ko'p yiqilsa TO'XTAYDI. Cheksiz sikl
-# jurnalni to'ldirib, haqiqiy sababni ko'mib tashlardi.
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# Chegara `[Unit]` da (yuqorida) — `StartLimitIntervalSec` va
+# `StartLimitBurst` SHU BO'LIMGA TEGISHLI EMAS.
 
 # To'xtatishda ishlab turgan so'rov tugasin.
 KillSignal=SIGINT
