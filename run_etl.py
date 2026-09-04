@@ -812,6 +812,53 @@ def main() -> None:
               "(manba ETL, kategoriyalash va bildirishnoma o'tkazib yuborildi)")
         sys.stdout.flush()
     else:
+        # --- LUG'AT: BO'SH BAZADA BIR MARTA -----------------------------------
+        # `tender.area_leaf_id` -> `dim_area(area_id)` ga FOREIGN KEY
+        # (`xt_xarid_schema.sql:76`). `dim_area` bo'sh bo'lsa HAR BIR
+        # tender yozuvi shu cheklovni buzadi.
+        #
+        # O'LCHANDI (2026-09-04, bo'sh serverga birinchi o'rnatish):
+        #
+        #     ! #509465 DB xato: insert or update on table "tender"
+        #       violates foreign key constraint "tender_area_leaf_id_fkey"
+        #     Metrika: ko'rildi 655, yozildi 0, yiqildi 655
+        #
+        # `dim_area` ni FAQAT `etl_dims.py` to'ldiradi, u esa bu
+        # ro'yxatda YO'Q edi — `LOYIHA.md` ning quvur diagrammasida
+        # (117-qator) bor bo'lsa ham. Ya'ni yangi o'rnatma HECH QACHON
+        # ma'lumot yoza olmasdi va buni hech narsa AYTMASDI.
+        #
+        # `etl_uzex.py` dagi `sync_region_names()` bu bo'shliqni
+        # yopmaydi: u mavjud qatorlarning NOMINI yangilaydi, yangi
+        # qator qo'shmaydi.
+        #
+        # NEGA HAR YURISHDA EMAS: hududlar reestri kamdan-kam
+        # o'zgaradi (`docs/legal-data-map.md`: "kamdan-kam"), soatlik
+        # yurishga qo'shish esa manbaga keraksiz yuk berardi. Shart —
+        # "jadval BO'SH", ya'ni bu BOOTSTRAP, yangilash emas.
+        # Reestrni ataylab yangilash uchun `etl_dims.py` qo'lda
+        # yurgiziladi.
+        try:
+            with db() as _c, _c.cursor() as _cur:
+                _cur.execute("SELECT count(*) FROM dim_area")
+                _n_area = int(_cur.fetchone()[0])
+        except Exception as e:                       # noqa: BLE001
+            _n_area = -1
+            print(f"[!] `dim_area` sanog'i olinmadi: {e}")
+
+        if _n_area == 0:
+            print("[i] `dim_area` BO'SH — lug'at yuklanadi (bir martalik). "
+                  "Busiz har bir tender yozuvi FOREIGN KEY ni buzardi.")
+            sys.stdout.flush()
+            _ok, _err, _dt, out, _kod = run_script("etl_dims.py", [])
+            emit(["\n===== pre: lug'at (dim_area bo'sh edi) =====", *out])
+            if not _ok:
+                # TO'XTATMAYDI, lekin JIMGINA ham o'tmaydi: manba
+                # ishlamayotgan bo'lishi mumkin va o'shanda tender
+                # yozuvlari baribir yiqiladi — sabab endi KO'RINADI.
+                print(f"[XATO] Lug'at yuklanmadi: {_err}")
+                post_xatolar.append(f"etl_dims: {_err}")
+
         groups = build_groups(args)
         mode = "ketma-ket" if args.sequential else "parallel"
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ETL orkestratori boshlandi "
