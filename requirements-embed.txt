@@ -1,0 +1,39 @@
+# Semantik qidiruv — LOKAL embedding modeli uchun bog'liqliklar
+# =============================================================================
+# O'rnatish (`deploy/bin/deploy.sh` buni `EMBED_INSTALL=1` bo'lsa o'zi qiladi):
+#     .venv/bin/pip install -r requirements-embed.txt
+#
+# --- NEGA ALOHIDA FAYL -------------------------------------------------------
+# `api/ai_chat.py` `torch` va `sentence_transformers` ni FUNKSIYA ICHIDA
+# import qiladi (`_load_embedder`), ya'ni ular yo'q bo'lsa ilova
+# YIQILMAYDI — chat leksik qidiruvga tushadi ("AI ixtiyoriy" tamoyili).
+#
+# Shu sababli ular `requirements-api.txt` da EMAS va bu TO'G'RI: bu
+# paketlar venv ni ~100 MB dan ~1.4 GB ga oshiradi. Faqat ETL yoki
+# faqat dashboard uchun ko'tarilgan o'rnatmaga bu og'irlikni
+# majburlash noo'rin.
+#
+# Lekin ular hech qayerda YOZILMAGAN ham edi. Natijada `EMBED_PROVIDER=local`
+# (standart qiymat!) bo'lgan yangi o'rnatmada model JIMGINA yuklanmasdi va
+# jurnalda faqat bitta ogohlantirish qolardi. Bu fayl o'sha bo'shliqni
+# yopadi: talab endi AYTILGAN va versiyalari QOTIRILGAN.
+#
+# --- NEGA CPU G'ILDIRAGI -----------------------------------------------------
+# Standart PyPI dagi `torch` CUDA kutubxonalarini tortadi (~2.5 GB) va
+# ular bu yerda BEHUDA: `docs/deploy.md` dagi o'lchov GPU'siz, 4 CPU ipi
+# bilan qilingan va `EMBED_THREADS` aynan shuning uchun bor.
+#
+# `--index-url` pytorch ga, `--extra-index-url` PyPI ga: `torch` birinchi
+# indeksdan, qolgan hammasi ikkinchisidan keladi. Versiya `+cpu` suffiksi
+# bilan QOTIRILGAN — shunda pip xato indeksdan olib qo'ya olmaydi.
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+# O'LCHANDI (2026-09-04, Ubuntu 26.04, Python 3.14, 4 yadro):
+#   o'rnatish  -> venv 100 MB dan 1.5 GB ga
+#   model      -> 14.2 s yuklanish (birinchi marta ~470 MB HF dan tushadi)
+#   vektorlash -> 2 ta qisqa matn uchun 0.06 s
+#   `pip check` toza; API paketlarining BIRORTASI ham o'zgarmadi
+#   (fastapi 0.141.1, starlette 1.6.0, uvicorn 0.52.4, pydantic 2.13.5).
+torch==2.14.0+cpu
+sentence-transformers==6.0.1
