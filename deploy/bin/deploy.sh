@@ -117,6 +117,31 @@ set -a
 set +a
 export APP_ENV="$MUHIT"
 
+# --- 4b) EMBEDDING BOG'LIQLIKLARI — IXTIYORIY --------------------------------
+# `EMBED_PROVIDER=local` (STANDART qiymat) ishlashi uchun `torch` va
+# `sentence-transformers` kerak. Ular `requirements-api.txt` da yo'q va
+# bu ataylab: venv ni ~100 MB dan ~1.5 GB ga oshiradi, `api/ai_chat.py`
+# esa ularni funksiya ichida import qiladi — yo'q bo'lsa chat LEKSIK
+# qidiruvga tushadi va xizmat yiqilmaydi.
+#
+# NEGA MUHIT FAYLIDAN BOSHQARILADI: bu QAROR har o'rnatmada bir xil
+# emas. Faqat ETL yoki faqat dashboard uchun ko'tarilgan nusxaga 1.4 GB
+# ni majburlash noo'rin; semantik qidiruv kerak bo'lgan nusxada esa u
+# SHART. `EMBED_INSTALL` shu tanlovni AYTILGAN qiladi.
+#
+# DIQQAT — DISK. Har reliz o'z venv iga ega va oxirgi 5 tasi saqlanadi
+# (11-bo'lim). `EMBED_INSTALL=1` da bu muhit boshiga ~7 GB demak.
+# Joy tor bo'lsa 11-bo'limdagi saqlanadigan reliz sonini kamaytiring.
+if [ "${EMBED_INSTALL:-0}" = "1" ]; then
+    log "embedding bog'liqliklari (torch CPU + sentence-transformers, ~1.4 GB)"
+    "${YANGI}/.venv/bin/pip" install --quiet -r "${YANGI}/requirements-embed.txt"
+    # QAYD: model FAYLLARI bu yerda tushmaydi — ular birinchi
+    # ishlatishda `HF_HOME` ga (`var/hf`) keladi, ya'ni RELIZDAN
+    # TASHQARIDA va joylashtirishlar orasida saqlanadi.
+else
+    log "embedding bog'liqliklari O'TKAZILDI (EMBED_INSTALL=0)"
+fi
+
 # --- 5) Frontend QURILADI (dev-server ISHLATILMAYDI) -------------------------
 # Vite dev-server 0.0.0.0 ga boglanadi va uning zaifliklari bor
 # (docs/xavfsizlik.md M-9). Joylashtirishda faqat statik qurilma.
@@ -174,7 +199,30 @@ log "migratsiya qollanadi"
 "${YANGI}/.venv/bin/python" "${YANGI}/migratsiya.py" --qolla --dsn "$XT_DB_DSN_OWNER"
 
 # --- 7) ALMASHTIRISH (atomar) ------------------------------------------------
-ESKI="$(readlink -f "$JORIY" 2>/dev/null || true)"
+# BIRINCHI JOYLASHTIRUVDA `current` HALI YO'Q. O'shanda `readlink -f`
+# BO'SH QAYTARMAYDI: u yo'lning FAQAT OXIRGI qismi yetishmasa ham
+# kanonik yo'lni chop etadi va nol kod bilan tugaydi. Ya'ni
+#
+#     ESKI="/opt/tenderai/<muhit>/current"
+#
+# bo'lib qolardi -- "eski reliz" emas, `current` ning O'ZI.
+#
+# O'LCHANGAN OQIBAT (2026-09-04, bo'sh serverga birinchi joylashtiruv):
+# sog'liq tekshiruvi o'tmagach 9-bo'lim `[ -n "$ESKI" ] && [ -d "$ESKI" ]`
+# ni TEKSHIRDI va u O'TDI -- chunki almashtirishdan keyin `current`
+# haqiqatan katalogga (yangi relizga) ko'rsatayotgan edi. Keyin:
+#
+#     ln -sfn /opt/tenderai/staging/current /opt/tenderai/staging/current
+#     current -> current          (O'ZI-O'ZIGA)
+#
+# Xizmat shundan keyin `203/EXEC` bilan yiqiladi va sabab jurnalda
+# "Too many levels of symbolic links" bo'lib turadi -- ya'ni ASL
+# nosozlik (nima uchun sog'liq tekshiruvi o'tmagani) BUTUNLAY
+# KO'MILADI. O'rnatma esa tuzatib bo'lmaydigan holatga tushadi.
+ESKI=""
+if [ -L "$JORIY" ]; then
+    ESKI="$(readlink -f "$JORIY" 2>/dev/null || true)"
+fi
 ln -sfn "$YANGI" "$JORIY"
 # ALMASHTIRILDI: bundan keyin reliz TIRIK, o'chirib bo'lmaydi.
 # Keyingi qadamlar yiqilsa 9-bo'lim ORQAGA QAYTARADI -- bu boshqa
@@ -191,7 +239,10 @@ sudo systemctl enable --now "tenderai-restore-test@${MUHIT}.timer" >/dev/null
 # --- 9) SOGLIQ TEKSHIRUVI — otmasa AVTOMATIK QAYTARILADI ---------------------
 if ! "${YANGI}/deploy/bin/health-check.sh" "$MUHIT"; then
     log "sogliq tekshiruvi OTMADI — orqaga qaytarilmoqda"
-    if [ -n "$ESKI" ] && [ -d "$ESKI" ]; then
+    # `"$ESKI" != "$JORIY"` -- IKKINCHI QO'RIQCHI. Yuqoridagi `-L`
+    # tekshiruvi sababni yopadi, bu esa OQIBATNI: qaytarish nishoni
+    # hech qachon `current` ning o'zi bo'lib qolmasin.
+    if [ -n "$ESKI" ] && [ -d "$ESKI" ] && [ "$ESKI" != "$JORIY" ]; then
         ln -sfn "$ESKI" "$JORIY"
         sudo systemctl restart "tenderai-api@${MUHIT}"
         xato "qaytarildi -> $ESKI"

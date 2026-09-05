@@ -351,6 +351,12 @@ def _uzilish_qabul(signum, frame):        # noqa: ARG001
 UZILISH_KODI = 3221225786
 
 
+#: Bola stderr idan jurnalga o'tadigan qator soni. Cheklov KERAK:
+#: yozuv darajasidagi xato minglab bo'lishi mumkin va ular jurnalni
+#: to'ldirsa, boshqa qadamlarning holati ko'rinmay qolardi.
+_STDERR_QATOR = 12
+
+
 def _fail_reason(res: "subprocess.CompletedProcess") -> str:
     """Muvaffaqiyatsiz bola uchun O'QILADIGAN sabab.
 
@@ -558,6 +564,33 @@ def run_script(script: str, extra_args: List[str],
             tail = "\n".join((res.stdout or "").strip().splitlines()[-4:])
             if tail:
                 out.extend(f"    {ln}" for ln in tail.splitlines())
+            # STDERR — `ok` bo'lganda ham. `_fail_reason()` uni faqat
+            # xato kodida o'qiydi, bolalar esa YOZUV darajasidagi
+            # sabablarni AYNAN stderr ga yozadi va QISMAN kodi bilan
+            # tugaydi — u esa `_KOD_MANOSI` da, ya'ni "xato emas".
+            #
+            # O'LCHANGAN NUQSON (2026-09-04). `etl_uzex.py` 655 ta
+            # yozuvni yiqitdi va har biri uchun sabab yozdi:
+            #
+            #     ! #509465 DB xato: insert or update on table "tender"
+            #       violates foreign key constraint "tender_area_leaf_id_fkey"
+            #
+            # Jurnalda esa FAQAT "655 ta yozuv yiqildi" qoldi. Sabab
+            # topilishi uchun ETL ni qo'lda, orkestratordan TASHQARIDA
+            # yurgizish kerak bo'ldi — ya'ni jurnal o'z vazifasini
+            # bajarmadi.
+            #
+            # OXIRGI QATORLAR olinadi va SON CHEKLANGAN: 655 ta bir xil
+            # xato jurnalni to'ldirardi va boshqa hamma narsani ko'mib
+            # tashlardi — aynan shu nuqsonning ikkinchi ko'rinishi.
+            xato_matn = (res.stderr or "").strip()
+            if xato_matn:
+                qatorlar = xato_matn.splitlines()
+                for ln in qatorlar[-_STDERR_QATOR:]:
+                    out.append(f"    [err] {ln}")
+                if len(qatorlar) > _STDERR_QATOR:
+                    out.append(f"    [err] ... yana {len(qatorlar) - _STDERR_QATOR} "
+                               f"qator (to'liq chiqish uchun skriptni qo'lda yurgizing)")
             # Chiqish umuman bo'lmasa ham xato SABABSIZ qolmasin: kod har
             # doim yoziladi (0xC000013A = majburiy to'xtatish, 1 = Python).
             err = None if ok else _fail_reason(res)
@@ -884,6 +917,53 @@ def main() -> None:
               "(manba ETL, kategoriyalash va bildirishnoma o'tkazib yuborildi)")
         sys.stdout.flush()
     else:
+        # --- LUG'AT: BO'SH BAZADA BIR MARTA -----------------------------------
+        # `tender.area_leaf_id` -> `dim_area(area_id)` ga FOREIGN KEY
+        # (`xt_xarid_schema.sql:76`). `dim_area` bo'sh bo'lsa HAR BIR
+        # tender yozuvi shu cheklovni buzadi.
+        #
+        # O'LCHANDI (2026-09-04, bo'sh serverga birinchi o'rnatish):
+        #
+        #     ! #509465 DB xato: insert or update on table "tender"
+        #       violates foreign key constraint "tender_area_leaf_id_fkey"
+        #     Metrika: ko'rildi 655, yozildi 0, yiqildi 655
+        #
+        # `dim_area` ni FAQAT `etl_dims.py` to'ldiradi, u esa bu
+        # ro'yxatda YO'Q edi — `LOYIHA.md` ning quvur diagrammasida
+        # (117-qator) bor bo'lsa ham. Ya'ni yangi o'rnatma HECH QACHON
+        # ma'lumot yoza olmasdi va buni hech narsa AYTMASDI.
+        #
+        # `etl_uzex.py` dagi `sync_region_names()` bu bo'shliqni
+        # yopmaydi: u mavjud qatorlarning NOMINI yangilaydi, yangi
+        # qator qo'shmaydi.
+        #
+        # NEGA HAR YURISHDA EMAS: hududlar reestri kamdan-kam
+        # o'zgaradi (`docs/legal-data-map.md`: "kamdan-kam"), soatlik
+        # yurishga qo'shish esa manbaga keraksiz yuk berardi. Shart —
+        # "jadval BO'SH", ya'ni bu BOOTSTRAP, yangilash emas.
+        # Reestrni ataylab yangilash uchun `etl_dims.py` qo'lda
+        # yurgiziladi.
+        try:
+            with db() as _c, _c.cursor() as _cur:
+                _cur.execute("SELECT count(*) FROM dim_area")
+                _n_area = int(_cur.fetchone()[0])
+        except Exception as e:                       # noqa: BLE001
+            _n_area = -1
+            print(f"[!] `dim_area` sanog'i olinmadi: {e}")
+
+        if _n_area == 0:
+            print("[i] `dim_area` BO'SH — lug'at yuklanadi (bir martalik). "
+                  "Busiz har bir tender yozuvi FOREIGN KEY ni buzardi.")
+            sys.stdout.flush()
+            _ok, _err, _dt, out, _kod = run_script("etl_dims.py", [])
+            emit(["\n===== pre: lug'at (dim_area bo'sh edi) =====", *out])
+            if not _ok:
+                # TO'XTATMAYDI, lekin JIMGINA ham o'tmaydi: manba
+                # ishlamayotgan bo'lishi mumkin va o'shanda tender
+                # yozuvlari baribir yiqiladi — sabab endi KO'RINADI.
+                print(f"[XATO] Lug'at yuklanmadi: {_err}")
+                post_xatolar.append(f"etl_dims: {_err}")
+
         groups = build_groups(args)
 
         # MUSBAT TASDIQ uchun BOSHLANG'ICH o'lchov (`--with-docs` bo'lsa).

@@ -27,10 +27,29 @@ if ! id tenderai >/dev/null 2>&1; then
 fi
 
 # --- 2) Kataloglar -----------------------------------------------------------
+# ORALIQ KATALOGLAR HAM SANALADI. `install -d` egalik va rejimni FAQAT
+# yo'lning OXIRGI qismiga qo'yadi; yo'lda yo'q bo'lgan oraliq
+# kataloglarni u yaratadi, lekin ular STANDART egalikda -- ya'ni
+# `root:root` -- qoladi.
+#
+# Natijasi o'lchandi (2026-09-04, birinchi joylashtiruv): `releases`
+# `tenderai` niki bo'ldi, uning USTIDAGI `/opt/tenderai/staging` esa
+# root niki. `deploy.sh` migratsiyalarni qo'llab bo'lgach, oxirgi
+# qadamda yiqildi:
+#
+#     ln: Permission denied
+#     yiqildi -> yarim reliz olib tashlanmoqda
+#
+# `current` havolasi AYNAN o'sha katalogda yaratiladi. Ya'ni bo'sh
+# serverda joylashtirish hech qachon tugamasdi -- 68 ta migratsiya
+# qo'llanib, keyin bekor qilinardi.
 install -d -o tenderai -g tenderai -m 0755 \
+    "/opt/tenderai/${MUHIT}" \
     "/opt/tenderai/${MUHIT}/releases" \
+    "/opt/tenderai/${MUHIT}/var" \
     "/opt/tenderai/${MUHIT}/var/hf" \
     "/opt/tenderai/${MUHIT}/var/cache" \
+    /var/backups/tenderai \
     "/var/backups/tenderai/${MUHIT}" \
     /var/log/caddy
 install -d -o root -g tenderai -m 0750 /etc/tenderai
