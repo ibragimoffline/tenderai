@@ -80,6 +80,29 @@ _TANAFFUS_SEK = 0.05
 #: sinalmay qoladi. `DB_SET_ROLE=tai_app` shu bo'shliqni yopadi.
 _SET_ROLE = (os.environ.get("DB_SET_ROLE") or "").strip()
 
+def rol_ornat(nom: str) -> None:
+    """`DB_SET_ROLE` ni ISH PAYTIDA o'rnatadi.
+
+    FAQAT SINOV QATLAMI UCHUN. `_SET_ROLE` modul yuklanganda
+    o'qiladi, ya'ni `os.environ` ni keyin o'zgartirish HECH
+    NARSAGA ta'sir qilmasdi -- sinov rejimni to'g'riladim deb
+    o'ylab, aslida superuser bilan yuraverardi (3-sinf: o'lchov
+    qo'shildi-yu, hech qachon o'lchamadi).
+
+    Nom `_quote_ident` bilan tekshiriladi va HOVUZ QAYTA OCHILADI:
+    ochiq ulanishlar eski rol bilan qolib ketmasin.
+
+    Ilova va ETL bu funksiyani CHAQIRMAYDI: ular uchun rol DSN
+    yoki `.env` bilan beriladi.
+    """
+    global _SET_ROLE
+    _quote_ident(nom)                 # yaroqsiz nom SHU YERDA yiqiladi
+    _SET_ROLE = nom
+    os.environ["DB_SET_ROLE"] = nom   # bola jarayonlar ham ko'rsin
+    if _pool is not None:
+        close_pool()
+        init_pool()
+
 
 def _quote_ident(nom: str) -> str:
     """Rol nomini SQL identifikatori sifatida qo'shtirnoqlaydi.

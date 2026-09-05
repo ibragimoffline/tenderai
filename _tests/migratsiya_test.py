@@ -102,6 +102,103 @@ def test_manifest():
     check("diskdagi HAR patch manifestda BOR", not yetim, str(yetim))
 
 
+def test_manifest_yasa_barqaror():
+    """`--manifest-yasa` MAVJUD `migratsiya_id` larni SILJITMAYDI.
+
+    O'LCHANGAN NUQSON (2026-09-06). `manifest_yasa()` id ni
+    POZITSIYADAN chiqarardi (`f"{i:04d}_{nom}"`). Ya'ni o'rtaga
+    bitta yangi patch tushsa undan keyingi HAMMA id bir pog'ona
+    siljirdi — manifest sarlavhasi id ni BARQAROR deb e'lon
+    qilgan bo'lsa ham.
+
+    NARXI: jurnal (`schema_migration`) `migratsiya_id` bo'yicha
+    kalitlanadi. Id siljigach yurgizuvchi ALLAQACHON QO'LLANGAN
+    migratsiyani "qo'llanmagan" deb ko'rib QAYTA YURGIZARDI.
+    Ishlab chiqarishda bu ma'lumot yo'qotishi bilan tugaydi.
+
+    Nuqson `main` birlashmasida ANIQ ZARAR keltirishi mumkin edi:
+    `0069_huquq_2` va `0070_dim_area_seed` ishlab chiqarishda
+    qo'llangan, birlashmada esa ularning oldiga yangi fayllar
+    tushardi.
+
+    Bu sinov IKKI narsani o'lchaydi:
+      1. hozirgi manifest uchun regeneratsiya HECH NIMANI
+         o'zgartirmaydi;
+      2. SUN'IY holatda — o'rtaga yangi patch qo'shilganda —
+         eskilarning id si baribir joyida qoladi.
+    Ikkinchisi asosiy: birinchisi tasodifan ham o'tishi mumkin.
+    """
+    bolim("Manifest — `--manifest-yasa` id ni SILJITMAYDI")
+
+    hozir = {z.fayl: z.mid for z in M.manifest_oqi()}
+    qayta = {z.fayl: z.mid for z in M.manifest_yasa()}
+    ozgargan = {f: (hozir[f], qayta[f])
+                for f in hozir if f in qayta and hozir[f] != qayta[f]}
+    check("regeneratsiya mavjud id larni O'ZGARTIRMAYDI",
+          not ozgargan,
+          "; ".join(f"{f}: {a}->{b}" for f, (a, b) in
+                    list(ozgargan.items())[:3]))
+    check("regeneratsiya fayl YO'QOTMAYDI",
+          not (set(hozir) - set(qayta)),
+          str(sorted(set(hozir) - set(qayta))[:3]))
+
+    # --- SUN'IY HOLAT: o'rtaga YANGI patch tushadi ---
+    #
+    # HAQIQIY manifestga tegilmaydi. `ROOT` va `MANIFEST` vaqtinchalik
+    # katalogga ko'chiriladi, oxirida QAYTARILADI. Aks holda sinov
+    # o'zi qo'riqlayotgan faylni buzardi.
+    import shutil
+    import tempfile
+    e_root, e_manifest = M.ROOT, M.MANIFEST
+    vaqt = tempfile.mkdtemp(prefix="manifest_yasa_")
+    try:
+        # Ikkita mustaqil patch: `a` jadval yaratadi, `b` unga tegadi.
+        # Bog'liqlik SHU orqali chiqadi, ya'ni tartib aniq.
+        io.open(os.path.join(vaqt, "xt_xarid_schema.sql"), "w",
+                encoding="utf-8").write("CREATE TABLE t_bir (id int);")
+        io.open(os.path.join(vaqt, M.JURNAL_PATCH), "w",
+                encoding="utf-8").write(
+                    "CREATE TABLE schema_migration (id int);")
+        io.open(os.path.join(vaqt, "schema_patch_aaa.sql"), "w",
+                encoding="utf-8").write("CREATE TABLE t_aaa (id int);")
+        io.open(os.path.join(vaqt, "schema_patch_zzz.sql"), "w",
+                encoding="utf-8").write(
+                    "ALTER TABLE t_aaa ADD COLUMN x int;")
+
+        M.ROOT = vaqt
+        M.MANIFEST = os.path.join(vaqt, "migratsiya_manifest.tsv")
+        birinchi = M.manifest_yasa()
+        M.manifest_yoz(birinchi)
+        oldin = {z.fayl: z.mid for z in birinchi}
+
+        # ENDI O'RTAGA yangi patch qo'shiladi: u `t_aaa` ga tegadi,
+        # ya'ni `aaa` dan KEYIN, lekin nomi bo'yicha `zzz` dan OLDIN
+        # turadi — pozitsiyaga tayangan id aynan shunda siljirdi.
+        io.open(os.path.join(vaqt, "schema_patch_mmm.sql"), "w",
+                encoding="utf-8").write(
+                    "ALTER TABLE t_aaa ADD COLUMN y int;")
+        keyin = {z.fayl: z.mid for z in M.manifest_yasa()}
+
+        siljigan = {f: (oldin[f], keyin[f])
+                    for f in oldin if oldin[f] != keyin.get(f)}
+        check("yangi patch ESKI id larni siljitmaydi",
+              not siljigan,
+              "; ".join(f"{f}: {a}->{b}" for f, (a, b) in
+                        list(siljigan.items())[:3]))
+        yangi_id = keyin.get("schema_patch_mmm.sql")
+        check("yangi patch YANGI id oladi",
+              bool(yangi_id) and yangi_id not in oldin.values(),
+              str(yangi_id))
+        check("yangi id band raqamdan KEYIN keladi",
+              bool(yangi_id) and yangi_id.startswith("0005_"),
+              f"{yangi_id} (oldingilar: {sorted(oldin.values())})")
+        check("id lar TAKRORSIZ qoladi",
+              len(set(keyin.values())) == len(keyin), str(len(keyin)))
+    finally:
+        M.ROOT, M.MANIFEST = e_root, e_manifest
+        shutil.rmtree(vaqt, ignore_errors=True)
+
+
 def test_checksum():
     bolim("Checksum — barqaror va sezgir")
     y = M.manifest_oqi()[1]
@@ -489,6 +586,7 @@ def main():
     print("=" * 70)
 
     test_manifest()
+    test_manifest_yasa_barqaror()
     test_checksum()
     test_xossalar()
     test_jurnal_mexanizmi()

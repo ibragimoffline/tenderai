@@ -454,10 +454,59 @@ def manifest_yasa() -> List[Yozuv]:
 
     # Jurnal patchi 1-o'rinda.
     tolik = [JURNAL_PATCH] + tartib
+
+    # `migratsiya_id` MAVJUD MANIFESTDAN OLINADI, POZITSIYADAN EMAS.
+    #
+    # O'LCHANGAN NUQSON (2026-09-06). Bu yerda id POZITSIYADAN
+    # chiqarilardi (`f"{i:04d}_{nom}"`), ya'ni bitta yangi fayl
+    # o'rtaga tushsa undan KEYINGI HAMMA id siljirdi. Manifest
+    # sarlavhasi esa buning TESKARISINI e'lon qiladi:
+    #
+    #     `migratsiya_id` BARQAROR: fayl qayta nomlansa ham
+    #     o'zgartirilmaydi, aks holda jurnal tarixi uzilardi.
+    #
+    # Ya'ni vosita o'z shartnomasiga zid ishlardi. Narxi nazariy
+    # emas: jurnal (`schema_migration`) aynan `migratsiya_id`
+    # bo'yicha kalitlanadi (`Jurnal.qollangan()`), ya'ni id
+    # siljigach yurgizuvchi ALLAQACHON QO'LLANGAN migratsiyani
+    # "qo'llanmagan" deb ko'rib QAYTA YURGIZARDI. Ishlab
+    # chiqarishda bu ma'lumot yo'qotishi bilan tugaydi.
+    #
+    # Aynan shu sabab 2026-09-06 dagi `main` birlashmasida
+    # `--manifest-yasa` CHAQIRILMAGAN va manifest QO'LDA
+    # birlashtirilgan edi. Endi vositaning o'zi xavfsiz.
+    #
+    # QOIDA: fayl nomi manifestda bor -> id O'ZGARMAYDI.
+    #        Yangi fayl -> eng katta raqamdan KEYINGI raqam.
+    # Fayl QAYTA NOMLANSA baribir yangi id oladi (moslik nom
+    # bo'yicha) — bu holat qo'lda tuzatiladi, sarlavha shuni aytadi.
+    mavjud: Dict[str, str] = {}
+    band: Set[int] = set()
+    if os.path.exists(MANIFEST):
+        for y in manifest_oqi():
+            mavjud[y.fayl] = y.mid
+            m = re.match(r"^(\d+)_", y.mid)
+            if m:
+                band.add(int(m.group(1)))
+    keyingi = max(band) + 1 if band else 1
+
     yozuvlar = []
+    korilgan: Set[str] = set()
     for i, f in enumerate(tolik, 1):
-        nom = re.sub(r"^schema_patch_|\.sql$", "", f) or f
-        yozuvlar.append(Yozuv(i * 10, f"{i:04d}_{nom}", f))
+        mid = mavjud.get(f)
+        if mid is None:
+            nom = re.sub(r"^schema_patch_|\.sql$", "", f) or f
+            mid = f"{keyingi:04d}_{nom}"
+            keyingi += 1
+        # TAKROR — JIM O'TMAYDI. Manifest qo'lda tahrirlanganda
+        # ikki fayl bir id ga ega bo'lib qolishi mumkin va u
+        # holda jurnal ikkalasini BITTA deb hisoblardi.
+        if mid in korilgan:
+            raise SystemExit(
+                f"`migratsiya_id` TAKRORLANDI: {mid} ({f}). "
+                f"{MANIFEST} ni qo'lda tuzating.")
+        korilgan.add(mid)
+        yozuvlar.append(Yozuv(i * 10, mid, f))
     return yozuvlar
 
 

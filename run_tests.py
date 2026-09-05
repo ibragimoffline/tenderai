@@ -55,6 +55,15 @@ import konsol  # noqa: E402
 #: CI ni to'sib qo'ymasin.
 TIMEOUT = int(os.environ.get("TEST_TIMEOUT", "900"))
 
+#: ILOVA ROLI — sinov MANA SHU rol bilan yurishi kerak.
+#:
+#: `postgres` (superuser) HAMMA grant tekshiruvini chetlab
+#: o'tadi, ya'ni ERP chegarasi va IDOR himoyalari sinalmay
+#: qoladi. Nom `deploy/bin/bootstrap.sh` dagi rol bilan bir xil
+#: bo'lishi SHART; o'zgarsa `_tests/rejim.py` dagi xabar ham
+#: yangilanadi.
+ILOVA_ROL = os.environ.get("TEST_ILOVA_ROL", "tai_app")
+
 
 def toplamlar(filtr: str = "") -> List[str]:
     hammasi = sorted(glob.glob(os.path.join(TESTS, "*_test.py")))
@@ -316,6 +325,61 @@ def main() -> None:
             "SELECT current_user AS u, "
             "(SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS s")
         rol = {"nom": _r["u"], "superuser": bool(_r["s"])}
+
+        # SUPERUSER BILAN YURISH — REJIM XATOSI, TO'PLAM XATOSI EMAS.
+        #
+        # O'LCHANGAN NUQSON (2026-09-06). To'liq yurishda `auth_test`
+        # va `xavfsizlik_test` YIQILDI. Sabab ularda emas edi: ikkalasi
+        # ham superuser aniqlagach ATAYLAB to'xtaydi, chunki superuser
+        # grant tekshiruvlarini chetlab o'tadi va ERP chegarasi, IDOR
+        # kabi himoyalar UMUMAN sinalmaydi. Farq katta: `auth_test`
+        # superuser bilan 10 ta tekshiruv beradi, `tai_app` bilan 131 ta.
+        #
+        # Qo'riqchi TO'G'RI ishlagan edi, lekin narxi noto'g'ri joyga
+        # tushardi: darvoza qizil bo'lardi va sabab "sinov yiqildi"
+        # bo'lib ko'rinardi. `DB_SET_ROLE` esa na `.env` da, na
+        # `.env.example` da bor edi — ya'ni uni HAR SAFAR eslab qolish
+        # kerak edi. Bu eslab qolinmaydi.
+        #
+        # Endi yurgizuvchi rejimni O'ZI to'g'rilaydi va buni BAQIRIB
+        # aytadi. Jim tuzatish bo'lmasin: qaysi rejimda o'lchanganini
+        # bilmasdan sonlarni solishtirib bo'lmaydi.
+        if rol["superuser"] and not (os.environ.get("DB_SET_ROLE") or "").strip():
+            _a = _db.query_one(
+                "SELECT (SELECT count(*) FROM pg_roles "
+                "          WHERE rolname=%(r)s) AS bor, "
+                "       pg_has_role(current_user, %(r)s, 'MEMBER') AS azo",
+                {"r": ILOVA_ROL}) or {}
+            if _a.get("bor") and _a.get("azo"):
+                _oldin = rol["nom"]
+                # `os.environ` NING O'ZI YETARLI EMAS. `api.db._SET_ROLE`
+                # modul YUKLANGANDA o'qiladi va u allaqachon yuklangan,
+                # ya'ni muhitni keyin o'zgartirish shu jarayonga TA'SIR
+                # QILMASDI. Birinchi urinishda aynan shu bo'ldi: sarlavha
+                # "rol to'g'rilandi" deb yozdi, `current_user` esa
+                # `postgres` bo'lib qoldi va bazaviy raqam NOTO'G'RI rol
+                # ostida saqlanardi. `rol_ornat()` ikkalasini ham qo'yadi
+                # va hovuzni qayta ochadi.
+                _db.rol_ornat(ILOVA_ROL)
+                _r = _db.query_one(
+                    "SELECT current_user AS u, "
+                    "(SELECT rolsuper FROM pg_roles "
+                    "  WHERE rolname=current_user) AS s")
+                rol = {"nom": _r["u"], "superuser": bool(_r["s"]),
+                       "avtomatik": True}
+                print(f"  ROL TO'G'RILANDI: superuser `{_oldin}` aniqlandi "
+                      f"-> `DB_SET_ROLE={ILOVA_ROL}` qo'yildi "
+                      f"(joriy rol: `{rol['nom']}`).")
+                print("  Sabab: superuser grant himoyalarini chetlab o'tadi, "
+                      "ular sinalmay qolardi.")
+            else:
+                rol["ogohlantirish"] = (
+                    f"superuser, `{ILOVA_ROL}` ga o'tib bo'lmadi")
+                print(f"  DIQQAT: superuser bilan yurilyapti va `{ILOVA_ROL}` "
+                      f"roliga o'tib bo'lmadi.")
+                print("  Grant asosidagi himoyalar (ERP chegarasi, IDOR) "
+                      "SINALMAYDI — `auth_test` va `xavfsizlik_test` "
+                      "ataylab to'xtaydi.")
         _db.close_pool()
     except Exception:                                         # noqa: BLE001
         # Bazasiz muhit yoki ulanish yo'q — `None` QOLADI.

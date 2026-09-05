@@ -43,6 +43,12 @@ ko'rinadi, tashqi uzilish esa to'plamni bloklamaydi.
 from __future__ import annotations
 
 import argparse
+import os
+
+#: ILOVA ROLI — `run_tests.py:ILOVA_ROL` bilan AYNI bo'lishi shart.
+#: Ikki joyda turgani ataylab emas, lekin `_tests/` paketi ildizdagi
+#: modulni import qilmaydi; `nom_butunlik_test` ikkalasini solishtiradi.
+ILOVA_ROL = os.environ.get("TEST_ILOVA_ROL", "tai_app")
 
 
 def bayroqlar(ap: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -104,6 +110,37 @@ def rol_tekshir(db) -> None:
         "(SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS s")
     if not kim or not kim["s"]:
         return
+
+    # AVVAL O'ZI TO'G'RILASHGA URINADI.
+    #
+    # O'LCHANGAN NUQSON (2026-09-06). Bu qo'riqchi ishlagan, lekin
+    # narxi noto'g'ri joyga tushgan: `run_tests.py` to'liq yurishida
+    # `auth_test` va `xavfsizlik_test` YIQILDI va darvoza "sinov
+    # buzilgan" deb ko'rindi, holbuki buzilgani MUHIT edi.
+    # `DB_SET_ROLE` na `.env` da, na `.env.example` da bor edi —
+    # ya'ni uni har safar buyruq satrida eslab qolish kerak edi.
+    # Bu eslab qolinmaydi va aynan shu sababdan to'liq yurish
+    # oxirgi marta 2026-09-04 da to'g'ri rejimda bo'lgan.
+    #
+    # `SET ROLE` uchun ULANISH kerak emas va `tai_app` login qila
+    # olmaydi, ya'ni bu yagona yo'l. A'zolik bo'lmasa — eski xatti
+    # harakat: TO'XTAYDI. Jimgina `skip` YO'Q.
+    #
+    # To'g'rilash BAQIRIB aytiladi: qaysi rejimda o'lchanganini
+    # bilmasdan sonlarni solishtirib bo'lmaydi.
+    if not (os.environ.get("DB_SET_ROLE") or "").strip():
+        a = db.query_one(
+            "SELECT (SELECT count(*) FROM pg_roles WHERE rolname=%(r)s) AS bor, "
+            "       pg_has_role(current_user, %(r)s, 'MEMBER') AS azo",
+            {"r": ILOVA_ROL}) or {}
+        if a.get("bor") and a.get("azo"):
+            db.rol_ornat(ILOVA_ROL)
+            yangi_kim = db.query_one("SELECT current_user AS u")
+            print(f"  [rejim] superuser `{kim['u']}` aniqlandi -> "
+                  f"`SET ROLE {ILOVA_ROL}` qo'llandi "
+                  f"(joriy rol: `{yangi_kim['u']}`).")
+            return
+
     qatorlar = [
         "",
         "SINOV SUPERUSER BILAN YURMOQDA — TO'XTATILDI.",

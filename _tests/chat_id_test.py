@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import statistics
 import os
 import sys
 
@@ -351,11 +352,34 @@ def test_tiklash_olchovi(db):
           R.MOSLIK_MIN == 10 and ">= 10" in tarif.replace(">=10", ">= 10"),
           f"MOSLIK_MIN={R.MOSLIK_MIN}")
 
+    # MUTLAQ QIYMAT EMAS, O'ZGARISH.
+    #
+    # O'LCHANGAN NUQSON (2026-09-06). Bu blok ilgari `tiklandi == 3`,
+    # `rad_foiz is None` va `mediana_sek == 1500` deb MUTLAQ qiymat
+    # kutardi — ya'ni "kesimda MENDAN BOSHQA hech kim yo'q" degan
+    # aytilmagan shartga tayanardi. Bazada bitta HAQIQIY tiklanish
+    # paydo bo'lgach (1 tiklandi / 1 rad, mediana 11 s) uchala shart
+    # ham yiqildi. Kod TO'G'RI edi: 4/10 ham, `namuna kam: 4/10` ham
+    # ko'rinishning to'g'ri javobi.
+    #
+    # Endi sinov O'ZI YOZGAN 3 qatorning HISSASINI o'lchaydi va
+    # medianani ko'rinishdan MUSTAQIL ravishda qayta hisoblab
+    # solishtiradi. Bu bazaviy holatga befarq va ayni paytda
+    # KUCHLIROQ: ilgari mediana bitta qotirilgan songa qaralardi,
+    # endi butun namunaga.
+    #
+    # `company_id=2` sharti QO'SHILDI: usiz tanlangan sessiya boshqa
+    # kompaniyaniki bo'lib, hissa umuman ko'rinmasligi mumkin edi.
     sinov = [r["id"] for r in db.query(
         "SELECT id FROM chat_session "
         " WHERE manba IS DISTINCT FROM 'eval' AND NOT archived "
+        "   AND company_id = 2 "
         "   AND tender_id IS NULL AND tiklandi_at IS NULL LIMIT 3")]
     if len(sinov) == 3:
+        oldin = db.query_one("SELECT * FROM v_chat_tiklash "
+                             "WHERE kesim='global' AND company_id=2") or {}
+        b_tik = int(oldin.get("tiklandi") or 0)
+        b_rad = int(oldin.get("rad_etildi") or 0)
         try:
             for k, i in enumerate(sinov):
                 db.execute_returning(
@@ -368,17 +392,38 @@ def test_tiklash_olchovi(db):
                     "WHERE id=%(i)s RETURNING id", {"i": i})
             r = db.query_one("SELECT * FROM v_chat_tiklash "
                              "WHERE kesim='global' AND company_id=2")
-            check("3/10 namunada foiz BERILMAYDI",
-                  r["tiklandi"] == 3 and r["rad_foiz"] is None, str(r))
-            check("sabab aniq: `namuna kam: 3/10`",
-                  r["foiz_yoq_sababi"] == "namuna kam: 3/10",
-                  str(r["foiz_yoq_sababi"]))
-            # 10 va 40 daqiqa -> MEDIANA 25 daqiqa (1500 s).
-            # O'RTACHA ham 25 chiqadi, shuning uchun uchinchi,
-            # RAD ETILMAGAN qator qo'shildi: u ikkalasiga ham
-            # kirmaydi va filtr ishlayotganini ko'rsatadi.
+            check("3 ta tiklanish HISOBGA olindi",
+                  r["tiklandi"] == b_tik + 3, f"{b_tik} -> {r['tiklandi']}")
+            check("2 ta rad HISOBGA olindi",
+                  r["rad_etildi"] == b_rad + 2, f"{b_rad} -> {r['rad_etildi']}")
+            # CHEGARA ikki tomonlama: 10 dan past bo'lsa foiz YO'Q va
+            # sababi aytiladi, 10 ga yetsa foiz BERILADI. Ilgari faqat
+            # birinchi tarmoq sinalardi va u ham tasodifan.
+            if r["tiklandi"] < 10:
+                check("kam namunada foiz BERILMAYDI",
+                      r["rad_foiz"] is None, str(r))
+                check("sabab AYNAN namuna sonini aytadi",
+                      r["foiz_yoq_sababi"] == f"namuna kam: {r['tiklandi']}/10",
+                      str(r["foiz_yoq_sababi"]))
+            else:
+                check("10 ga yetganda foiz BERILADI",
+                      r["rad_foiz"] is not None and r["foiz_yoq_sababi"] is None,
+                      str(r))
+            # MEDIANA KO'RINISHDAN MUSTAQIL QAYTA HISOBLANADI.
+            # Uchinchi qator RAD ETILMAGAN — u bu ro'yxatga
+            # kirmaydi, ya'ni `FILTER` ishlayotgani ko'rinadi.
+            xom = [float(x["sek"]) for x in db.query(
+                "SELECT EXTRACT(epoch FROM tiklash_rad_at - tiklandi_at) AS sek "
+                "  FROM chat_session "
+                " WHERE manba IS DISTINCT FROM 'eval' AND company_id = 2 "
+                "   AND tender_id IS NULL AND tiklash_rad_at IS NOT NULL")]
+            kutilgan = statistics.median(xom)
+            # 1 sekundlik yo'l qo'yiladi: `now()` ikki UPDATE orasida
+            # siljiydi va ko'rinish `::integer` ga yaxlitlaydi.
             check("mediana faqat RAD ETILGANLARDAN hisoblanadi",
-                  r["mediana_sek"] == 1500, str(r["mediana_sek"]))
+                  abs(r["mediana_sek"] - kutilgan) <= 1,
+                  f"ko'rinish={r['mediana_sek']} mustaqil={kutilgan:.0f} "
+                  f"namuna={len(xom)}")
         finally:
             for i in sinov:
                 db.execute_returning(

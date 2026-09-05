@@ -633,19 +633,75 @@ def test_isteemolchilar():
           "AJRATILGAN TALABLAR" in chatsrc)
 
     # --- 4. `prompt_block` mazmuni ---
-    tid = db.scalar("""SELECT tender_id FROM tender_requirement
-        WHERE source='document' LIMIT 1""")
-    if tid:
-        cid = db.scalar("""SELECT company_id FROM tender_requirement
-            WHERE tender_id=%(t)s LIMIT 1""", {"t": tid})
+    #
+    # NOMZOD ATAYLAB IKKITA VA ATAYLAB SHARTLI TANLANADI.
+    #
+    # O'LCHANGAN NUQSON (2026-09-06). Ilgari bu yerda bitta
+    # `... WHERE source='document' LIMIT 1` turardi — `ORDER BY`
+    # SIZ, ya'ni nomzodni Postgres rejasi tanlardi. Baza inson
+    # tasdig'i bilan to'lgach tanlov `20000508677` ga tushdi va
+    # uning 6 ta talabining 6 tasi ham tasdiqlangan edi. Blok esa
+    # bunday qatorga ATAYLAB `naqsh`/`model` emas, `INSON
+    # TASDIQLAGAN` yozadi (`api/requirement.py`), shuning uchun
+    # "usul ko'rsatilgan" sharti yiqildi. Kod TO'G'RI edi — sinov
+    # o'z nomzodiga kafolat bermagan edi.
+    #
+    # Endi ikkala TARMOQ ham o'z nomzodi bilan tekshiriladi va
+    # nomzod topilmasa shart JIM O'TMAYDI, `check` yiqiladi.
+    # `jami <= PROMPT_LIMIT` sharti kerak: blok `LIMIT` bilan
+    # kesiladi va tekshirilayotgan qator kesimdan tashqarida
+    # qolishi mumkin edi.
+    nomzod = db.query_one("""
+        SELECT tender_id, company_id
+          FROM tender_requirement
+         WHERE source='document' AND review_status <> 'rejected'
+         GROUP BY tender_id, company_id
+        HAVING count(*) <= %(l)s
+           AND count(*) FILTER (
+                   WHERE review_status IN ('approved','corrected')
+                     AND reviewed_by IS NOT NULL) = 0
+         ORDER BY tender_id
+         LIMIT 1""", {"l": R.PROMPT_LIMIT})
+    if nomzod:
+        tid, cid = nomzod["tender_id"], nomzod["company_id"]
         blok = R.prompt_block(tid, cid)
         check("prompt_block matn qaytardi", bool(blok), blok[:60])
-        check("ishonch KO'RSATILGAN", "ishonch" in blok,
-              "modelga 'bu aniq ma'lumot' degan taassurot bermaymiz")
         check("qamrov ogohlantirishi bor",
               "BARCHASI emas" in blok, blok[-160:])
         check("usul ko'rsatilgan (naqsh/model)",
               "naqsh]" in blok or "model]" in blok, blok[:200])
+        # `ishonch` so'zi izoh SARLAVHASIDA ham bor, ya'ni uni
+        # butun blokdan qidirish HECH NARSANI o'lchamasdi. Talab
+        # QATORINING o'zida turishi kerak.
+        check("ishonch talab QATORIDA ko'rsatilgan",
+              any("[ishonch " in q for q in blok.splitlines()),
+              "modelga 'bu aniq ma'lumot' degan taassurot bermaymiz")
+    else:
+        check("tasdiqlanmagan talabli tender topildi", False,
+              "nomzod yo'q — 'usul ko'rsatilgan' sharti o'lchanmadi")
+
+    # INSON TASDIG'I TARMOG'I. Bu holat oldin UMUMAN sinalmagan edi
+    # va aynan u sinovni yiqitgan edi.
+    nomzod2 = db.query_one("""
+        SELECT tender_id, company_id
+          FROM tender_requirement
+         WHERE source='document' AND review_status <> 'rejected'
+         GROUP BY tender_id, company_id
+        HAVING count(*) <= %(l)s
+           AND count(*) FILTER (
+                   WHERE review_status IN ('approved','corrected')
+                     AND reviewed_by IS NOT NULL) > 0
+         ORDER BY tender_id
+         LIMIT 1""", {"l": R.PROMPT_LIMIT})
+    if nomzod2:
+        blok2 = R.prompt_block(nomzod2["tender_id"], nomzod2["company_id"])
+        check("inson tasdig'i YORLIQLANADI",
+              "INSON TASDIQLAGAN]" in blok2, blok2[:200])
+        check("tasdiqlangan qatorda model ishonchi KO'RSATILMAYDI",
+              all("[ishonch " not in q
+                  for q in blok2.splitlines()
+                  if "INSON TASDIQLAGAN]" in q),
+              "tasdiqlangan talab model ishonchi bilan bir xil ko'rinmasin")
 
     # --- 5. BO'SH holat — "yo'q" va "ajratilmagan" AJRALADI ---
     yoq = db.scalar("""SELECT t.id FROM tender t WHERE NOT EXISTS
