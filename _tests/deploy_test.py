@@ -383,6 +383,11 @@ def test_e2e_darvozasi():
     # chegarasi va iqtibos zanjiri O'LCHANMAYDI.
     check("`--begona` DOIM beriladi", "--begona" in d)
     check("`--ai` DOIM beriladi (iqtibos zanjiri)", "--ai" in d)
+    # `--proksi` -- 413 QAYSI QATLAMDAN kelganini ajratadi.
+    # Busiz "413 keldi" degan xulosa Caddy chegarasi ISHLAYOTGANINI
+    # isbotlamasdi: uni ilova ham qaytaradi.
+    check("`--proksi` DOIM beriladi (Caddy chegarasi isboti)",
+          "--proksi" in d)
     check("E2E yiqilsa ORQAGA QAYTARILADI",
           "E2E YIQILDI" in d and d.count("ln -sfn \"$ESKI\"") >= 2)
     # Skriptning O'ZI ham ikki shartni majburiy qiladi.
@@ -393,6 +398,10 @@ def test_e2e_darvozasi():
           "IQTIBOS O'LCHANMADI" in e)
     check("skript javob va iqtibosni AJRATADI",
           "citation" in e and "token" in e and "ajratilgan" in e)
+    check("skript 413 ni QATLAM bo'yicha ajratadi",
+          "FILE_TOO_LARGE" in e and "to'xtatgan qatlam" in e)
+    check("skript proksi JUDA KICHIK emasligini ham tekshiradi",
+          "proksidan O'TADI" in e)
     check("skript BRAUZER sinovi EMASligini aytadi",
           "BRAUZER sinovi EMAS" in e)
 

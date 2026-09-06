@@ -329,6 +329,31 @@ unda o'sha raqam bor — ya'ni shart modelning javobini emas, o'zi
 yuborgan matnni topib yashil bo'lardi. Endi `token` va `citation`
 hodisalari turiga ko'ra ajratiladi.
 
+**413 QAYSI QATLAMDAN kelgani ajratiladi.** Statusning o'zi yetarli
+emas: uni ikkala qatlam ham qaytaradi va ular **boshqa** narsani
+isbotlaydi.
+
+| to'xtatgan | ma'nosi |
+|---|---|
+| proksi | Caddy `max_size` **ishlayapti**; so'rov ilovaga yetib bormadi |
+| ilova | `_yuklangani()` ishladi, lekin proksi chegarasi **yo'q yoki juda katta** |
+
+Ajratish belgisi: ilova **kodli** javob beradi
+(`{"error":{"code":"FILE_TOO_LARGE"}}`), Caddy esa o'z 413 ini
+beradi va unda bu kod yo'q. `--proksi` berilsa, ilovaning 413 i
+**xato** deb sanaladi.
+
+**Chegaraning ikkala tomoni** o'lchanadi: 30 MB proksida to'xtaydi,
+20 MB esa proksidan **o'tadi** (ilova uni tur bo'yicha rad etadi →
+422, bu tana ilovaga yetib kelganining isboti). Faqat birinchisini
+o'lchash yarim o'lchov bo'lardi: proksi chegarasi juda kichik bo'lsa
+qonuniy fayl ham to'xtardi va foydalanuvchi ilovaning tushunarli
+xatosi o'rniga proksining yalang'och 413 sahifasini ko'rardi.
+
+Mahalliy yurishda (`uvicorn` to'g'ridan-to'g'ri) `--proksi`
+**berilmaydi** — u yerda proksi yo'q va 413 ni ilova qaytaradi. Skript
+buni jim o'tkazmaydi: qaysi qatlam to'xtatgani **yoziladi**.
+
 > **Bu brauzer sinovi EMAS.** Tugma bosish, fayl tanlash dialogi va
 > UI holati (Processing → Ready) sinalmaydi. Ular odam yoki brauzer
 > avtomatizatsiyasi bilan tekshiriladi.

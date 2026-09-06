@@ -284,7 +284,7 @@ if [ "$MUHIT" = "staging" ]; then
     # sezilarli emas, buzilgan iqtibos esa sezilarli.
     if ! "${YANGI}/deploy/bin/e2e-fayl.sh" "$E2E_URL" \
             "$E2E_LOGIN" "$E2E_PAROL" \
-            --begona "$E2E_BEGONA_LOGIN" "$E2E_BEGONA_PAROL" --ai; then
+            --begona "$E2E_BEGONA_LOGIN" "$E2E_BEGONA_PAROL" --ai --proksi; then
         log "E2E YIQILDI — orqaga qaytarilmoqda"
         if [ -n "$ESKI" ] && [ -d "$ESKI" ] && [ "$ESKI" != "$JORIY" ]; then
             ln -sfn "$ESKI" "$JORIY"

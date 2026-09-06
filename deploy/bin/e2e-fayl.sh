@@ -2,7 +2,7 @@
 # =============================================================================
 # Tender AI — FAYL YUKLASH uchidan-uchiga sinovi (HAQIQIY HTTP)
 # =============================================================================
-#     e2e-fayl.sh <bazaviy-url> <login> <parol> [--ai] [--begona <login> <parol>]
+#     e2e-fayl.sh <url> <login> <parol> [--ai] [--proksi] \n#                 [--begona <login> <parol>]
 #
 # MISOL:
 #     e2e-fayl.sh https://staging.example.uz/api broker 'parol' --ai
@@ -33,11 +33,15 @@ PAROL="${3:?parol kerak}"
 shift 3
 
 AI=0
+PROKSI=0
 B_LOGIN=""
 B_PAROL=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --ai) AI=1; shift ;;
+        # Oldida teskari proksi TURISHI SHART deb e'lon qiladi:
+        # ilovaning 413 i XATO deb sanaladi.
+        --proksi) PROKSI=1; shift ;;
         --begona) B_LOGIN="${2:?}"; B_PAROL="${3:?}"; shift 3 ;;
         *) echo "Noma'lum argument: $1" >&2; exit 2 ;;
     esac
@@ -168,15 +172,62 @@ check "$(grep -qi 'x-content-type-options: nosniff' "$ISH/sarlavha.txt" \
 check "$(grep -qi 'cache-control:.*no-store' "$ISH/sarlavha.txt" \
          && echo 1 || echo 0)" "kesh O'CHIQ (proksi boshqasiga bermasin)"
 
-# --- CHEGARA: PROKSI QATLAMI HAM SINALADI ---
-# Bu `TestClient` da MUMKIN EMAS: u tarmoqqa chiqmaydi va Caddy
-# umuman yo'lda turmaydi.
+# --- CHEGARA: QAYSI QATLAM TO'XTATDI ---------------------------------------
+#
+# `413` NING O'ZI YETARLI EMAS. Uni IKKALA qatlam ham qaytarishi
+# mumkin va ular BOSHQA narsani isbotlaydi:
+#
+#   proksi to'xtatdi  -> Caddy `max_size` ISHLAYAPTI; so'rov ilovaga
+#                        umuman yetib bormadi (tarmoq va vaqt tejaldi)
+#   ilova to'xtatdi   -> `_yuklangani()` ishladi, LEKIN proksi
+#                        chegarasi YO'Q yoki juda katta
+#
+# AJRATISH BELGISI: ilova KODLI javob beradi
+# (`{"error":{"code":"FILE_TOO_LARGE"}}`), Caddy esa o'z 413 ini
+# beradi va unda bu kod YO'Q.
+#
+# `--proksi` berilsa, ilovaning 413 i XATO deb sanaladi: proksi
+# oldida turishi kerak edi.
 head -c $((30 * 1024 * 1024)) /dev/zero | tr '\0' 'a' > "$ISH/katta.txt"
-KOD="$(curl -sS "${K[@]}" -o /dev/null -w '%{http_code}' \
+KOD="$(curl -sS "${K[@]}" -o "$ISH/katta_javob.txt" -w '%{http_code}' \
     -F "file=@$ISH/katta.txt" \
     "$URL/company/documents/$DID/fayl" || echo "000")"
 check "$([ "$KOD" = "413" ] && echo 1 || echo 0)" \
-      "30 MB rad etiladi -> 413 (ilova yoki proksi)" "$KOD"
+      "30 MB rad etiladi -> 413" "$KOD"
+
+if grep -q 'FILE_TOO_LARGE' "$ISH/katta_javob.txt" 2>/dev/null; then
+    QATLAM="ilova"
+else
+    QATLAM="proksi"
+fi
+if [ "$PROKSI" = "1" ]; then
+    check "$([ "$QATLAM" = "proksi" ] && echo 1 || echo 0)" \
+          "30 MB ni PROKSI to'xtatdi (Caddy \`max_size\`)" \
+          "to'xtatgan qatlam: $QATLAM"
+
+    # PROKSI JUDA KICHIK EMASLIGI HAM tekshiriladi.
+    #
+    # Faqat "katta rad etiladi" ni o'lchash YARIM o'lchov: proksi
+    # chegarasi ilovanikidan KICHIK bo'lsa, qonuniy 20 MB li fayl
+    # ham to'xtardi va foydalanuvchi ilovaning tushunarli xatosi
+    # o'rniga proksining yalang'och 413 sahifasini ko'rardi.
+    #
+    # 20 MB `.exe` YUBORILADI: u proksidan O'TISHI, ilova esa uni
+    # TUR bo'yicha rad etishi kerak. `422` -- tana ilovaga YETIB
+    # KELGANINING isboti (hajm bo'yicha emas, TUR bo'yicha rad).
+    head -c $((20 * 1024 * 1024)) /dev/zero | tr '\0' 'b' > "$ISH/orta.exe"
+    KOD="$(curl -sS "${K[@]}" -o /dev/null -w '%{http_code}' \
+        -F "file=@$ISH/orta.exe" \
+        "$URL/company/documents/$DID/fayl" || echo "000")"
+    check "$([ "$KOD" = "422" ] && echo 1 || echo 0)" \
+          "20 MB proksidan O'TADI (chegara juda kichik emas)" "$KOD"
+else
+    # `--proksi` SIZ BU O'LCHANMAYDI, LEKIN JIM QOLMAYDI.
+    # Mahalliy yurishda (uvicorn to'g'ridan-to'g'ri) proksi yo'q va
+    # 413 ni ilova qaytaradi -- bu KUTILGAN.
+    echo "        [i] proksi qatlami O'LCHANMADI (\`--proksi\` berilmagan)."
+    echo "        [i] 30 MB ni to'xtatgan qatlam: $QATLAM"
+fi
 
 # SOXTA KENGAYTMA UCHUN ALOHIDA FAYL.
 #
