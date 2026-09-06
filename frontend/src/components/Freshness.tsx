@@ -91,8 +91,15 @@ export default function Freshness({ data }: { data: FreshnessData | null }) {
             title={t('fresh.lagTitle')}
           >
             {t('fresh.lag')}{' '}
+            {/* MEDIANA `?? 0` QILINMAYDI. Nol soat "aniqlash bir
+                zumda" degani — ya'ni O'LCHANMAGAN holat ENG YAXSHI
+                natija bo'lib ko'rinardi. Yonidagi `within_1h_pct`
+                allaqachon to'g'ri qilingan (`!= null` bilan
+                yashiriladi); mediana undan qolib ketgan edi. */}
             <b className="tabular text-foreground">
-              {t('fresh.lagHours', { n: data.detection.median_hours ?? 0 })}
+              {data.detection.median_hours == null
+                ? t('fresh.lagNone')
+                : t('fresh.lagHours', { n: data.detection.median_hours })}
             </b>
             {data.detection.within_1h_pct != null &&
               <> · {t('fresh.within1h', { pct: data.detection.within_1h_pct })}</>}

@@ -59,7 +59,7 @@ export default function AccountSettings({ onSaved }: AccountSettingsProps) {
           semantik teg ustiga uning sinflari qo'lda qo'yiladi. */}
       <nav
         aria-label={t('acc.navLabel')}
-        className="sticky top-4 rounded-xl border bg-card p-2 text-card-foreground shadow-sm max-lg:static max-lg:flex max-lg:overflow-x-auto"
+        className="sticky top-4 rounded-xl border bg-card p-2 text-card-foreground max-lg:static max-lg:flex max-lg:overflow-x-auto"
       >
           {SECTIONS.map((s) => {
             const pr = prog[s.key]
@@ -108,7 +108,7 @@ export default function AccountSettings({ onSaved }: AccountSettingsProps) {
 
       <section
         aria-label={current ? t(current.label) : undefined}
-        className="min-w-0 rounded-xl border bg-card p-5 text-card-foreground shadow-sm"
+        className="min-w-0 rounded-xl border bg-card p-5 text-card-foreground"
       >
         <h2 className="mb-3 text-title font-semibold">{current ? t(current.label) : ''}</h2>
 

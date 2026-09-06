@@ -47,6 +47,21 @@ xato() { printf '[%s] XATO: %s\n' "$(date '+%F %T')" "$*" >&2; exit 1; }
 
 [ -f "$ENVFILE" ] || xato "muhit fayli yo'q: $ENVFILE"
 
+# --- 0) SOZLAMA TEKSHIRUVI — QIMMAT QADAMLARDAN OLDIN ------------------------
+# ENG BOSHIDA turishining sababi: to'ldirilmagan sozlama ilgari FAQAT
+# 6-bo'limda (migratsiya) chiqardi, ya'ni `venv`, `npm ci` va frontend
+# qurilmasidan KEYIN — ~4-5 daqiqa va yarim reliz katalogi.
+#
+# Undan ham yomoni: `example.uz` domeni bilan joylashtirish
+# MUVAFFAQIYATLI tugardi va faqat bildirishnoma yuborilganda
+# ma'lum bo'lardi.
+#
+# Skript RELIZDAN emas, DEPLOY.SH YONIDAN olinadi: bu qadam arxiv
+# ochilishidan OLDIN yuradi.
+BU_KATALOG="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${BU_KATALOG}/oldindan-tekshir.sh" "$MUHIT" \
+    || xato "sozlamada to'siq bor (yuqorida) — joylashtirish BOSHLANMADI"
+
 # --- 1) ISHLAB CHIQARISH UCHUN STAGING TASDIQI SHART -------------------------
 if [ "$MUHIT" = "production" ]; then
     TASDIQ="${TENDERAI_STAGING_ILDIZ:-/opt/tenderai/staging}/.verified"
@@ -160,6 +175,20 @@ if grep -rqE 'localhost|127\.0\.0\.1|0\.0\.0\.0' "${YANGI}/frontend/dist/assets"
     xato "qurilmada MAHALLIY manzil bor (yuqorida) — ommaviy sahifada ishlamaydi"
 fi
 log "qurilma toza: mahalliy manzil yo'q"
+
+# --- 5b) RELIZ DARVOZASI — QAYTMAS QADAMLARDAN OLDIN -------------------------
+# Bu yerda turishining sababi: keyingi qadam (`migratsiya --qolla`)
+# bazani O'ZGARTIRADI va undan keyingisi symlink'ni almashtiradi.
+# Ikkalasi ham qaytarish narxi yuqori amallar. Sinov esa ULARDAN
+# OLDIN yurishi kerak — aks holda "yiqilgan sinov" xabari bazaga
+# migratsiya tushgandan keyin keladi.
+#
+# Frontend allaqachon qurilgan va `dist/` tekshirilgan, shuning uchun
+# darvoza uni QAYTA qurmaydi (tip tekshiruvi va sinovlar YURADI).
+log "reliz darvozasi"
+TENDERAI_DARVOZA_FRONTEND=0 TENDERAI_PY="${YANGI}/.venv/bin/python" \
+    "${YANGI}/deploy/bin/relis-darvoza.sh" "$YANGI" \
+    || xato "reliz darvozasi yiqildi — joylashtirish TO'XTATILDI"
 
 # --- 6) MIGRATSIYA — EGASI roli bilan ---------------------------------------
 # Ilova roli (tai_app) da DDL huquqi ATAYLAB yoq.

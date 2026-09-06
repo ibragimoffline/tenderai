@@ -93,6 +93,72 @@ def test_toplam_shakli():
     check("id lar TAKRORSIZ", len({c["id"] for c in cs}) == len(cs))
 
 
+def test_tool_yoli_guruhlari():
+    section("F va G — modelning YO'LI o'lchanadi (2026-09-04)")
+    # F va G javob MATNINI emas, qaysi tool chaqirilganini o'lchaydi.
+    # Ular PULLIK yurgizilmaydi; bu yerda SHAKL va BAHOLOVCHI
+    # sinaladi, aks holda holat yozilib, yurgizilganda yiqilardi.
+    cs = {c["id"]: c for c in cases()}
+    f = [c for c in cs.values() if c.get("guruh") == "F"]
+    g = [c for c in cs.values() if c.get("guruh") == "G"]
+    check("F guruhi yozilgan (>= 6)", len(f) >= 6, f"{len(f)} ta")
+    check("G guruhi yozilgan (>= 5)", len(g) >= 5, f"{len(g)} ta")
+
+    for c in f + g:
+        k = c["kutilgan"]
+        check(f"{c['id']}: turi `tool_yoli`", k["tur"] == "tool_yoli",
+              k["tur"])
+        check(f"{c['id']}: tool sharti BOR",
+              bool(k.get("tool_kerakli") or k.get("tool_taqiqlangan")),
+              "shartsiz holat hech narsani o'lchamaydi")
+
+    # SALBIY HOLAT MAJBURIY. Taqiq faqat "chaqirma" dan iborat
+    # bo'lsa, model HECH QACHON chaqirmay ham o'tib ketardi va
+    # taqiqning chegarasi o'lchanmasdi.
+    check("G da `run_gonogo` TALAB qilinadigan holat bor",
+          any("run_gonogo" in (c["kutilgan"].get("tool_kerakli") or [])
+              for c in g),
+          "aks holda taqiq cheksiz bo'lardi")
+    check("F da `get_tender` TAQIQLANGAN holat bor",
+          any("get_tender" in (c["kutilgan"].get("tool_taqiqlangan") or [])
+              for c in f),
+          "raqam ID emas bo'lgan holat")
+
+    # BAHOLOVCHI — soxta yurish bilan, PULLIK CHAQIRUVSIZ.
+    #
+    # `EVAL` (`rag_eval.py`) BOSHQA skript: u qidiruv sifatini
+    # o'lchaydi. Tool yo'lini `run_eval.py` baholaydi.
+    import importlib.util
+    yol = os.path.join(ROOT, "_tests", "ai_eval", "run_eval.py")
+    spec = importlib.util.spec_from_file_location("run_eval_baho", yol)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    def yurish(javob, tools):
+        return {"javob": javob, "tools": tools, "citations": [],
+                "xato": None}
+
+    c = cs["F1"]
+    check("baholovchi: to'g'ri yo'l O'TADI",
+          m.baho(c, yurish("Narx hisoblandi.", ["calc_price:done"]))["otdi"])
+    b = m.baho(c, yurish("Narx.", ["search_tenders:start", "calc_price:done"]))
+    check("baholovchi: ORTIQCHA tool tutiladi",
+          not b["otdi"] and b["tool_ortiqcha"] == ["search_tenders"],
+          str(b["tool_ortiqcha"]))
+    b = m.baho(c, yurish("Narx.", ["get_tender:done"]))
+    check("baholovchi: YETISHMAGAN tool tutiladi",
+          not b["otdi"] and b["tool_yetishmadi"] == ["calc_price"],
+          str(b["tool_yetishmadi"]))
+    # MATN SHARTI HAM AMAL QILADI — yo'l to'g'ri bo'lib javob
+    # noto'g'ri bo'lishi mumkin.
+    check("baholovchi: yo'l to'g'ri, MATN noto'g'ri -> YIQILADI",
+          not m.baho(cs["G1"], yurish("Bilmadim.", []))["otdi"])
+    check("baholovchi: taqiqlangan MATN tutiladi",
+          not m.baho(cs["G3"],
+                     yurish("Sertifikati yo'q, malumot yetarli emas.",
+                            []))["otdi"])
+
+
 def test_sizib_chiqish():
     section("Sizib chiqish — ground truth qidiruvga bormaydi")
     r = subprocess.run([sys.executable, EVAL, "--sizish-tekshir"],
@@ -265,6 +331,8 @@ def main():
     print("=" * 70)
 
     test_toplam_shakli()
+
+    test_tool_yoli_guruhlari()
     b = test_bazaviy_fayl()
 
     conn = None

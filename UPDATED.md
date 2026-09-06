@@ -588,6 +588,8 @@ ogohlantiradi — `_talab()` ning YUQORI CHEGARA ekani interfeysda ham ko'rinadi
 | **Til devori** (uch yozuv aralashmasi) | Hamma kirish `atama.normal()` dan o'tadi |
 | **Ikki joyda ikki formula** (narx) | Sinov ikkalasini solishtirib turadi |
 | **O'lchov kechiktirilsa qarz o'sadi** (12a-sinf, `grill-me`) | Yangi qatlamdan OLDIN inson halqasi hisoblagichi ko'rsatiladi (§18) |
+| **Ikki qatlam alohida to'g'ri, orasidagi holat yo'qolgan** (13-sinf) — `POST /chat` `session_id` ni tiklaydi, `useChatStream` uni saqlaydi, lekin `App.tsx` `ChatPanel` ni SHARTLI chizadi: panel yopilganda state o'ladi. 133 sessiyaning 131 tasida ANIQ 2 xabar. Jiddiyrogʻi — `seansOch()` transkriptni ekranga chiqarib `sessionId` ni nolga tushirardi: **ekranda tarix, modelda bo'sh kontekst** | Sessiya ochilganda tiklanadi (`ChatPanel`, `DAVOM_SOAT`), `davom()` `reset()` o'rniga ipni saqlaydi; jurnalda CHEGARA qidiriladi (taqsimot emas) |
+| **Avto-yaratilgan ma'lumot foydalanuvchi OQIMIGA tushishi** (10-sinf kengaytmasi) — eval `EVAL_COMPANY_ID = 2`, ya'ni haqiqiy ijarachi: 122 `[eval]` sessiyasi tiklash mexanizmiga ilinishi mumkin edi | `chat_session.manba` (migratsiya 0080); tiklash ham, tarix ro'yxati ham `manba <> 'eval'` bilan filtrlaydi |
 
 ---
 

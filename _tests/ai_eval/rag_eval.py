@@ -141,11 +141,36 @@ def mos_bolaklar(conn, tender_id: int, manba_matn: Optional[str]) -> List[int]:
     """
     if not manba_matn:
         return []
+    # JOKER BELGILAR QOCHIRILADI.
+    #
+    # O'LCHANGAN NUQSON (2026-09-02). A4 holatining dalil matni
+    # `"15% oldindan to"` va undagi `%` PostgreSQL uchun JOKER.
+    # Ya'ni naqsh `%15% oldindan to%` bo'lib, "15" bilan
+    # "oldindan to" orasida NIMA BO'LSA HAM mos kelardi:
+    #
+    #     ILIKE mos kelgan bo'lak   4
+    #     dalilni HAQIQATAN tutgan  1
+    #
+    # Uchta soxta bo'lak ground truth ga kirib, RECALL NI
+    # SHISHIRARDI: nishon kengaygan, ya'ni tegish osonlashgan.
+    # O'lchov o'zini o'zi yaxshi ko'rsatardi.
+    #
+    # `_` ham joker (bitta belgi) va u ham qochiriladi.
+    naqsh = (manba_matn.replace(chr(92), chr(92) * 2)
+             .replace("%", chr(92) + "%")
+             .replace("_", chr(92) + "_"))
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id FROM doc_chunk WHERE tender_id = %s AND text ILIKE %s "
-            "ORDER BY id", (tender_id, "%" + manba_matn + "%"))
-        return [r[0] for r in cur.fetchall()]
+            "SELECT id FROM doc_chunk WHERE tender_id = %s "
+            "AND text ILIKE %s ESCAPE '" + chr(92) + "' ORDER BY id",
+            (tender_id, "%" + naqsh + "%"))
+        # IKKI XIL KURSOR: `rag_eval` o'zi tuple kursor ochadi,
+        # `api/db` esa `RealDictCursor` beradi. Funksiya ikkalasidan
+        # ham chaqiriladi (sinov uni QAYTA ISHLATADI — ikkinchi nusxa
+        # yozilsa joker nuqsoni ham ikki joyda tuzatilishi kerak
+        # bo'lardi).
+        return [(r["id"] if isinstance(r, dict) else r[0])
+                for r in cur.fetchall()]
 
 
 # =====================================================================
@@ -261,6 +286,76 @@ def _ortacha(qiymatlar: Sequence[Optional[float]]) -> Optional[float]:
 # =====================================================================
 # BAHOLASH
 # =====================================================================
+def til_qamrovi(conn, cases: List[dict], gt: Dict[str, List[int]],
+                k: int) -> Dict[str, Any]:
+    """So'rov TILI bo'yicha qidiruv sifati (F).
+
+    ISHLAB CHIQARISH yo'li -- `gibrid`. Uch usulni uch tilga
+    ko'paytirish natijani o'qib bo'lmas qilardi; usullar
+    taqqoslashi allaqachon `usullar` bo'limida bor.
+
+    PROVENANS QAYTARILADI. `uz_cyr` mashina transliteratsiyasi,
+    `ru` esa muallif yozgan va IKKALASI HAM inson ko'rigidan
+    O'TMAGAN. Raqamlar shu bilan birga o'qilishi kerak.
+    """
+    javobli = [c for c in cases if gt[c["id"]]]
+    if not javobli:
+        return {"izoh": "javobli holat yo'q"}
+
+    tillar: Dict[str, Any] = {}
+    provenans: Dict[str, Any] = {}
+    for til in ("uz_lat", "uz_cyr", "ru"):
+        r_lar, p_lar, mrr_lar, ndcg_lar = [], [], [], []
+        korilgan = 0
+        inson_korigi = True
+        for cs in javobli:
+            v = (cs.get("savol_variantlari") or {}).get(til)
+            if not v:
+                continue
+            korilgan += 1
+            inson_korigi = inson_korigi and bool(v.get("inson_korigi"))
+            mos = gt[cs["id"]]
+            top = qidir(conn, "gibrid", cs["tender_id"], v["matn"], k)
+            r_lar.append(recall_at_k(top, mos))
+            p_lar.append(precision_at_k(top, mos, k))
+            mrr_lar.append(mrr(top, mos))
+            ndcg_lar.append(ndcg_at_k(top, mos, k))
+        if not korilgan:
+            continue
+        tillar[til] = {
+            "holat": korilgan,
+            "recall_at_k": _ortacha(r_lar),
+            "precision_at_k": _ortacha(p_lar),
+            "mrr": _ortacha(mrr_lar),
+            "ndcg_at_k": _ortacha(ndcg_lar),
+        }
+        manbalar = {(cs.get("savol_variantlari") or {}).get(til, {}).get("manba")
+                    for cs in javobli}
+        provenans[til] = {
+            "manba": sorted(m for m in manbalar if m),
+            "inson_korigi": inson_korigi,
+        }
+
+    # ASOSGA NISBATAN TUSHISH -- eng muhim raqam. "Kirill ishlaydi"
+    # degan da'vo faqat shu farq KICHIK bo'lsa o'rinli.
+    asos = (tillar.get("uz_lat") or {}).get("recall_at_k")
+    tushish = {}
+    for til, o in tillar.items():
+        if til == "uz_lat" or asos is None or o["recall_at_k"] is None:
+            continue
+        tushish[til] = round(o["recall_at_k"] - asos, 4)
+
+    return {
+        "usul": "gibrid",
+        "tillar": tillar,
+        "provenans": provenans,
+        "recall_tushishi": tushish,
+        "izoh": ("`uz_cyr` mashina transliteratsiyasi, `ru` muallif "
+                 "yozgan -- IKKALASI HAM inson ko'rigidan o'tmagan. "
+                 "Raqamlar YO'NALISH beradi."),
+    }
+
+
 def baholash(conn, cases: List[dict], k: int) -> Dict[str, Any]:
     natija: Dict[str, Any] = {
         "k": k,
@@ -281,6 +376,18 @@ def baholash(conn, cases: List[dict], k: int) -> Dict[str, Any]:
     natija["javobli_holat"] = len(javobli)
     natija["javobsiz_holat"] = len(javobsiz)
     natija["ground_truth"] = {cid: len(v) for cid, v in gt.items()}
+
+    # --- F. SO'ROV TILI bo'yicha qidiruv sifati ------------------------
+    #
+    # ILGARI FAQAT DALIL tili kesilardi (`dalil_til_recall`), SO'ROV
+    # tili emas -- va to'plamdagi HAMMA savol o'zbek lotinida edi.
+    # Ya'ni "kirill/rus so'rovlar ishlaydi" degan savol UMUMAN
+    # o'lchanmagan edi.
+    #
+    # Ground truth O'ZGARMAYDI: savol boshqa tilda, dalil o'sha-o'sha.
+    # Shuning uchun bu HALOL taqqoslash -- bir xil nishonni uch xil
+    # so'rov bilan qidiramiz.
+    natija["til_qamrov"] = til_qamrovi(conn, cases, gt, k)
 
     for usul in USULLAR:
         oz: Dict[str, Any] = {"holatlar": {}}

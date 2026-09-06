@@ -121,6 +121,35 @@ def yiqiladimi(fn, tur):
     return False, "yiqilmadi"
 
 
+#: Muhitdan O'QISH naqshi — `os.environ[...]`, `os.environ.get(...)`,
+#: `getenv(...)`, ichida o'zgaruvchi nomi yoki modul doimiysi bilan.
+#: Nomning shunchaki matnda uchrashi (tashxis xabari, istisno matni)
+#: BU NAQSHGA TUSHMAYDI — bu ataylab, izohga qarang.
+ENV_OQISH_RE = re.compile(
+    r"(?:os\.)?(?:environ\s*\.\s*get\s*\(|environ\s*\[|getenv\s*\()"
+    r"\s*[^)\]\n]*?(?:APP_PUBLIC_URL|PUBLIC_BASE_URL|ENV_ASOSIY|ENV_ESKI)"
+)
+
+
+def _env_oquvchilar():
+    """Muhit o'zgaruvchisini HAQIQATAN o'qiydigan fayllar ro'yxati."""
+    topildi = []
+    for katalog, _d, fayllar in os.walk(ROOT):
+        if any(x in katalog for x in (".venv", "node_modules", ".git",
+                                      "__pycache__", "_tests")):
+            continue
+        for f in fayllar:
+            if not f.endswith(".py"):
+                continue
+            yol = os.path.join(katalog, f)
+            src = io.open(yol, encoding="utf-8", errors="replace").read()
+            kod = "\n".join(ln for ln in src.split("\n")
+                            if not ln.lstrip().startswith("#"))
+            if ENV_OQISH_RE.search(kod):
+                topildi.append(os.path.relpath(yol, ROOT).replace("\\", "/"))
+    return sorted(topildi)
+
+
 # =====================================================================
 def test_yagona_manba():
     bolim("1. YAGONA MANBA — ikkinchi nusxa yo'q")
@@ -138,22 +167,47 @@ def test_yagona_manba():
     # ikkinchi haqiqat manbai bo'lardi.
     # Izoh qatorlari HISOBGA OLINMAYDI: ular boshqa faylga ishora
     # qilishi mumkin va bu takrorlanish emas. Faqat KOD qidiriladi.
-    oquvchi = []
-    for katalog, _d, fayllar in os.walk(ROOT):
-        if any(x in katalog for x in (".venv", "node_modules", ".git",
-                                      "__pycache__", "_tests")):
-            continue
-        for f in fayllar:
-            if not f.endswith(".py"):
-                continue
-            yol = os.path.join(katalog, f)
-            src = io.open(yol, encoding="utf-8", errors="replace").read()
-            kod = "\n".join(ln for ln in src.split("\n")
-                            if not ln.lstrip().startswith("#"))
-            if re.search(r"APP_PUBLIC_URL|PUBLIC_BASE_URL", kod):
-                oquvchi.append(os.path.relpath(yol, ROOT).replace("\\", "/"))
-    check("muhit o'zgaruvchisi nomini KODIDA tutgan fayl AYNAN bitta",
+    #
+    # NIMA QIDIRILADI — O'QISH, NOM EMAS.
+    # ────────────────────────────────────
+    # Ilgari bu yerda o'zgaruvchi NOMI qidirilardi (`APP_PUBLIC_URL`
+    # matni kodning istalgan joyida). Bu ANIQ invariant emas, uning
+    # o'rniga qo'yilgan TAXMIN edi va yolg'on ogohlantirish berdi:
+    # `api/topshiriq.py` muhitni umuman o'qimaydi — u to'g'ri yo'l
+    # bilan `ommaviy_url.sozlangan()` ni chaqiradi — lekin
+    # tashxis MATNIDA o'zgaruvchi nomini tilga oladi
+    # ("APP_PUBLIC_URL mahalliy yoki sozlanmagan"). Nom tilga
+    # olinishi ikkinchi o'quvchi EMAS.
+    #
+    # Endi aynan muhitdan O'QISH qidiriladi: `os.environ[...]`,
+    # `os.environ.get(...)`, `getenv(...)` — nom yoki modul
+    # doimiysi (`ENV_ASOSIY`/`ENV_ESKI`) bilan. Invariant
+    # KUCHSIZLANMAYDI, aksincha aniqlashadi: haqiqiy ikkinchi
+    # o'quvchi endi ham ushlanadi (pastdagi salbiy sinovga qarang),
+    # tashxis matni esa endi yolg'on ogohlantirmaydi.
+    oquvchi = _env_oquvchilar()
+    check("muhitdan O'QIYDIGAN fayl AYNAN bitta",
           oquvchi == ["api/ommaviy_url.py"], str(oquvchi))
+
+    # SKANERNI SINAYMIZ. Qo'riqchi jimgina "o'tib" ketishi eng oson
+    # nuqson: yuqoridagi tekshiruv har doim `[]` qaytarsa ham "o'tdi"
+    # bo'lib ko'rinardi. Shuning uchun skaner HAQIQIY ikkinchi
+    # o'quvchini topishi alohida tasdiqlanadi.
+    soxta = [
+        'x = os.environ.get("APP_PUBLIC_URL")',
+        'x = os.environ["PUBLIC_BASE_URL"]',
+        'x = os.getenv("APP_PUBLIC_URL", "")',
+        'x = getenv(ENV_ASOSIY)',
+        'x = os.environ.get(ENV_ESKI) or ""',
+    ]
+    for s in soxta:
+        check(f"skaner ikkinchi o'quvchini TOPADI: {s[4:40]}",
+              ENV_OQISH_RE.search(s) is not None)
+    # Va TESKARISI: shunchaki nom tilga olinishi o'quvchi emas.
+    for s in ('out["sabab"] = "APP_PUBLIC_URL sozlanmagan"',
+              'raise ValueError("PUBLIC_BASE_URL yaroqsiz")'):
+        check(f"nomni TILGA OLISH o'quvchi emas: {s[:38]}",
+              ENV_OQISH_RE.search(s) is None)
 
     nsrc = oqi("api", "notify.py")
     check("`notify.py` manzilni o'zi TANLAMAYDI (uzatadi)",

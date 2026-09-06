@@ -390,8 +390,49 @@ def test_baza_qulflari(cid: int):
             {"p": prod["id"], "k": kod["code"]})
     except Exception as e:                                   # noqa: BLE001
         xato = str(e)
+    # IKKI QO'RIQCHI bor va HAR IKKALASI ham shu yozuvni rad etadi:
+    #   tasdiq_odam       — `tasdiqlagan` bo'sh
+    #   tasdiq_manba_chk  — `tasdiq_ishonch` bo'sh (2026-09-02)
+    # Qaysi biri birinchi ishlashi baza ixtiyorida, shuning uchun
+    # NOMI emas, RAD ETILGANI tekshiriladi — aks holda ikkinchi
+    # qo'riqcha qo'shilganda sinov "himoya yo'qoldi" deb yolg'on
+    # signal berardi.
     check("tasdiq ODAMSIZ yozilmadi (CHECK ushladi)",
-          xato is not None and "tasdiq_odam" in (xato or ""), xato or "yozildi!")
+          xato is not None
+          and ("tasdiq_odam" in xato or "tasdiq_manba_chk" in xato),
+          xato or "yozildi!")
+
+    # --- MANBASIZ tasdiq (2026-09-02) ---
+    # O'LCHANGAN NUQSON: bazada 1 048 ta "inson tasdig'i" bor edi va
+    # hammasi mashina yozgan (16 ta turli sekundda, ~34 va ~290
+    # qator/sek). Yagona shart `tasdiqlagan` bo'sh bo'lmasligi edi —
+    # 'tizim:auto' esa bo'sh emas.
+    xato_m = None
+    try:
+        db.execute_returning(
+            "UPDATE catalog_product_code "
+            "SET tasdiqlandi=now(), tasdiqlagan='tizim:auto' "
+            "WHERE product_id=%(p)s AND code=%(k)s RETURNING product_id",
+            {"p": prod["id"], "k": kod["code"]})
+    except Exception as e:                                   # noqa: BLE001
+        xato_m = str(e)
+    check("MANBASIZ tasdiq yozilmadi (bo'sh bo'lmagan satr != odam)",
+          xato_m is not None and "tasdiq_manba_chk" in (xato_m or ""),
+          xato_m or "yozildi!")
+
+    # --- INSON ishonchi, lekin AKTORSIZ ---
+    xato_a = None
+    try:
+        db.execute_returning(
+            "UPDATE catalog_product_code SET tasdiqlandi=now(), "
+            "tasdiqlagan='x', tasdiq_ishonch='aktor_elon' "
+            "WHERE product_id=%(p)s AND code=%(k)s RETURNING product_id",
+            {"p": prod["id"], "k": kod["code"]})
+    except Exception as e:                                   # noqa: BLE001
+        xato_a = str(e)
+    check("AKTORSIZ inson tasdig'i yozilmadi",
+          xato_a is not None and "aktor_izchil" in (xato_a or ""),
+          xato_a or "yozildi!")
 
     # --- Begona kompaniya bog'lay olmaydi ---
     xato2 = None
@@ -470,14 +511,15 @@ def test_moslik_tasdiqsiz_ishlamaydi(cid: int):
           f"oldin={oldin} keyin={keyin} (kod={kod['code']}, yozildi={yozildi})")
 
     # Endi tasdiqlaymiz — moslik O'SISHI kerak (aks holda quvur uzilgan).
-    kodlash.tasdiqla(cid, prod["id"], kod["code"], kim="kodlash-test")
+    kodlash.tasdiqla(cid, prod["id"], kod["code"], kim="kodlash-test",
+                     ishonch="servis")
     tasdiqdan = len(kodlash.moslik(cid, limit=1000))
     check("tasdiqdan KEYIN moslik ishladi", tasdiqdan >= keyin,
           f"keyin={keyin} tasdiqdan={tasdiqdan}")
 
     # Rad etilsa qator QOLADI (takror taklif chiqmasin), lekin moslikdan
     # chiqadi.
-    kodlash.rad_et(cid, prod["id"], kod["code"])
+    kodlash.rad_et(cid, prod["id"], kod["code"], ishonch="servis")
     raddan = len(kodlash.moslik(cid, limit=1000))
     check("rad etilgach moslikdan chiqdi", raddan <= tasdiqdan,
           f"tasdiqdan={tasdiqdan} raddan={raddan}")
@@ -707,6 +749,90 @@ def test_ochiq_soat_qulfi(cid: int):
                          {"k": K})
 
 
+def test_takror_hisob_yoq():
+    """ORTIQCHA HISOB QAYTMASIN — "Sizga mos" sekinligining sababi.
+
+    O'LCHANGAN NUQSON (2026-09-02). `POST /catalog/match` 4.9-8.1 s
+    yuklanardi (35 ta natija uchun). Profil: vaqtning 96% i
+    `pozitsiya_moslik` da, uning ichida `translit._cyr_readings`
+    19 280 marta chaqirilgan va 16 151 990 ta `str.startswith`
+    bajarilgan.
+
+    SABAB ALGORITM EMAS, TAKROR HISOB edi: bitta so'rovda
+    `variants()` 16 851 marta chaqirilardi, TAKRORSIZ kirish esa
+    atigi 1 048 ta — 16 barobar ortiqcha ish.
+
+    BU SINOV VAQTNI O'LCHAMAYDI. Vaqt sinovlari mashinaga bog'liq
+    va tebranadi; ular yiqilganda sabab noaniq bo'ladi. O'lchanadigan
+    narsa — ORTIQCHA ISH: bir xil kirish qayta hisoblanmasin.
+    """
+    section("Takror hisob — kesh")
+    from api import kodlash as K
+    from api import translit as T
+
+    # --- Keshlar mavjud ---
+    for nom, fn in (("translit._variants", T._variants),
+                    ("translit._cyr_readings", T._cyr_readings),
+                    ("translit.fold_cyr", T.fold_cyr),
+                    ("kodlash._uchliklar", K._uchliklar),
+                    ("kodlash._ozgarish", K._ozgarish)):
+        check(f"`{nom}` keshlangan", hasattr(fn, "cache_info"))
+
+    # --- KESH HAQIQATAN ISHLAYDI ---
+    # Mavjudligi yetarli emas: `maxsize=0` bo'lsa ham `cache_info`
+    # bo'lardi.
+    K._ozgarish.cache_clear()
+    T._variants.cache_clear()
+    nomlar = ["Кресло офисное", "Стол ученический", "Кресло офисное"]
+    pozlar = ["Ofis kreslosi", "Ofis kreslosi"]
+    for nom in nomlar:
+        for poz in pozlar:
+            K._ozgarish(nom, poz)
+    ci = K._ozgarish.cache_info()
+    # 3 nom x 2 pozitsiya = 6 chaqiruv, TAKRORSIZ juftlik = 4.
+    check("takroriy juftlik QAYTA hisoblanmaydi",
+          ci.hits >= 2 and ci.misses <= 4, str(ci))
+    # `variants()` ALOHIDA sinaladi: `_ozgarish` keshi tufayli
+    # takroriy juftlik unga umuman YETIB BORMAYDI, ya'ni uni
+    # `_ozgarish` orqali sinash keshni emas, boshqa keshni o'lchardi.
+    T._variants.cache_clear()
+    for _ in range(3):
+        T.variants("Кресло офисное")
+    vi = T._variants.cache_info()
+    check("`variants()` takroriy nomni QAYTA hisoblamaydi",
+          vi.hits == 2 and vi.misses == 1, str(vi))
+
+    # --- KESH ZAHARLANMASIN ---
+    # Keshlangan funksiya O'ZGARUVCHAN qiymat qaytarsa, chaqiruvchi
+    # uni o'zgartirib butun keshni buzardi va xato BUTUNLAY boshqa
+    # joyda chiqardi.
+    v = T.variants("Кресло офисное")
+    check("`variants()` RO'YXAT qaytaradi (chaqiruvchilar shunday kutadi)",
+          isinstance(v, list), type(v).__name__)
+    v.append("ZAHAR")
+    check("qaytgan ro'yxatni o'zgartirish keshni BUZMAYDI",
+          "ZAHAR" not in T.variants("Кресло офисное"))
+    check("`_variants()` O'ZGARMAS tur qaytaradi",
+          isinstance(T._variants("Кресло офисное"), tuple))
+    check("`_cyr_readings()` O'ZGARMAS tur qaytaradi",
+          isinstance(T._cyr_readings("kreslo"), tuple))
+    u = K._uchliklar("Кресло")
+    check("`_uchliklar()` O'ZGARMAS tur qaytaradi (frozenset)",
+          isinstance(u, frozenset), type(u).__name__)
+    # `frozenset` to'plam amallarida `set` bilan bir xil ishlashi shart.
+    check("`frozenset` to'plam amallari ishlaydi",
+          len(K._uchliklar("abc") & K._uchliklar("abc")) > 0
+          and len(K._uchliklar("abc") | K._uchliklar("xyz")) > 0)
+
+    # --- G'OLIB BALLI IKKI MARTA HISOBLANMAYDI ---
+    with open(os.path.join(ROOT, "api", "kodlash.py"),
+              encoding="utf-8") as f:
+        src = f.read()
+    check("g'olib balli QAYTA hisoblanmaydi",
+          'skor = _ozgarish(eng["product_name"], poz)' not in src,
+          "`max(key=...)` dan keyin yana bir chaqiruv bor edi")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     rejim.bayroqlar(ap)
@@ -723,6 +849,7 @@ def main() -> int:
     test_navbat_qaror_filtri_kodda()
     test_moslik_sql_faol_korinishdan()
     test_semantik_hublik()
+    test_takror_hisob_yoq()
 
     if not args.bazasiz:
         try:

@@ -87,11 +87,30 @@ def main() -> None:
     print("PULLIK QULF SINOVI — o'zi pul sarflamaydi")
     print("=" * 62)
 
-    section("1. Standart holat")
-    print(f"     AI_PAID_ENABLED = "
-          f"{os.environ.get(ai.PAID_ENV, '(o`rnatilmagan)')!r}")
-    check("standart holat BLOKLANGAN", not ai.paid_allowed(),
-          "shart buzilgan — .env dagi AI_PAID_ENABLED ni tekshiring")
+    section("1. Jonli holat va STANDART qiymat")
+    # JONLI QIYMAT SINOV ICHIDA ISHLATILMAYDI.
+    #
+    # 2026-09-02 da loyiha egasi pullik so'rovlarga ochiq ruxsat
+    # berdi (`.env` da `AI_PAID_ENABLED=1`). O'shandan keyin bu sinov
+    # jonli qiymat bilan ishlasa, 2-4 bo'limlar chaqiruvlar
+    # BLOKLANISHINI emas, HAQIQATAN BAJARILISHINI ko'rardi — ya'ni
+    # "o'zi pul sarflamaydigan" sinov chat, Go/No-Go, moslik va talab
+    # ajratish uchun TO'RTTA pullik so'rov yuborardi.
+    #
+    # Shuning uchun jonli qiymat faqat CHOP ETILADI, so'ng jarayon
+    # ichida MAJBURAN o'chiriladi. Sinovning maqsadi o'zgarmadi:
+    # qulf o'chirilganda oltala yo'l ham to'xtashini isbotlash.
+    jonli = os.environ.get(ai.PAID_ENV)
+    print(f"     .env dagi AI_PAID_ENABLED = "
+          f"{jonli if jonli is not None else '(o`rnatilmagan)'!r}")
+    if ai.paid_allowed():
+        print("     DIQQAT: pullik amallar YOQILGAN. Quyidagi "
+              "bo'limlar qulfni\n     jarayon ichida majburan "
+              "o'chiradi — sinovning O'ZI pul sarflamaydi.")
+    os.environ.pop(ai.PAID_ENV, None)
+    check("qiymat berilmaganda BLOKLANGAN", not ai.paid_allowed(),
+          "standart qiymat ochiq qolgan — ai.paid_allowed() buzilgan")
+    os.environ[ai.PAID_ENV] = "0"
 
     section("2. Barcha pullik yo'llar")
     bloklandimi(ai.get_client, "ai.get_client()")
@@ -195,6 +214,12 @@ def main() -> None:
                 os.environ[ai.PAID_ENV] = eski
     finally:
         db.close_pool()
+        # Jonli qiymat QAYTARILADI — sinov `.env` ni emas, faqat
+        # o'z jarayonini vaqtincha o'zgartirgan bo'lishi kerak.
+        if jonli is None:
+            os.environ.pop(ai.PAID_ENV, None)
+        else:
+            os.environ[ai.PAID_ENV] = jonli
 
     print("\n" + "=" * 62)
     print(f"NATIJA: {PASS}/{PASS + FAIL} o'tdi")

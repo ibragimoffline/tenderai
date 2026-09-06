@@ -117,6 +117,32 @@ export interface TenderRow {
   goods_preview?: string[]
   match?: MatchInfo
   catalog?: CatalogMatchInfo
+  /**
+   * Tender kompaniya profilida ko'rsatilgan hududlardan TASHQARIDA.
+   *
+   * `false` ikki holatni bildiradi: hudud ichida YOKI o'lchab
+   * bo'lmadi (cheklov qo'yilmagan / tender hududi noma'lum).
+   * Faqat `true` aniq da'vo — shuning uchun belgi ham shunda
+   * ko'rsatiladi.
+   */
+  hudud_tashqari?: boolean
+}
+
+/**
+ * "Sizga mos" natijasidagi hudud xulosasi.
+ *
+ * SAHIFADAN emas, BUTUN natijadan hisoblanadi: sahifadagi son
+ * "2 tasi tashqarida" derdi, holbuki jami 11 ta bo'lishi mumkin.
+ */
+export interface HududXulosa {
+  regions: string[]
+  tashqari: number
+  jami: number
+}
+
+export interface CatalogMatchResponse extends Paged<TenderRow> {
+  hudud?: HududXulosa
+  atama_kesildi?: number
 }
 
 export interface AiSummary {
@@ -217,6 +243,70 @@ export type InsonQaror = 'olindi' | 'rad' | 'kutilsin'
 
 export type RoutingHolat = 'yangi' | 'korilmoqda' | 'yopildi'
 
+/**
+ * Broker navbatining filtri. Bo'sh satr / `false` = filtr yo'q.
+ *
+ * FILTR SERVERGA KETADI. Mijoz tomonida filtrlash faqat olingan
+ * sahifaga tegardi (navbat 180, sahifa 100) va ikkinchi yuzlikdagi
+ * tender "topilmadi" bo'lib ko'rinardi.
+ */
+export interface NavbatFiltr {
+  q: string
+  region: string
+  holat: '' | RoutingHolat
+  qaror: '' | AiQaror
+  eskirgan: boolean
+  /**
+   * Faqat "Sizga mos" bo'limidagi tenderlar.
+   *
+   * Ta'rif SERVERDA, `kodlash.mos_tender_idlari()` da — ya'ni
+   * ro'yxatning O'ZI bilan bir xil to'plam. Mijoz tomonida
+   * hisoblash ikkinchi haqiqat yasardi.
+   */
+  katalog: boolean
+}
+
+/**
+ * Har manba QANCHA natija berishi.
+ *
+ * O'LCHANGAN NUQSON (2026-09-03): "Manba" filtri qo'shilganda
+ * ko'rinishdagi `naqshdan`/`modeldan` ustunlariga qaraldi, lekin ular
+ * HAQIQATAN farq qiladimi degan savol berilmadi. Bugun ko'rik
+ * navbatidagi HAMMA talab `naqsh` dan (LLM qatlami pullik va
+ * qulflangan) — ya'ni "Naqshdan" hech narsani o'zgartirmasdi,
+ * "Modeldan" esa ro'yxatni bo'shatardi. Ikkalasi ham BUZUQ deb
+ * o'qilardi.
+ *
+ * Endi son yoniga yoziladi va noli o'chiriladi: hech narsa
+ * o'zgartira olmaydigan boshqaruv elementi — boshqaruv yo'qligidan
+ * yomonroq, u interfeys buzuq degan xulosani o'rgatadi.
+ */
+export interface ManbaSonlari {
+  naqsh: number
+  llm: number
+}
+
+/** Ko'rib chiqish (Talablar) navbatining filtri. */
+export interface TalabFiltr {
+  q: string
+  region: string
+  /** Faqat past ishonchli talabi borlar. */
+  past: boolean
+  /** Talab manbai: naqsh yoki model. */
+  manba: '' | 'naqsh' | 'llm'
+  /** Faqat "Sizga mos" bo'limidagi tenderlar. */
+  katalog: boolean
+  /**
+   * Muddati O'TGAN tenderlarni ham ko'rsatish.
+   *
+   * Standart `false`. O'LCHANGAN NUQSON (2026-09-03): navbatda
+   * muddat sharti YO'Q edi va tartib `close_at` bo'yicha o'sish —
+   * ya'ni butun birinchi sahifa allaqachon yopilgan tenderlardan
+   * iborat edi (989 dan 534 tasi o'tgan).
+   */
+  otgan: boolean
+}
+
 export interface RoutingItem {
   id: number
   tender_id: number
@@ -259,7 +349,19 @@ export interface RoutingItem {
 export interface RoutingMoslik {
   qatorlar: {
     ai_manba: string; ai_qaror: AiQaror; jami: number
-    olindi: number; rad: number; moslik_foiz: Nullable<number>
+    olindi: number; rad: number
+    /**
+     * `null` — HISOBLANMAGAN, nol EMAS. Sababi yonidagi
+     * ustunda; interfeys uni `?? 0` bilan nolga AYLANTIRMAYDI.
+     */
+    moslik_foiz: Nullable<number>
+    /**
+     * Foiz nega yo'q:
+     *   `ai_qaror_yoq`  `review` — AI qaror qilmagan, formula
+     *                   struktura bo'yicha nol beradi
+     *   `namuna_kam`    qator `MOSLIK_MIN` dan kam kuzatuvga tayanadi
+     */
+    foiz_yoq_sababi: Nullable<'ai_qaror_yoq' | 'namuna_kam'>
   }[]
   inson_qarorlari: number
   /** Foiz ma'noli bo'lishi uchun kerakli minimal qaror soni. */
@@ -709,6 +811,33 @@ export type TalabHolat =
   | 'rejected'
   | 'corrected'
 
+/**
+ * KO'RIK TUGAGACH NAVBATGA NIMA BO'LGANI.
+ *
+ * Talab tasdiqlangach server `routing.korik_tugadi()` ni chaqiradi
+ * va natija SHU YERDA qaytadi -- ilgari bu jimgina keyingi ETL
+ * yurishiga qolardi va broker eski ballni ko'rib turardi.
+ *
+ *   navbatda    tender navbatda (`go`/`review`)
+ *   no_go       malaka o'tmadi -- navbatga qo'shilmadi yoki CHIQDI
+ *   yopiq       muddat o'tgan, baholanmaydi (`SQL_NOMZODLAR` qoidasi)
+ *   tender_yoq  tender topilmadi
+ *   xato        yangilash yiqildi -- KO'RIK BUZILMADI, sabab `xato` da
+ */
+export type YonaltirishHolat =
+  | 'navbatda' | 'no_go' | 'yopiq' | 'tender_yoq' | 'xato'
+
+export interface Yonaltirish {
+  holat: YonaltirishHolat
+  /** Yozuv HAQIQATAN o'zgardimi (sabab matni ham sanaladi). */
+  ozgardi: boolean
+  /** Broker allaqachon qaror bergan va AI fikri o'zgargan. */
+  inson_qarori_eskirdi: boolean
+  ai_qaror: AiQaror | null
+  routing_id: number | null
+  xato?: string
+}
+
 /** INSON qo'ya oladigan holatlar (API `Literal` bilan qulflangan). */
 export type InsonQarori = 'approved' | 'rejected' | 'corrected'
 
@@ -1051,4 +1180,36 @@ export interface KodPilot {
   taklif_kelishuv_foiz: Nullable<number>
   qidiruv_foiz: Nullable<number>
   kodsiz_mahsulot: number
+  /** MAQSADGA QO'SHILMAYDIGAN qarorlar: anonim (`kompaniya_sessiyasi`)
+   *  yoki mashina (`servis`). `qaror_soni` FAQAT atributlanganni
+   *  sanaydi — ekran va sifat darvozasi bir xil qoidada bo'lsin.
+   *  Bu son noldan farq qilsa, ko'ruvchi "bajardim" deb o'ylagan ish
+   *  darvozaga o'tmagan degani. */
+  atributsiz_qaror?: number
+}
+
+/** `/validatsiya/holat` bitta qatlami.
+ *
+ * `aktorli` — DARVOZA SHUNI sanaydi. `anonim` va `mashina` ALOHIDA
+ * turadi va hech qachon qo'shilmaydi: qo'shilsa darvoza yopiq bo'la
+ * turib ochiqdek ko'rinardi. */
+export interface ValidatsiyaQatlam {
+  qatlam: string
+  eng_kam: number
+  aktorli: number
+  qolgan: number
+  anonim: number
+  mashina: number
+  navbatda: number
+  holat: string
+  ulush_foiz: number | null
+  aktor_jami?: number
+  aktor_faol?: number
+  aktor_koruvchi?: number
+  tosiq?: string | null
+}
+
+export interface ValidatsiyaHolat {
+  qatlamlar: ValidatsiyaQatlam[]
+  izoh: Record<string, string>
 }

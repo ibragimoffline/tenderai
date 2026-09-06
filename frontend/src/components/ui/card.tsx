@@ -2,11 +2,23 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
+// KARTA.
+//
+// SOYA YO'Q — chuqurlik SIRT va CHEGARA bilan beriladi (`bg-card`
+// `--background` dan bir pog'ona baland + 1px `border`). Bu tugmalarda
+// allaqachon qabul qilingan qoida (`button.tsx` ga qarang), lekin
+// kartaga o'tkazilmay qolgan edi: natijada bitta ekranda soyasiz tugma
+// va soyali karta yonma-yon turardi.
+//
+// Zich ish quroli uchun bu ayniqsa muhim: ekranda o'nlab karta bo'ladi
+// va har birining ostidagi soya shovqinga aylanadi. Suzuvchi qatlamlar
+// (`popover`, `sheet`, `confirm-dialog`, `select`) soyani SAQLAYDI —
+// ular haqiqatan kontent USTIDA turadi va buni bildirishi kerak.
 function Card({ className, ...props }: React.ComponentProps<'div'>) {
     return (
         <div
             data-slot="card"
-            className={cn('bg-card text-card-foreground rounded-xl border shadow-sm', className)}
+            className={cn('bg-card text-card-foreground rounded-xl border', className)}
             {...props}
         />
     )

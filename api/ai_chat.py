@@ -37,7 +37,7 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 from starlette.concurrency import run_in_threadpool
 
-from api import ai, atama, db, queries, translit, xatolar
+from api import ai, atama, db, queries, tender_ref, translit, xatolar
 from api.ai import AIUnavailable  # mavjud istisno — qayta yaratmaymiz
 
 # =====================================================================
@@ -224,20 +224,27 @@ LIMIT %(k)s
 """
 
 # --- Sessiya va xabarlar ---
+#: MANBA YOZILADI, TAXMIN QILINMAYDI (`schema_patch_chat_manba.sql`).
+#: Eval `EVAL_COMPANY_ID = 2` bilan ishlaydi -- bu HAQIQIY
+#: ijarachining o'zi. Belgisiz avto-yaratilgan sessiyalar inson
+#: o'lchoviga qo'shilib ketardi va aynan shunday bo'lgan ham:
+#: 133 sessiyadan 122 tasi benchmark yurishi edi.
 SQL_SESSION_CREATE = """
-INSERT INTO chat_session (id, company_id, tender_id, title, lang)
-VALUES (%(id)s, %(company_id)s, %(tender_id)s, %(title)s, %(lang)s)
+INSERT INTO chat_session (id, company_id, tender_id, title, lang,
+                          manba, tahlil_hash)
+VALUES (%(id)s, %(company_id)s, %(tender_id)s, %(title)s, %(lang)s,
+        %(manba)s, %(tahlil_hash)s)
 RETURNING id, created_at
 """
 
 SQL_SESSION_GET = """
-SELECT id, company_id, tender_id, title, lang
+SELECT id, company_id, tender_id, title, lang, manba, tahlil_hash
 FROM chat_session
 WHERE id = %(id)s AND company_id = %(company_id)s AND NOT archived
 """
 
 SQL_SESSION_LIST = """
-SELECT id, tender_id, title, lang, created_at, updated_at
+SELECT id, tender_id, title, lang, manba, created_at, updated_at
 FROM chat_session
 WHERE company_id = %(company_id)s AND NOT archived
 ORDER BY updated_at DESC
@@ -309,6 +316,12 @@ ON CONFLICT (company_id, period, kind, model) DO UPDATE SET
 RETURNING company_id
 """
 
+#: TODO(§16.69): oylik byudjet standarti `50.00` UCH joyda yozilgan
+#: — `v_ai_spend_current`, shu so'rov va `spend()` fallback'i.
+#: Bugun uchtasi bir xil, lekin o'zgartirishda ikkitasi topilib
+#: uchinchisi qolib ketishi mumkin. `MOSLIK_MIN` naqshi bo'yicha
+#: bitta doimiyga, yaxshisi `ai_quota` ustunining `DEFAULT` iga
+#: ko'chirilsin.
 SQL_QUOTA_CHECK = """
 SELECT COALESCE(v.spent_usd, 0)            AS spent,
        COALESCE(q.monthly_usd, 50.00)      AS limit_usd,
@@ -558,6 +571,12 @@ class ChatContext:
     session_id: str
     lang: str = "uz"
     tender_id: Optional[int] = None       # tender paneli konteksti
+    #: Suhbat QAYERDAN boshlangan (`chat_session.manba`).
+    #: `gonogo`/`match` bo'lsa tizim blokiga tahlil sharhi qo'shiladi.
+    manba: Optional[str] = None
+    #: Sessiya OCHILGANDAGI `ai_analysis.content_hash`. Joriysi bilan
+    #: farq qilsa model tahlil qayta hisoblanganidan xabardor bo'ladi.
+    tahlil_hash: Optional[str] = None
     citations: List[dict] = field(default_factory=list)
 
 
@@ -596,10 +615,19 @@ TOOLS: List[Dict[str, Any]] = [
     {
         "name": "get_tender",
         "description": ("Bitta tenderning to'liq ma'lumoti: lotlar, pozitsiyalar, "
-                        "muddat, tafsilot va hujjatlar ro'yxati."),
+                        "muddat, tafsilot va hujjatlar ro'yxati. "
+                        "`tender_id` raqam ham, matn ham bo'lishi mumkin: "
+                        "\"20000508544\", \"#20000508544\", \"t8440527\" yoki "
+                        "havola — tizim o'zi tozalaydi, siz tozalamang."),
         "input_schema": {
             "type": "object",
-            "properties": {"tender_id": {"type": "integer"}},
+            # RAQAM ham, MATN ham qabul qilinadi.
+            #
+            # Ilgari `integer` edi va model `"#20000508544"` uzatsa
+            # tool `int()` da yiqilardi. Model prefiksni o'zi
+            # tozalashi KUTILMAYDI: bu deterministik ish va u
+            # `api/tender_ref.py` da bir joyda qilinadi.
+            "properties": {"tender_id": {"type": ["integer", "string"]}},
             "required": ["tender_id"],
         },
     },
@@ -694,11 +722,34 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_analysis",
+        "description": (
+            "Tenderning SAQLANGAN AI tahlilini qaytaradi "
+            "(summary / match / gonogo). `run_gonogo` DAN FARQLI — "
+            "QIMMAT EMAS va TEZ: bazadan o'qiydi, model chaqirilmaydi. "
+            "Foydalanuvchi mavjud tahlil haqida so'rasa ('nega review?', "
+            "'3-mezon nima?', 'bu tahlilda...') AVVAL SHUNI chaqiring. "
+            "Tahlil yo'q bo'lsa `topilmadi` qaytadi — bu xato emas."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tender_id": {"type": ["integer", "string"]},
+                "kind": {"type": "string",
+                         "enum": ["summary", "match", "gonogo"]},
+            },
+            "required": ["tender_id", "kind"],
+        },
+    },
+    {
         "name": "run_gonogo",
         "description": (
-            "To'liq Go/No-Go tahlili, 11 mezon bo'yicha. QIMMAT va SEKIN "
-            "(30-60 soniya) — faqat foydalanuvchi aniq so'raganda yoki "
-            "yakuniy qaror kerak bo'lganda chaqiring."
+            "To'liq Go/No-Go tahlilini QAYTA HISOBLAYDI, 11 mezon "
+            "bo'yicha. QIMMAT va SEKIN (30-60 soniya). "
+            "AVVAL `get_analysis` (kind='gonogo') ni chaqiring — agar u "
+            "tahlil qaytarsa, `run_gonogo` NI CHAQIRMANG. Bu tool faqat "
+            "foydalanuvchi ANIQ 'qayta hisobla' desa yoki saqlangan "
+            "tahlil umuman bo'lmasa kerak bo'ladi."
         ),
         "input_schema": {
             "type": "object",
@@ -757,6 +808,10 @@ def _t_search_tenders(args: dict, ctx: ChatContext) -> dict:
 
     out = {
         "count": len(rows),
+        # SQL `LIMIT k` bilan kesadi va JAMI o'lchanmaydi (gibrid
+        # qidiruvda to'liq sanoq qimmat). `kesim()` shuni ROST
+        # aytadi: `kesildi: null` — "bilmayman", `0` EMAS.
+        **kesim(len(rows), chegara=k),
         "tenders": [{
             "tender_id": r["id"],
             "name": r["name"],
@@ -797,13 +852,65 @@ def _talab_xulosa(tid: int, company_id: int) -> dict:
     return x
 
 
+def _tender_id_ol(xom: Any, company_id: int) -> Optional[int]:
+    """Modeldan kelgan identifikatorni `tender.id` ga aylantiradi.
+
+    QABUL QILADI: `20000508544`, `"20000508544"`, `"#20000508544"`,
+    `"t8440527"`, `"508540"` (uzex `source_id`), havola.
+
+    `None` -- tushunarsiz yoki bazada yo'q. Chaqiruvchi buni
+    xato deb qaytaradi: bu yerda TAXMIN qilinmaydi.
+    """
+    if xom is None:
+        return None
+    if isinstance(xom, int):
+        # Model TURLANGAN son bergan -- unga tegmaymiz. Noto'g'ri
+        # bo'lsa `build_tender_detail` "topilmadi" deydi.
+        return xom
+    matn = str(xom).strip()
+
+    # SOF SON HAM HAL QILGICHDAN O'TADI.
+    #
+    # NUQSON EDI: `matn.isdigit()` bo'lsa darhol `int()` qaytarardi
+    # va `source_id` yo'li YO'QOLARDI -- `"508540"` uchun
+    # `build_tender_detail(508540)` NULL berardi, holbuki
+    # `hal_qil` uni `20000508540` ga bog'lardi (uzex da
+    # `id = 20000000000 + source_id`).
+    for r in tender_ref.hal_qil(matn, company_id):
+        if r["holat"] == "topildi":
+            return int(r["tender_id"])
+
+    # Hal qilgich ko'rmagan sof son -- naqsh diapazonidan tashqarida
+    # bo'lishi mumkin (korpusda 3 va 5 xonali ID lar ham bor).
+    # Chaqiruvchiga beramiz: "topilmadi" javobini baza aytsin.
+    return int(matn) if matn.isdigit() else None
+
+
 def _t_get_tender(args: dict, ctx: ChatContext) -> dict:
     # Kechiktirilgan import: `main` moduli `ai_chat` ni import qiladi.
     from api import main as api_main, matching
 
-    detail = api_main.build_tender_detail(int(args["tender_id"]))
+    # IDENTIFIKATOR TOZALANADI, MODELDAN KUTILMAYDI.
+    #
+    # `stream_chat` xabardagi raqamlarni allaqachon hal qiladi
+    # (`tender_ref`), lekin model bu tool ga BOSHQA yo'ldan ham
+    # raqam uzatishi mumkin: o'z oldingi javobidan, hujjat
+    # matnidan, foydalanuvchining eski xabaridan. O'shanda u
+    # `"#20000508544"` yoki `"t8440527"` ko'rinishida kelardi va
+    # `int()` `ValueError` bilan yiqilardi -- ya'ni tool xatosi
+    # modelning MATN SHAKLIGA bog'liq edi.
+    #
+    # `tender_ref` ni ishlatamiz: `#`, `№`, `t` prefikslari,
+    # havola va `source_id` -- hammasi BIR joyda hal qilinadi.
+    tid = _tender_id_ol(args.get("tender_id"), ctx.company_id)
+    if tid is None:
+        return {"error": f"Tender {args.get('tender_id')!r} topilmadi "
+                         f"yoki identifikator tushunarsiz."}
+
+    detail = api_main.build_tender_detail(tid)
     if detail is None:
-        return {"error": f"Tender {args['tender_id']} topilmadi."}
+        return {"error": f"Tender {tid} topilmadi."}
+    args = {**args, "tender_id": tid}
 
     # YOPILGANLIK BELGISI. Ro'yxat filtrlari buni yashiradi, lekin bu tool
     # aniq id bo'yicha ham chaqiriladi (havola, eski suhbat, model xatosi).
@@ -825,13 +932,18 @@ def _t_get_tender(args: dict, ctx: ChatContext) -> dict:
     # J3 — TUZILGAN TALABLAR. `search_documents` xom bo'lak beradi,
     # bu esa ajratilgan va ishonch darajasi bilan. Model ikkalasini
     # ham ko'rsin: talab ro'yxati hujjatning HAMMASI emas.
-    detail["talablar"] = _talab_xulosa(int(args["tender_id"]),
-                                       ctx.company_id)
+    detail["talablar"] = _talab_xulosa(tid, ctx.company_id)
     return detail
 
 
 def _t_search_documents(args: dict, ctx: ChatContext) -> dict:
-    tid = int(args["tender_id"])
+    # IDENTIFIKATOR BIR JOYDA HAL QILINADI (`_tender_id_ol`).
+    # Sxema `integer` desa ham model matn uzatishi mumkin -- ilgari
+    # bu `ValueError` bilan yiqilardi, ya'ni tool xatosi modelning
+    # matn shakliga bog'liq edi.
+    tid = _tender_id_ol(args.get("tender_id"), ctx.company_id)
+    if tid is None:
+        return {"error": f"Tender {args.get('tender_id')!r} topilmadi."}
     q = (args.get("query") or "").strip()
     tsq = tsquery(q)
     if not tsq:
@@ -884,6 +996,10 @@ def _t_search_documents(args: dict, ctx: ChatContext) -> dict:
                       if e["topilish"] == "leksik+semantik")
     return {
         "found": len(excerpts),
+        # Bo'laklar `TOP_K_CHUNKS` bilan kesiladi va tenderdagi
+        # JAMI mos bo'lak soni o'lchanmaydi -> `kesildi: null`.
+        # "Bor-yo'g'i shu" degan xulosa CHIQARILMASIN.
+        **kesim(len(excerpts), chegara=TOP_K_CHUNKS),
         "leksik_tasdiqlangan": leksik_soni,
         "excerpts": excerpts,
         # Model TOOL JAVOBIDAN o'qiydigan qo'llanma. chr(10) — ATAYLAB:
@@ -926,7 +1042,10 @@ def _t_check_stock(args: dict, ctx: ChatContext) -> dict:
     from api import stock
 
     # `company_id` SESSIYADAN (ChatContext), model argumentidan EMAS.
-    res = stock.check_tender_stock(int(args["tender_id"]), ctx.company_id)
+    tid = _tender_id_ol(args.get("tender_id"), ctx.company_id)
+    if tid is None:
+        return {"error": f"Tender {args.get('tender_id')!r} topilmadi."}
+    res = stock.check_tender_stock(tid, ctx.company_id)
     if res is None:
         return {"error": f"Tender {args['tender_id']} topilmadi."}
     return res
@@ -936,7 +1055,13 @@ def _t_calc_price(args: dict, ctx: ChatContext) -> dict:
     """Smeta — `api/pricing.py` SOF FUNKSIYASI. Bazaga YOZMAYDI."""
     from api import pricing
 
-    tid = int(args["tender_id"])
+    # IDENTIFIKATOR BIR JOYDA HAL QILINADI (`_tender_id_ol`).
+    # Sxema `integer` desa ham model matn uzatishi mumkin -- ilgari
+    # bu `ValueError` bilan yiqilardi, ya'ni tool xatosi modelning
+    # matn shakliga bog'liq edi.
+    tid = _tender_id_ol(args.get("tender_id"), ctx.company_id)
+    if tid is None:
+        return {"error": f"Tender {args.get('tender_id')!r} topilmadi."}
     tender = db.query_one(queries.PRICING_TENDER_SQL, {"id": tid})
     if not tender:
         return {"error": f"Tender {tid} topilmadi."}
@@ -964,13 +1089,40 @@ def _t_calc_price(args: dict, ctx: ChatContext) -> dict:
 def _t_check_compliance(args: dict, ctx: ChatContext) -> dict:
     from api import compliance
 
-    tid = int(args["tender_id"])
+    tid = _tender_id_ol(args.get("tender_id"), ctx.company_id)
+    if tid is None:
+        return {"error": f"Tender {args.get('tender_id')!r} topilmadi."}
     # `compliance.check()` yo'q tender uchun ham BO'SH cheklist qaytaradi —
     # "hujjat talab qilinmaydi" va "tender yo'q" ni ajratamiz.
     if not db.query_one("SELECT 1 AS x FROM tender WHERE id = %(id)s", {"id": tid}):
         return {"error": f"Tender {tid} topilmadi."}
     # `company_id` SESSIYADAN (ChatContext) — hujjatlar shu kompaniyaniki.
     return compliance.check(tid, company_id=ctx.company_id)
+
+
+def _t_get_analysis(args: dict, ctx: ChatContext) -> dict:
+    """SAQLANGAN tahlilni o'qiydi. MODEL CHAQIRILMAYDI, pul ketmaydi.
+
+    `company_id` SESSIYADAN — `ai_analysis` ijarachi bo'yicha
+    bo'lingan va model uni argument bilan almashtira olmaydi.
+    """
+    from api import tahlil, xatolar
+
+    tid = _tender_id_ol(args.get("tender_id"), ctx.company_id)
+    if tid is None:
+        return {"error": f"Tender {args.get('tender_id')!r} topilmadi."}
+    try:
+        r = tahlil.oqi(tid, ctx.company_id, str(args.get("kind") or ""))
+    except xatolar.Xato as e:
+        return {"error": str(e)}
+    if r is None:
+        # "YO'Q" BILAN "YOMON" ARALASHMASIN. Model tahlilni
+        # topolmaganda "natija salbiy" deb yozmasligi kerak.
+        return {"topilmadi": True,
+                "tender_id": tid, "kind": args.get("kind"),
+                "izoh": "Bu tender uchun bunday tahlil hali "
+                        "hisoblanmagan. Bu SALBIY natija EMAS."}
+    return {"tender_id": tid, **r}
 
 
 def _t_run_gonogo(args: dict, ctx: ChatContext) -> dict:
@@ -980,9 +1132,58 @@ def _t_run_gonogo(args: dict, ctx: ChatContext) -> dict:
     try:
         # `company_id` SESSIYADAN (ChatContext), model argumentidan EMAS —
         # kesh ham, natija ham shu kompaniyaniki bo'lishi shart.
-        return api_main.gonogo_cached(int(args["tender_id"]), ctx.company_id)
+        _tid = _tender_id_ol(args.get("tender_id"), ctx.company_id)
+        if _tid is None:
+            return {"error": f"Tender {args.get('tender_id')!r} topilmadi."}
+        return api_main.gonogo_cached(_tid, ctx.company_id)
     except LookupError as e:
         return {"error": str(e)}
+
+
+#: Bir chaqiruvda nechta mahsulot qaytadi.
+CATALOG_MAX = 200
+
+
+def kesim(korsatildi: int, jami: Optional[int] = None,
+          chegara: Optional[int] = None) -> Dict[str, Any]:
+    """Ro'yxat kesilganini AYTADIGAN juftlik.
+
+    HAR TOOL JAVOBIDA BO'LSIN — kesilmagan bo'lsa ham. Sabab
+    detektsiya: maydon doim kutilsa, yangi tool yozilganda uning
+    YO'QLIGI ko'zga tashlanadi va sinov buni tutadi. Aks holda
+    qoida bor-u qamrovi to'liq emas bo'lardi — `get_my_catalog`
+    aynan shunday tushib qolgan edi (uch tool da ogohlantirish
+    bor, to'rtinchisida yo'q).
+
+    `kesildi` UCH XIL qiymat oladi va ular ARALASHMAYDI:
+
+        0      HECH NARSA kesilmagan (aniq bilamiz)
+        n > 0  aynan `n` ta ko'rsatilmadi
+        None   BILMAYMIZ — jami son o'lchanmagan
+
+    `None` ni `0` ga aylantirish "hech narsa kesilmadi" degan
+    YOLG'ON bo'lardi. O'lchanmaganni o'lchangan deb ko'rsatish —
+    bu loyihada eng qimmat xato sinfi.
+    """
+    if jami is not None:
+        n = max(0, int(jami) - int(korsatildi))
+        out: Dict[str, Any] = {"korsatildi": int(korsatildi),
+                               "jami": int(jami), "kesildi": n}
+        if n:
+            out["kesildi_izoh"] = (
+                f"Ro'yxat KESILGAN: {jami} tadan {korsatildi} tasi. "
+                f"Qolgan {n} tasini KO'RMAYAPSAN — 'yo'q' deb xulosa "
+                f"chiqarma, aniqroq so'rov bilan qayta qidir.")
+        return out
+    # Jami noma'lum: chegaraga YETMAGAN bo'lsa kesilmagani ANIQ.
+    if chegara is not None and int(korsatildi) < int(chegara):
+        return {"korsatildi": int(korsatildi), "jami": int(korsatildi),
+                "kesildi": 0}
+    return {"korsatildi": int(korsatildi), "jami": None, "kesildi": None,
+            "kesildi_izoh": (
+                f"So'ralgan chegara ({chegara}) TO'LDI. Bundan ko'p "
+                f"natija bormi — O'LCHANMAGAN. 'Bor-yo'g'i shu' deb "
+                f"xulosa chiqarma.")}
 
 
 def _t_get_my_catalog(args: dict, ctx: ChatContext) -> dict:
@@ -990,17 +1191,49 @@ def _t_get_my_catalog(args: dict, ctx: ChatContext) -> dict:
     q = (args.get("query") or "").strip().lower()
     if q:
         rows = [r for r in rows if q in (r.get("name") or "").lower()]
-    return {
+
+    # KESILGANI AYTILADI.
+    #
+    # O'LCHANGAN NUQSON (2026-09-04). `count` TO'LIQ sonni berardi,
+    # `products` esa 200 ta bilan kesilardi va bu HECH QAYERDA
+    # aytilmasdi. Bugungi katalog 1798 ta, ya'ni model 1798 deb
+    # o'qib 200 tasini ko'rardi va "katalogimda bunday mahsulot
+    # yo'q" deb ISHONCH BILAN yozardi.
+    #
+    # TARTIB ATAYLAB TANLANADI. `CATALOG_LIST_SQL` `created_at`
+    # bo'yicha O'SISHDA saralaydi (interfeys uchun), ya'ni kesilgan
+    # 200 ta ENG ESKI mahsulot bo'lardi — va model doim o'shalarni
+    # ko'rardi. Bu yerda TESKARISI: `query` berilmaganda eng yangi
+    # qo'shilganlar ko'rsatiladi, chunki ular kompaniya bugun nima
+    # bilan shug'ullanayotganini aniqroq aytadi.
+    #
+    # TARTIB JAVOBDA AYTILADI: 200 ta tasodifiy emas va model buni
+    # bilishi kerak.
+    tartib = None
+    if len(rows) > CATALOG_MAX:
+        rows = sorted(rows, key=lambda r: (r.get("created_at") is None,
+                                           r.get("created_at")),
+                      reverse=True)
+        tartib = "eng yangi qo'shilganlar birinchi (`created_at` kamayishda)"
+
+    out = {
         "count": len(rows),
+        **kesim(min(len(rows), CATALOG_MAX), jami=len(rows)),
         "products": [{
             "id": r["id"], "name": r["name"], "unit": r.get("unit"),
             "stock_qty": r.get("stock_qty"), "stock_unit": r.get("stock_unit"),
             "cost_price": r.get("cost_price"), "price": r.get("price"),
             "currency": r.get("currency"),
-        } for r in rows[:200]],
+        } for r in rows[:CATALOG_MAX]],
         "izoh": ("`stock_qty` NULL = qoldiq KIRITILMAGAN (0 = mavjud emas). "
                  "Bu farqni javobda saqlang."),
     }
+    if tartib:
+        out["tartib"] = tartib
+        out["izoh"] += (
+            f" Ro'yxat {tartib} bo'yicha kesilgan — 'katalogimda yo'q' "
+            f"deb XULOSA CHIQARMA; aniq nom bilan `query` berib qayta qidir.")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1035,6 +1268,8 @@ def _t_compare_tenders(args: dict, ctx: ChatContext) -> dict:
     ids = args.get("tender_ids") or []
     if not isinstance(ids, list) or not ids:
         return {"error": "tender_ids bo'sh. Avval `search_tenders` bilan toping."}
+    # SO'RALGAN son ESLAB QOLINADI: kesim `jami` ni ANIQ biladi.
+    soralgan = len(ids)
     try:
         ids = [int(x) for x in ids][:MAX_COMPARE]
     except (TypeError, ValueError):
@@ -1143,6 +1378,9 @@ def _t_compare_tenders(args: dict, ctx: ChatContext) -> dict:
 
     return {
         "count": len(natija),
+        # Model 12 ta ID uzatib 6 ta javob olsa, qolgan 6 tasini
+        # "yomon" deb emas, KO'RILMAGAN deb bilishi kerak.
+        **kesim(len(natija), jami=soralgan),
         "yopilganlar": yopiq,
         "aspects": sorted(aspects),
         "tenders": natija,
@@ -1164,6 +1402,7 @@ TOOL_IMPL: Dict[str, Callable[[dict, ChatContext], dict]] = {
     "check_stock":      _t_check_stock,
     "calc_price":       _t_calc_price,
     "check_compliance": _t_check_compliance,
+    "get_analysis":     _t_get_analysis,
     "run_gonogo":       _t_run_gonogo,
     "get_my_catalog":   _t_get_my_catalog,
 }
@@ -1280,8 +1519,34 @@ Pul: har doim valyutasi bilan. Sana: YYYY-MM-DD. Muddat: "N kun qoldi".
 """
 
 
-def build_system(ctx: ChatContext, profile: Optional[dict]) -> List[dict]:
-    """Tizim promptini bloklarga bo'ladi — birinchi blok keshlanadi."""
+def _log_chat():
+    import logging
+    return logging.getLogger("uvicorn.error")
+
+
+def _raqam_bloki(matn: str, company_id: int) -> Optional[str]:
+    """Xabardagi tender raqamlari -> tizim bloki. Sinxron (threadpool)."""
+    return tender_ref.blok(tender_ref.hal_qil(matn, company_id))
+
+
+def _tahlil_bloki(ctx: ChatContext) -> Optional[str]:
+    """Saqlangan tahlil konteksti. Sinxron (threadpool uchun)."""
+    if not ctx.tender_id:
+        return None
+    from api import tahlil
+    return tahlil.kontekst_bloki(ctx.tender_id, ctx.company_id,
+                                 ctx.manba, ctx.tahlil_hash)
+
+
+def build_system(ctx: ChatContext, profile: Optional[dict],
+                 raqam_bloki: Optional[str] = None,
+                 tahlil_bloki: Optional[str] = None) -> List[dict]:
+    """Tizim promptini bloklarga bo'ladi — birinchi blok keshlanadi.
+
+    `raqam_bloki` — `tender_ref.blok()` natijasi. U KESH
+    CHEGARASIDAN KEYIN turadi: har xabarda o'zgaradi va statik
+    blokka qo'yilsa keshni har safar buzardi.
+    """
     blocks: List[dict] = [{
         "type": "text",
         "text": SYSTEM_STATIC,
@@ -1299,6 +1564,32 @@ def build_system(ctx: ChatContext, profile: Optional[dict]) -> List[dict]:
             f"KONTEKST: foydalanuvchi hozir {ctx.tender_id} raqamli tender "
             "panelida. 'bu tender' desa — shu tender."
         )
+    # XABARDAGI RAQAMLAR — TIZIM ANIQLAGAN (`api/tender_ref.py`).
+    #
+    # NEGA BOR (o'lchandi 2026-09-04, `chat_tool_call` jurnalidan):
+    # haqiqiy foydalanuvchining raqamli 7 xabaridan 5 tasida model
+    # `search_tenders` ni RAQAM bilan chaqirgan — ya'ni ID ni matn
+    # deb qidirgan; 2 tasida `get_tender` umuman chaqirilmagan va
+    # javob qidiruv natijasidan tuzilgan.
+    #
+    # Deterministik ishni modelga bermaymiz: raqamni kod hal qiladi.
+    if raqam_bloki:
+        dynamic.append(raqam_bloki)
+
+    # SAQLANGAN TAHLIL KONTEKSTI (`api/tahlil.py`).
+    #
+    # Foydalanuvchi Go/No-Go panelidan kelgan bo'lsa, u ALLAQACHON
+    # hukmni va yiqilgan mezonlarni ko'rgan. Modelga shuni aytmasak,
+    # yagona yo'li `run_gonogo` bo'lardi — 30-60 soniya va yangi
+    # pullik chaqiruv, foydalanuvchi ENDIGINA ko'rgan natija uchun.
+    #
+    # BU YERDA BAZAGA BORILMAYDI: `build_system` sinxron va u
+    # asinxron oqimdan chaqiriladi — DB so'rovi event loop'ni
+    # bloklardi (modul izohidagi ogohlantirish). Blok
+    # `stream_chat` da `run_in_threadpool` bilan tayyorlanadi.
+    if tahlil_bloki:
+        dynamic.append(tahlil_bloki)
+
     blocks.append({"type": "text", "text": "\n\n".join(dynamic)})
     return blocks
 
@@ -1367,14 +1658,75 @@ def spend(company_id: int) -> dict:
 # 10. Sessiya va tarix
 # =====================================================================
 
+#: Sessiya manbalari -- bazadagi CHECK bilan AYNI ro'yxat.
+MANBALAR = ("eval", "gonogo", "match", "panel", "global")
+
+
 def create_session(company_id: int, tender_id: Optional[int],
-                   title: Optional[str], lang: str = "uz") -> str:
+                   title: Optional[str], lang: str = "uz",
+                   manba: Optional[str] = None,
+                   tahlil_hash: Optional[str] = None) -> str:
+    """Yangi suhbat ochadi.
+
+    `manba` MAJBURIY EMAS, lekin BERILISHI KERAK. `None` -- "manba
+    noma'lum" degani va u o'lchovda alohida sanaladi; uni jimgina
+    "global" ga aylantirish o'lchanmaganni o'lchangan deb ko'rsatish
+    bo'lardi.
+
+    Noto'g'ri qiymat SHU YERDA tutiladi: bazadagi CHECK ham uni rad
+    etadi, lekin xato 500 emas, tushunarli bo'lsin.
+    """
+    if manba is not None and manba not in MANBALAR:
+        raise xatolar.Xato("INVALID_ENUM",
+                           {"maydon": "manba", "qiymat": manba})
     sid = str(uuid.uuid4())
     db.execute_returning(SQL_SESSION_CREATE, {
         "id": sid, "company_id": company_id, "tender_id": tender_id,
         "title": (title or "").strip()[:120] or None, "lang": lang,
+        "manba": manba, "tahlil_hash": tahlil_hash,
     })
     return sid
+
+
+#: TIKLANISH QAYDI — `schema_patch_chat_tiklash.sql`.
+#:
+#: `tiklandi_at` FAQAT BIR MARTA yoziladi (`COALESCE` emas, shart).
+#: Aks holda bir sessiya bir necha marta ochilganda maxraj shishar
+#: va `rad_foiz` haqiqiydan KICHIK chiqardi — ya'ni chegara
+#: haqiqiydan yaxshiroq ko'rinardi. O'lchov o'zini oqlamasin.
+SQL_TIKLASH = {
+    "tiklandi": """
+        UPDATE chat_session SET tiklandi_at = now()
+        WHERE id = %(id)s AND company_id = %(c)s AND NOT archived
+          AND tiklandi_at IS NULL
+        RETURNING id""",
+    # RAD ETISH ham bir marta: takroriy bosish bitta signal.
+    "rad": """
+        UPDATE chat_session SET tiklash_rad_at = now()
+        WHERE id = %(id)s AND company_id = %(c)s AND NOT archived
+          AND tiklandi_at IS NOT NULL AND tiklash_rad_at IS NULL
+        RETURNING id""",
+}
+
+
+def tiklash_qayd(session_id: str, company_id: int, holat: str) -> bool:
+    """Tiklanish yoki uni rad etishni yozadi.
+
+    `True` — sessiya BOR va shu ijarachiniki. Belgi allaqachon
+    qo'yilgan bo'lsa ham `True`: takroriy chaqiruv xato emas,
+    lekin ikkinchi marta SANALMAYDI.
+    """
+    if holat not in SQL_TIKLASH:
+        raise xatolar.Xato("INVALID_ENUM",
+                           {"maydon": "holat", "qiymat": holat})
+    row = db.execute_returning(SQL_TIKLASH[holat],
+                               {"id": session_id, "c": company_id})
+    if row:
+        return True
+    # Yozilmadi: yo sessiya boshqa ijarachiniki/yo'q, yo belgi
+    # allaqachon bor. IKKISI BOSHQA NARSA — farqni aniqlaymiz.
+    return bool(db.query_one(SQL_SESSION_GET,
+                             {"id": session_id, "company_id": company_id}))
 
 
 def load_session(session_id: str, company_id: int) -> dict:
@@ -1573,7 +1925,27 @@ async def stream_chat(session_id: str, user_text: str, ctx: ChatContext,
 
     await run_in_threadpool(save_message, session_id, "user", user_block)
 
-    system = build_system(ctx, profile)
+    # RAQAMLAR MODELDAN OLDIN HAL QILINADI — bepul, bazaga 1–5 so'rov.
+    #
+    # YIQILSA CHAT ISHLAYVERADI: blok qo'shilmaydi va model avvalgidek
+    # o'zi qidiradi. Bu qatlam YAXSHILASH, shart emas — u butun
+    # suhbatni yiqitmasligi kerak.
+    try:
+        raqam_bloki = await run_in_threadpool(
+            _raqam_bloki, user_text, ctx.company_id)
+    except Exception as e:                              # noqa: BLE001
+        _log_chat().warning("tender raqami hal qilinmadi: %s", e)
+        raqam_bloki = None
+
+    # SAQLANGAN TAHLIL KONTEKSTI — bazadan, shuning uchun threadpool'da.
+    # YIQILSA CHAT ISHLAYVERADI: blok qo'shilmaydi, xolos.
+    try:
+        tahlil_bloki = await run_in_threadpool(_tahlil_bloki, ctx)
+    except Exception as e:                              # noqa: BLE001
+        _log_chat().warning("tahlil konteksti qurilmadi: %s", e)
+        tahlil_bloki = None
+
+    system = build_system(ctx, profile, raqam_bloki, tahlil_bloki)
     yield _sse("meta", {"session_id": session_id, "model": CHAT_MODEL})
 
     total_in = total_out = total_cache_r = total_cache_w = 0

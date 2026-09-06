@@ -257,6 +257,76 @@ def test_tarix_saqlanadi(db):
         print("        (sinov qatori o'chirildi)")
 
 
+def test_hisoblanmagan_foiz(db):
+    bolim("8. HISOBLANMAGAN FOIZ O'ZINI TUSHUNTIRADI")
+    # O'LCHANGAN NUQSON (2026-09-04). Broker ekranida shu ikkisi
+    # turgan edi:
+    #     go: 71.4%     -- jami 7 ta kuzatuvdan (MOSLIK_MIN = 10)
+    #     review: 0.0%  -- formula STRUKTURA bo'yicha nol beradi
+    #
+    # Birinchisi `MOSLIK_MIN` ni chetlab o'tardi: darvoza JAMIGA
+    # qo'yilgan, qatorga emas. Ikkinchisi "AI 0% da haq" bo'lib
+    # o'qilardi, holbuki `review` "AI QAROR QILMADI" degani.
+    from api import auth, routing
+    cid = auth.sole_company_id()
+    m = routing.moslik(cid)
+
+    check("har qatorda `foiz_yoq_sababi` maydoni bor",
+          all("foiz_yoq_sababi" in r for r in m["qatorlar"]),
+          str(len(m["qatorlar"])))
+
+    for r in m["qatorlar"]:
+        # `review` HECH QACHON foiz olmaydi.
+        if r["ai_qaror"] == "review":
+            check("`review` uchun foiz BERILMAYDI (nol EMAS)",
+                  r["moslik_foiz"] is None
+                  and r["foiz_yoq_sababi"] == "ai_qaror_yoq", str(r))
+        # Kam namunali qator ham foiz olmaydi.
+        elif int(r["jami"]) < routing.MOSLIK_MIN:
+            check(f"`{r['ai_qaror']}` {r['jami']}/{routing.MOSLIK_MIN} "
+                  f"— foiz BERILMAYDI",
+                  r["moslik_foiz"] is None
+                  and r["foiz_yoq_sababi"] == "namuna_kam", str(r))
+        else:
+            check(f"`{r['ai_qaror']}` yetarli namuna — foiz BERILADI",
+                  r["moslik_foiz"] is not None
+                  and r["foiz_yoq_sababi"] is None, str(r))
+
+    # DARVOZA IKKI DARAJADA: jami VA qator.
+    src = io.open(os.path.join(ROOT, "api", "routing.py"),
+                  encoding="utf-8").read()
+    check("qator darvozasi `MOSLIK_MIN` ni ishlatadi (yangi raqam EMAS)",
+          'int(r["jami"] or 0) < MOSLIK_MIN' in src)
+    check("nuqson sababi izohda yozilgan",
+          "STRUKTURA BO'YICHA nol" in src and "71.4%" in src)
+
+    # INTERFEYS NULL ni NOLGA AYLANTIRMAYDI.
+    ui = io.open(os.path.join(ROOT, "frontend", "src", "components",
+                              "BrokerQueue.tsx"), encoding="utf-8").read()
+    # SKANER NASRNI O'QIMAYDI (9-sinf). Birinchi yozilishida bu
+    # tekshiruv O'Z IZOHINI tutdi: nuqsonni tasvirlagan izohda
+    # ham `moslik_foiz ?? 0` matni bor edi. Izohlar olib tashlanadi.
+    import re as _re
+    ui_kod = _re.sub(r"/\*.*?\*/", " ", ui, flags=_re.S)
+    ui_kod = _re.sub(r"^\s*//.*$", " ", ui_kod, flags=_re.M)
+    check("interfeysda `moslik_foiz ?? 0` QOLMAGAN (izohlarsiz)",
+          "moslik_foiz ?? 0" not in ui_kod)
+    check("tekshiruv izohni o'qimasligi TASDIQLANDI",
+          "moslik_foiz ?? 0" in ui,
+          "izohda bor, kodda yo'q — skaner farqni ko'radi")
+    check("interfeys sababni ko'rsatadi",
+          "broker.noPct." in ui)
+    for lok in ("uz", "ru", "en"):
+        t = io.open(os.path.join(ROOT, "frontend", "src", "locales",
+                                 f"{lok}.ts"), encoding="utf-8").read()
+        yoq = [k for k in ("broker.noPct.ai_qaror_yoq",
+                           "broker.noPct.ai_qaror_yoq.short",
+                           "broker.noPct.namuna_kam",
+                           "broker.noPct.namuna_kam.short")
+               if f"'{k}'" not in t]
+        check(f"`{lok}` sabab tarjimalari to'liq", not yoq, str(yoq))
+
+
 # =====================================================================
 def main():
     ap = argparse.ArgumentParser(description="Yo'naltirish kelishuvi sinovi")
@@ -278,6 +348,7 @@ def main():
             db.init_pool()
             test_baza(db)
             test_tarix_saqlanadi(db)
+            test_hisoblanmagan_foiz(db)
         except Exception as e:                                # noqa: BLE001
             check("bazali tekshiruv", False, str(e)[:110])
 

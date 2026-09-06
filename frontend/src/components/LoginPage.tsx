@@ -49,7 +49,7 @@ export default function LoginPage({ onLogin }: {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <form onSubmit={submit}
-        className="w-full max-w-sm rounded-lg border bg-card p-6 shadow-sm">
+        className="w-full max-w-sm rounded-lg border bg-card p-6">
         <div className="mb-5 flex items-center gap-2.5">
           <Icon name="search" size={22} className="text-primary" />
           <div>

@@ -19,6 +19,19 @@
  * 3. ESKIRGAN QAROR ENG TEPADA VA QIZIL. Broker allaqachon qaror
  *    bergan, lekin tahlil o'zgargan — u YOLG'ON ISHONCH bilan
  *    yuribdi. Bu navbatdagi eng shoshilinch holat.
+ *
+ * "OLINDI" ENDI ISH TAQSIMOTI HAM
+ * ═══════════════════════════════
+ * Qaror ERP da ish kartasiga aylanadi (`api/topshiriq.py`), shuning
+ * uchun u bilan birga uchta narsa yuboriladi: KIMGA, qanchalik
+ * SHOSHILINCH va QACHONGACHA. Ular ixtiyoriy — hodim tanlanmasa ERP
+ * kartani "Taqsimlanmagan" ga qo'yadi va menejerga xabar beradi
+ * (jimgina yo'qolmaydi).
+ *
+ * HODIM RO'YXATI — AKTORLARDAN (`/aktor`), ya'ni ERP hodimlariga
+ * xaritalangan odamlardan. Xaritalanmagan aktor ham ko'rinadi:
+ * uni tanlash mumkin, lekin ERP kartani biriktira olmaydi va buni
+ * javobda AYTADI.
  */
 import { useCallback, useEffect, useState } from 'react'
 
@@ -27,14 +40,21 @@ import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useFormat } from '@/format'
 import type {
-  AiQaror, InsonQaror, MalakaNatija, MalakaHolat, RoutingItem, RoutingMoslik,
+  Aktor, AiQaror, InsonQaror, MalakaNatija, MalakaHolat, NavbatFiltr,
+  Region, RoutingItem, RoutingMoslik,
 } from '@/types'
 
 import Icon from './Icon'
+import { DarvozaProgress } from './DarvozaProgress'
+import NavbatFilters, { Kesildi, TRIGGER, filtrga, tanlovga, HAMMASI }
+  from './NavbatFilters'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
 import { Skeleton } from './ui/skeleton'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from './ui/select'
 
 /** AI qarorining rangi. `no_go` navbatga tushmaydi, lekin to'liqlik uchun. */
 const QAROR_RANG: Record<AiQaror, string> = {
@@ -51,14 +71,23 @@ const HOLAT_RANG: Record<MalakaHolat, string> = {
   malumot_yoq: 'text-muted-foreground',
 }
 
+const BOSH_FILTR: NavbatFiltr = {
+  q: '', region: '', holat: '', qaror: '', eskirgan: false, katalog: false,
+}
+
 export default function BrokerQueue({
-  onOpenTender,
+  onOpenTender, regions = [],
 }: {
   onOpenTender?: (tenderId: number) => void
+  regions?: Region[]
 }) {
   const { t } = useI18n()
   const fmt = useFormat()
   const [items, setItems] = useState<RoutingItem[]>([])
+  const [filtr, setFiltr] = useState<NavbatFiltr>(BOSH_FILTR)
+  // `jami` — filtrga MOS KELGANLARNING to'liq soni. Sahifa 100 ta,
+  // shuning uchun u `items.length` dan katta bo'lishi mumkin.
+  const [jami, setJami] = useState(0)
   const [moslik, setMoslik] = useState<RoutingMoslik | null>(null)
   const [yuklanmoqda, setYuklanmoqda] = useState(true)
   const [xato, setXato] = useState<string | null>(null)
@@ -67,20 +96,37 @@ export default function BrokerQueue({
   const [malakaYuk, setMalakaYuk] = useState(false)
   const [izoh, setIzoh] = useState('')
   const [band, setBand] = useState(false)
+  // --- ERP ga topshiriq: ish taqsimoti ---
+  const [hodim, setHodim] = useState('')
+  const [ustuvorlik, setUstuvorlik] =
+    useState<'low' | 'medium' | 'high'>('medium')
+  const [muddat, setMuddat] = useState('')
+  const [aktorlar, setAktorlar] = useState<Aktor[]>([])
+  const [erpXabar, setErpXabar] = useState<string | null>(null)
+
+  // Aktorlar BIR MARTA: ular ish davomida o'zgarmaydi. Ro'yxat
+  // bo'lmasa (patch yo'q yoki huquq yetmasa) tanlov ko'rsatilmaydi
+  // va qaror avvalgidek ishlayveradi.
+  useEffect(() => {
+    void api.aktorlar(true)
+      .then((r) => setAktorlar(r.aktorlar || []))
+      .catch(() => setAktorlar([]))
+  }, [])
 
   const yukla = useCallback(async () => {
     setYuklanmoqda(true)
     setXato(null)
     try {
-      const r = await api.brokerNavbat(undefined, 100)
+      const r = await api.brokerNavbat(filtr, 100)
       setItems(r.items)
+      setJami(r.jami)
       setMoslik(r.moslik)
     } catch (e) {
       setXato(e instanceof Error ? e.message : String(e))
     } finally {
       setYuklanmoqda(false)
     }
-  }, [])
+  }, [filtr])
 
   useEffect(() => { void yukla() }, [yukla])
 
@@ -105,10 +151,32 @@ export default function BrokerQueue({
   async function qaror(it: RoutingItem, q: InsonQaror) {
     setBand(true)
     try {
-      await api.brokerQaror(it.id, { qaror: q, izoh: izoh || undefined })
+      const r = await api.brokerQaror(it.id, {
+        qaror: q,
+        izoh: izoh || undefined,
+        // Ish taqsimoti FAQAT "olindi" da ma'noga ega.
+        ...(q === 'olindi'
+          ? { hodim_actor_id: hodim ? Number(hodim) : null,
+              ustuvorlik, muddat: muddat || null }
+          : {}),
+      })
+      // ERP GA NIMA BO'LGANI JIM QOLMAYDI. Uchta holat bor va
+      // ular bir-biridan farq qiladi: karta ochildi / kimsasiz
+      // ochildi / umuman yozilmadi.
+      const tp = r.topshiriq
+      if (q === 'olindi' && tp) {
+        setErpXabar(tp.holat === 'yaratildi'
+          ? (tp.hodim_actor_id ? t('broker.erpCard') : t('broker.erpUnassigned'))
+          : `${t('broker.erpFailed')}: ${tp.xato || tp.holat}`)
+      } else {
+        setErpXabar(null)
+      }
       setOchilgan(null)
       setMalaka(null)
       setIzoh('')
+      setHodim('')
+      setMuddat('')
+      setUstuvorlik('medium')
       await yukla()
     } catch (e) {
       setXato(e instanceof Error ? e.message : String(e))
@@ -129,12 +197,17 @@ export default function BrokerQueue({
     }
   }
 
-  if (yuklanmoqda) return <Skeleton className="h-[420px] w-full rounded-xl" />
-
   const eskirgan = items.filter((x) => x.ai_ozgardi).length
+  const filtrBor = !!(filtr.q || filtr.region || filtr.holat
+                      || filtr.qaror || filtr.eskirgan || filtr.katalog)
 
   return (
     <div className="space-y-3">
+      {/* SIFAT DARVOZASI — "18 / 40". Ko'ruvchi o'z ekranida
+          qanchasi qolganini ko'rsin; ilgari bu raqam faqat
+          `v_sifat_darvoza` da, ya'ni SQL yozadigan odam uchun
+          ko'rinardi. Tugallanmagan darvoza YASHIRILMAYDI. */}
+      <DarvozaProgress qatlam="yonaltirish" />
       {/* SINOV PROFILI — eng tepada va yo'qolmaydi.
           "147 ta tender navbatda" degan raqam o'ylab topilgan
           qiymatlarni o'lchaydi; yorliqsiz u haqiqiy deb o'qilardi. */}
@@ -156,12 +229,71 @@ export default function BrokerQueue({
         </div>
       )}
 
+      {/* ERP GA NIMA BO'LGANI. Qaror MUVAFFAQIYATLI bo'lib, ERP
+          kartasi ochilmagan bo'lishi mumkin (masalan hodim
+          xaritalanmagan) — buni jimgina o'tkazib yuborish "hammasi
+          joyida" degan yolg'on taassurot qoldirardi. */}
+      {erpXabar && (
+        <div className="flex items-start gap-2 rounded-lg border
+                        border-soon/40 bg-soon-soft px-3 py-2
+                        text-caption text-soon-strong">
+          <span className="flex-1">{erpXabar}</span>
+          <button type="button" className="underline"
+                  onClick={() => setErpXabar(null)}>×</button>
+        </div>
+      )}
+
+      {/* FILTR — server tomonda. Panel qidiruvni 400 ms kechiktiradi
+          (`NavbatFilters`), ya'ni har harf so'rov yubormaydi. */}
+      <NavbatFilters
+        q={filtr.q} region={filtr.region} regions={regions}
+        katalog={filtr.katalog}
+        onChange={(patch) => setFiltr((f) => ({ ...f, ...patch }))}
+        onReset={() => setFiltr(BOSH_FILTR)}
+      >
+        <Select value={tanlovga(filtr.holat)}
+          onValueChange={(v) =>
+            setFiltr((f) => ({ ...f, holat: filtrga(v) as NavbatFiltr['holat'] }))}>
+          <SelectTrigger className={TRIGGER}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={HAMMASI}>{t('broker.f.allStates')}</SelectItem>
+            <SelectItem value="yangi">{t('broker.f.new')}</SelectItem>
+            <SelectItem value="korilmoqda">{t('broker.f.inProgress')}</SelectItem>
+            <SelectItem value="yopildi">{t('broker.f.closed')}</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={tanlovga(filtr.qaror)}
+          onValueChange={(v) =>
+            setFiltr((f) => ({ ...f, qaror: filtrga(v) as NavbatFiltr['qaror'] }))}>
+          <SelectTrigger className={TRIGGER}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={HAMMASI}>{t('broker.f.allDecisions')}</SelectItem>
+            <SelectItem value="go">go</SelectItem>
+            <SelectItem value="review">review</SelectItem>
+            {/* `no_go` navbatga faqat `--barchasi` bilan yoziladi.
+                Variant baribir turadi: yozilgan bo'lsa broker uni
+                topa olishi kerak, bo'lmasa ro'yxat bo'sh chiqadi —
+                bu "filtr yo'q" dan ANIQROQ javob. */}
+            <SelectItem value="no_go">no_go</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* ESKIRGAN QAROR — eng shoshilinch holat, shuning uchun
+            alohida tugma: broker uni bir bosishda ajratib olsin. */}
+        <Button
+          variant={filtr.eskirgan ? 'default' : 'outline'} size="sm"
+          onClick={() => setFiltr((f) => ({ ...f, eskirgan: !f.eskirgan }))}>
+          {t('broker.f.staleOnly')}
+        </Button>
+      </NavbatFilters>
+
       <Card className="p-0">
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
           <Icon name="send" size={16} className="text-accent" />
           <div className="text-body font-medium">{t('broker.title')}</div>
           <span className="text-xs text-muted-foreground">
-            {t('broker.count', { n: items.length })}
+            {t('broker.count', { n: jami })}
           </span>
           {/* ESKIRGAN QAROR — eng shoshilinch raqam. */}
           {eskirgan > 0 && (
@@ -186,9 +318,31 @@ export default function BrokerQueue({
                 {t('broker.agreement', { n: moslik.inson_qarorlari })}
                 {moslik.qatorlar.map((r) => (
                   <span key={`${r.ai_manba}-${r.ai_qaror}`} className="ml-2">
-                    {r.ai_qaror}: <b className="tabular text-foreground">
-                      {r.moslik_foiz ?? 0}%
-                    </b>
+                    {r.ai_qaror}:{' '}
+                    {/* HISOBLANMAGAN QIYMAT O'ZINI TUSHUNTIRADI.
+                        Ilgari bu yerda `{r.moslik_foiz ?? 0}%` turardi
+                        va NULL ni `0%` ga aylantirardi — ya'ni
+                        "o'lchanmadi" broker uchun "AI 0% da haq"
+                        bo'lib ko'rinardi. `review` da bu HAR DOIM
+                        shunday edi: formula unga nolni KAFOLATLAYDI. */}
+                    {/* SHART SABABGA QO'YILGAN, foizga emas.
+                        `moslik_foiz === null` bo'yicha tekshirilganda
+                        TypeScript `foiz_yoq_sababi` ni hamon
+                        `null` bo'lishi mumkin deb ko'rardi va
+                        kalit `broker.noPct.null` ga aylanardi —
+                        ya'ni tarjimasiz satr. Sababning o'zi
+                        mavjudligini so'raymiz: shunda kalit
+                        HAR DOIM haqiqiy. */}
+                    {r.foiz_yoq_sababi ? (
+                      <span title={t(`broker.noPct.${r.foiz_yoq_sababi}`,
+                                     { n: r.jami, kerak: moslik.kerakli_qaror })}>
+                        {t(`broker.noPct.${r.foiz_yoq_sababi}.short`)}
+                      </span>
+                    ) : (
+                      <b className="tabular text-foreground">
+                        {r.moslik_foiz ?? '—'}%
+                      </b>
+                    )}
                   </span>
                 ))}
               </>
@@ -207,10 +361,25 @@ export default function BrokerQueue({
           </div>
         )}
 
-        {items.length === 0 ? (
+        {!yuklanmoqda && (
+          <div className="px-4 pt-2">
+            <Kesildi jami={jami} korsatildi={items.length} />
+          </div>
+        )}
+
+        {yuklanmoqda ? (
+          <div className="p-4">
+            <Skeleton className="h-[360px] w-full rounded-lg" />
+          </div>
+        ) : items.length === 0 ? (
           <div className="px-4 py-8 text-center text-body
                           text-muted-foreground">
-            {t('broker.empty')}
+            {/* BO'SH NATIJANING SABABI AYTILADI. Filtr qo'yilgan
+                bo'lsa "navbat bo'sh" YOLG'ON bo'lardi — navbatda
+                tender bor, faqat filtrga mos kelmagan. */}
+            {filtr.katalog
+              ? t('navbat.noCatalogMatch')
+              : filtrBor ? t('navbat.noMatch') : t('broker.empty')}
           </div>
         ) : (
           <ul className="divide-y">
@@ -303,6 +472,52 @@ export default function BrokerQueue({
                   <div className="mt-3 rounded-lg border bg-muted/30 p-3">
                     {malakaYuk && <Skeleton className="h-32 w-full" />}
                     {malaka && <MalakaJadval n={malaka} />}
+
+                    {/* ISH TAQSIMOTI — faqat "Olindi" uchun ma'noli,
+                        lekin oldindan to'ldiriladi: qaror bosilgach
+                        yana bir oyna ochish ishni sekinlashtirardi. */}
+                    {aktorlar.length > 0 && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <label className="text-caption text-muted-foreground">
+                          {t('broker.assignee')}
+                        </label>
+                        <select
+                          className="rounded-md border bg-background px-2
+                                     py-1.5 text-caption"
+                          value={hodim}
+                          onChange={(e) => setHodim(e.target.value)}>
+                          <option value="">{t('broker.assignee.none')}</option>
+                          {aktorlar.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.ism}{a.erp_user_id ? '' : ' (ERP xaritasi yo‘q)'}
+                            </option>
+                          ))}
+                        </select>
+
+                        <label className="text-caption text-muted-foreground">
+                          {t('broker.priority')}
+                        </label>
+                        <select
+                          className="rounded-md border bg-background px-2
+                                     py-1.5 text-caption"
+                          value={ustuvorlik}
+                          onChange={(e) => setUstuvorlik(
+                            e.target.value as 'low' | 'medium' | 'high')}>
+                          <option value="low">{t('broker.priority.low')}</option>
+                          <option value="medium">{t('broker.priority.medium')}</option>
+                          <option value="high">{t('broker.priority.high')}</option>
+                        </select>
+
+                        <label className="text-caption text-muted-foreground">
+                          {t('broker.due')}
+                        </label>
+                        <input type="date"
+                          className="rounded-md border bg-background px-2
+                                     py-1.5 text-caption"
+                          value={muddat}
+                          onChange={(e) => setMuddat(e.target.value)} />
+                      </div>
+                    )}
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <input

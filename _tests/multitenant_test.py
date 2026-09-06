@@ -140,6 +140,30 @@ def _sql_matnlari(path: str):
     """
     tree = ast.parse(open(path, encoding="utf-8").read())
 
+    def _izohsiz(sql: str) -> str:
+        """SQL IZOHLARINI olib tashlaydi — skaner NASRNI o'qimasin.
+
+        O'LCHANGAN YOLG'ON TOPILMA (2026-09-03). `pilot_rejim()` dagi
+        SQL ga izoh qo'shildi:
+
+            SELECT rejim FROM review_pilot
+             WHERE company_id = %(c)s AND tender_id = %(t)s
+            -- Bir tender ikki avlodda bo'lishi mumkin; ...
+             ORDER BY avlod DESC LIMIT 1
+
+        `tender` so'zi FAQAT IZOHDA edi, lekin A4 tekshiruvi
+        `\\btender\\b` ni topib SQL ni "tender jadvaliga tegadi" deb
+        hisobladi va aliassiz `company_id` uchun BUZILISH e'lon qildi.
+        Kod SOG'LOM edi — `review_pilot` da alias umuman kerak emas.
+
+        Bu loyihada aynan shu sinf xato UCH MARTA takrorlangan
+        (skaner o'z izohiga, o'z sinov namunasiga, o'z
+        tushuntirishiga urildi). Qoida: KOD SKANERLANADI, NASR EMAS.
+        """
+        sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)   # /* blok */
+        sql = re.sub(r"--[^\n]*", " ", sql)                # -- qator
+        return sql
+
     def matn(node) -> Optional[str]:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return node.value
@@ -166,7 +190,8 @@ def _sql_matnlari(path: str):
         # Modul/funksiya hujjati emas, haqiqiy SQL bo'lsin: fe'l ham,
         # manba (FROM/INTO/SET) ham bo'lishi shart.
         if t and fel.search(t) and manba.search(t):
-            yield t
+            # IZOHSIZ chiqariladi — tekshiruvlar KODNI ko'rsin.
+            yield _izohsiz(t)
 
 
 #: Katalog (metadata) so'rovlari — ular MA'LUMOTGA tegmaydi, faqat
@@ -257,6 +282,50 @@ def test_tender_company_id_nomsiz_emas():
     check(f"{tekshirilgan} ta 'tender + company_id' SQL tekshirildi",
           True, "")
     check("aliassiz company_id yo'q", not buzuq, "\n       ".join(buzuq[:8]))
+
+    # -----------------------------------------------------------------
+    # SKANERNING O'ZI SINALADI
+    # -----------------------------------------------------------------
+    # 2026-09-03 da bu tekshiruv YOLG'ON topilma berdi: `review_pilot`
+    # ustidagi SOG'LOM SQL ga izoh qo'shilgan edi va izohdagi "tender"
+    # so'zi uni "tender jadvaliga tegadi" deb ko'rsatdi. Tuzatish —
+    # `_sql_matnlari()` endi izohlarni olib tashlaydi.
+    #
+    # LEKIN "izohni olib tashlash" skanerni BO'SHATGAN bo'lishi ham
+    # mumkin. Shuning uchun ikki tomon ham sinaladi: nasrni
+    # e'tiborsiz qoldiradimi VA haqiqiy buzilishni hamon tutadimi.
+    def _buzuqmi(sql: str) -> bool:
+        sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
+        sql = re.sub(r"--[^\n]*", " ", sql)
+        if not re.search(r"\btender\b(?!_)", sql, re.I):
+            return False
+        if not re.search(r"\bcompany_id\b", sql, re.I):
+            return False
+        for m in re.finditer(r"(\w+\.)?\bcompany_id\b", sql, re.I):
+            if m.group(1):
+                continue
+            oldin = sql[max(0, m.start() - 2):m.start()]
+            if oldin.endswith("(") or oldin.endswith("%("):
+                continue
+            return True
+        return False
+
+    nasr = ("SELECT rejim FROM review_pilot "
+            "WHERE company_id = %(c)s AND tender_id = %(t)s "
+            "-- Bir tender ikki avlodda bo'lishi mumkin "
+            "ORDER BY avlod DESC LIMIT 1")
+    check("skaner NASRNI o'qimaydi (izohdagi 'tender' e'tiborsiz)",
+          not _buzuqmi(nasr), nasr[:70])
+
+    haqiqiy = ("SELECT t.id FROM tender t JOIN catalog_product p "
+               "ON p.company_id = company_id WHERE t.status = 'open'")
+    check("skaner HAQIQIY buzilishni HAMON tutadi",
+          _buzuqmi(haqiqiy),
+          "izohni olib tashlash skanerni BO'SHATMAGAN bo'lishi shart")
+
+    blok = ("SELECT x FROM review_pilot /* tender haqida izoh */ "
+            "WHERE company_id = %(c)s")
+    check("blok izoh (/* */) ham e'tiborsiz", not _buzuqmi(blok), blok[:60])
 
 
 def test_ai_analysis_aralash():
@@ -741,6 +810,85 @@ def test_izolyatsiya(conn):
     print("     (barcha sinov yozuvlari qaytarildi — bazaga tegmadi)")
 
 
+def test_erp_karta_ijarachisi() -> None:
+    """ERP kartalari IJARACHILARARO sizib ketmasin.
+
+    O'LCHANGAN OCHIQ CHEGARA (2026-09-03). `erp_status.for_tender()`
+    FAQAT `tender_id` bo'yicha filtrlaydi, `erp.v_tender_status` esa
+    `tai_company_id` ni chop ETMAYDI — ya'ni ijarachi bo'yicha
+    filtrlab BO'LMAYDI. Bitta tender ikki ijarachida ishga olinsa,
+    A ijarachisi B ning kartasini (broker, mijoz, holat) ko'rardi.
+    FK bu yerda yordam bermaydi: FK YOZISHNI to'sadi, O'QISHNI emas.
+
+    QOIDA: view ijarachini aytmasa VA faol ijarachi > 1 bo'lsa —
+    BO'SH ro'yxat. "Ma'lumot yo'q" halol; "boshqasining ma'lumoti"
+    emas.
+
+    IKKI TOMON ham sinaladi: bloklaydimi VA keraksiz joyda
+    bloklamaydimi.
+    """
+    print("\n[A5] ERP kartalari — ijarachi chegarasi")
+    try:
+        from api import db, erp_status
+        db.init_pool()
+    except Exception as e:                                    # noqa: BLE001
+        check("erp_status yuklandi", False, str(e)[:80])
+        return
+
+    if not erp_status.ready():
+        check("erp.v_tender_status yo'q -> tekshiruv o'tkazildi", True,
+              "ERP o'rnatilmagan")
+        return
+
+    check("view `tai_company_id` ni chop etmaydi (ochiq chegara)",
+          erp_status.ijarachili() is False,
+          "TRUE bo'lsa chegara YOPILGAN va bu tekshiruv eskirgan")
+
+    tid = db.scalar("SELECT tender_id FROM erp.v_tender_status LIMIT 1")
+    if tid is None:
+        check("ERP da opportunity yo'q -> tekshiruv o'tkazildi", True)
+        return
+
+    # 1) BOSHQA ijarachi bu tenderni TOPSHIRMAGAN -> karta ko'rinadi.
+    #    Birinchi urinishda shart "faol ijarachi > 1" edi va u juda
+    #    qo'pol chiqdi: `auth_test` o'z hisobini yaratganda ham karta
+    #    bloklanardi (o'lchandi: to'plam 132 emas, 74 tekshiruvda uzildi).
+    check("begona topshiriq YO'Q: karta KO'RSATILADI",
+          len(erp_status.for_tender(tid, company_id=None)) > 0,
+          "to'qnashuv sharti yo'q — bloklash ortiqcha bo'lardi")
+
+    # 2) BOSHQA ijarachi SHU TENDERNI topshirgan -> BLOK.
+    zz = db.query_one("SELECT id FROM company_account "
+                      " WHERE username = 'zzmt_erp'")
+    if zz is None:
+        zz = db.execute_returning(
+            "INSERT INTO company_account (username, company_name, "
+            "  password_hash, active) VALUES ('zzmt_erp', 'ZZTEST erp', "
+            "  '!sinov-yaroqsiz-xesh', false) RETURNING id")
+    zid = int(zz["id"])
+    rid = db.execute_returning(
+        "INSERT INTO tender_routing (company_id, tender_id, holat) "
+        "VALUES (%(c)s, %(t)s, 'yangi') RETURNING id",
+        {"c": zid, "t": tid})["id"]
+    try:
+        db.execute_returning(
+            "INSERT INTO tender_topshiriq (company_id, routing_id, "
+            "  tender_id, ishonch, ustuvorlik) "
+            "VALUES (%(c)s, %(r)s, %(t)s, 'kompaniya_sessiyasi', 'medium') "
+            "RETURNING id", {"c": zid, "r": rid, "t": tid})
+        n = len(erp_status.for_tender(tid, company_id=1))
+        check("BEGONA ijarachi topshirgan: karta KO'RSATILMAYDI",
+              n == 0, f"{n} ta karta qaytdi — ijarachilararo sizish")
+        # O'Z topshirig'i BLOKLAMAYDI — aks holda xususiyat o'ladi.
+        n2 = len(erp_status.for_tender(tid, company_id=zid))
+        check("O'Z topshirig'i bloklamaydi", n2 > 0, f"{n2} ta karta")
+    finally:
+        db.execute_returning("DELETE FROM tender_topshiriq "
+                             " WHERE routing_id=%(r)s RETURNING id", {"r": rid})
+        db.execute_returning("DELETE FROM tender_routing WHERE id=%(r)s "
+                             "RETURNING id", {"r": rid})
+
+
 def main():
     ap = argparse.ArgumentParser(description="Ko'p-ijarachilik sinovi (J1)")
     rejim.bayroqlar(ap)
@@ -756,6 +904,7 @@ def main():
     test_patch_royxati_mos()
     test_cid_skaner_ozini_sinaydi()
     test_sole_company_tushishi()
+    test_erp_karta_ijarachisi()
 
     if not args.bazasiz:
         from dotenv import load_dotenv

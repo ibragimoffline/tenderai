@@ -48,6 +48,8 @@ import zipfile
 
 import requests
 
+import etl_ishonch as ish
+
 try:
     from dotenv import load_dotenv
 except ImportError:  # dotenv bo'lmasa ham muhit o'zgaruvchisidan ishlaydi
@@ -88,6 +90,22 @@ CHUNK         = 65536        # oqim bo'lagi
 
 MAX_BYTES     = 25 * 1024 * 1024    # 25 MB dan katta -> too_large
 MAX_CHARS     = 400_000             # bazaga yoziladigan matn chegarasi
+
+#: VAQT BYUDJETI (soniya). `run_etl.py` uni `--max-seconds` bilan
+#: beradi; yakka yurgizilganda standart shu. 0 = cheksiz.
+#:
+#: `etl_uzex.py` va `etl_details.py` da byudjet ALLAQACHON bor edi,
+#: bu qadamda esa YO'Q edi — holbuki u quvurdagi ENG SEKINI
+#: (to'liq qamrov ~25 daqiqa). Natija: host CTRL+C yuborganda
+#: (`0xC000013A`) qadam fayl o'rtasida o'lardi.
+STANDART_BYUDJET = 1200
+
+#: Byudjet/to'xtash so'rovi bilan TUGALLANMAGAN yurish. `0` (ok) ham,
+#: `1` (xato) ham EMAS — `run_etl.py` uni `partial` deb o'qiydi.
+CHIQISH_QISMAN = 7
+
+#: To'xtash so'rovini yig'uvchi (signal + byudjet). `main()` da quriladi.
+_TOXTATGICH: Optional["ish.Toxtatgich"] = None
 MIN_CHARS     = 20                  # shundan kam matn = amalda bo'sh (skan)
 # Chizma/skan PDF'lardan ba'zan bir necha belgi "sizib" chiqadi:
 #   '№ № № ³ Ø296 Ø296Ø83Ø88937'  — uzunligi MIN_CHARS dan katta, lekin bu
@@ -749,15 +767,53 @@ def fetch_targets(conn, args) -> List[dict]:
         where.append("d.tender_id = ANY(%(cat_ids)s)")
         params["cat_ids"] = ids
 
+    # ------------------------------------------------------------------
+    # TARTIB: PLATFORMALAR ARALASHTIRILADI, KETMA-KET EMAS
+    # ------------------------------------------------------------------
+    # O'LCHANGAN NUQSON (2026-09-03). Ilgari bu yerda shunchaki
+    # `ORDER BY d.tender_id DESC` turardi. Ikki platformaning ID
+    # FAZOLARI esa butunlay boshqa:
+    #
+    #     xt-xarid      108 .. 8 538 264
+    #     uzex   20 000 475 229 .. 20 000 510 026
+    #
+    # Ya'ni HAR uzex hujjati HAR xt-xarid hujjatidan oldin turardi.
+    # O'lchandi — navbatdagi o'rinlar:
+    #
+    #     uzex       1 .. 342   (342 ta)
+    #     xt-xarid 343 .. 906   (564 ta)
+    #
+    # Qadamda vaqt byudjeti bor (to'liq qamrov ~25 daqiqa), shuning
+    # uchun BIRORTA xt-xarid hujjati 342 ta uzex hujjati tugamaguncha
+    # yetib borilmasdi. Natija: xt-xarid matn qamrovi 31/595, uzex esa
+    # 2 925. Bu "sekin ishlayapti" emas — STRUKTURAVIY OCHLIK: filtr
+    # ham, byudjet ham to'g'ri, faqat NAVBAT TARTIBI bir platformani
+    # abadiy oxirga surardi.
+    #
+    # Yechim: har platforma ichida tartib SAQLANADI (yangi tender
+    # oldin), lekin platformalar NAVBATMA-NAVBAT olinadi. Bu yon
+    # foyda ham beradi — ikki HOSTGA so'rov navbatma-navbat ketadi,
+    # bitta manbaga ketma-ket urish o'rniga.
+    #
+    # `--platform` berilgan bo'lsa aralashtirish ma'nosiz, lekin
+    # zarari ham yo'q: bitta guruh qoladi.
     sql = f"""
-        SELECT d.tender_id, d.file_ref, d.file_id, d.file_path, d.name,
-               d.size_bytes, d.content_type, d.file_type, d.source_platform,
-               d.holat, d.urinish
-        FROM tender_document d
-        LEFT JOIN tender_document_text t
-               ON t.tender_id = d.tender_id AND t.file_ref = d.file_ref
-        WHERE {' AND '.join(where)}
-        ORDER BY d.tender_id DESC, d.file_ref
+        SELECT tender_id, file_ref, file_id, file_path, name,
+               size_bytes, content_type, file_type, source_platform,
+               holat, urinish
+        FROM (
+            SELECT d.tender_id, d.file_ref, d.file_id, d.file_path, d.name,
+                   d.size_bytes, d.content_type, d.file_type,
+                   d.source_platform, d.holat, d.urinish,
+                   row_number() OVER (PARTITION BY d.source_platform
+                                      ORDER BY d.tender_id DESC, d.file_ref)
+                       AS _navbat
+            FROM tender_document d
+            LEFT JOIN tender_document_text t
+                   ON t.tender_id = d.tender_id AND t.file_ref = d.file_ref
+            WHERE {' AND '.join(where)}
+        ) s
+        ORDER BY _navbat, source_platform, tender_id DESC, file_ref
     """
     if args.limit:
         sql += f" LIMIT {int(args.limit)}"
@@ -879,9 +935,15 @@ def main() -> None:
                     help="Allaqachon ishlanganlarni ham qayta yuklab oladi")
     ap.add_argument("--dry-run", action="store_true",
                     help="Yuklab oladi va matn ajratadi, lekin DBga yozmaydi")
+    ap.add_argument("--max-seconds", type=float, default=STANDART_BYUDJET,
+                    help="Vaqt byudjeti. Tugaganda TOZA to'xtaydi va qolgani keyingi yurishga qoladi (0 = cheksiz)")
     ap.add_argument("--quiet", action="store_true", help="Har fayl uchun satr chiqarmaydi")
     ap.add_argument("--dsn", default=os.environ.get("XT_DB_DSN"))
     args = ap.parse_args()
+
+    global _TOXTATGICH
+    _TOXTATGICH = ish.Toxtatgich(getattr(args, 'max_seconds', 0) or None)
+    _TOXTATGICH.signallarni_ulash()
 
     if not args.dsn:
         sys.exit("XATO: DSN yo'q. --dsn yoki XT_DB_DSN o'rnating.")
@@ -943,11 +1005,34 @@ def main() -> None:
     print(f"      Taxminiy vaqt: ~{len(rows) * (REQUEST_DELAY + 1.2) / 60:.1f} daqiqa\n")
 
     session = requests.Session()
+    chiqish_qismam = False
     counts: Dict[str, int] = {}
     total_chars = 0
     downloaded = 0
 
     for i, row in enumerate(rows, 1):
+        # VAQT BYUDJETI / TO'XTASH SO'ROVI — TOZA CHIQISH.
+        #
+        # NEGA QO'SHILDI (2026-09-03). Bu quvurdagi ENG SEKIN qadam
+        # (to'liq qamrov ~25 daqiqa), lekin `etl_uzex.py` va
+        # `etl_details.py` dan farqli o'laroq unda byudjet YO'Q edi.
+        # Oqibati o'lchangan: `LastTaskResult=0xC000013A`
+        # (STATUS_CONTROL_C_EXIT) — host CTRL+C yuborganda qadam
+        # FAYL O'RTASIDA o'lardi.
+        #
+        # `ish.Toxtatgich` SIGINT/SIGBREAK/SIGTERM ni ham ushlaydi,
+        # ya'ni o'sha CTRL+C endi O'LIM emas, TOZA TO'XTASH bo'ladi:
+        # joriy fayl tugatiladi, qolgani keyingi yurishga qoladi.
+        # Navbatning o'zi checkpoint vazifasini bajaradi — ishlangan
+        # hujjat `tender_document_text` da qator qoldiradi va
+        # `fetch_targets()` uni boshqa tanlamaydi.
+        if _TOXTATGICH is not None and _TOXTATGICH.toxtaymi():
+            sabab = _TOXTATGICH.sabab or "toxtatildi"
+            chiqish_qismam = True
+            print(f"\n[!] TO'XTASH ({sabab}): {i - 1}/{len(rows)} bajarildi. "
+                  "Navbat saqlanadi — keyingi yurish qolganidan davom etadi.")
+            break
+
         # ISH BOSHLANGANINI DARHOL BELGILAYMIZ. Jarayon o'rtada
         # o'ldirilsa holat `yuklanmoqda` bo'lib qoladi — bu HALOL
         # ("boshlandi, tugamadi") va keyingi yurish uni qayta oladi.
@@ -990,6 +1075,12 @@ def main() -> None:
     print(f"      -> qo'lda tekshirish talab etiladi: {manual}")
     if args.dry_run:
         print("      (--dry-run — DBga yozilmadi)")
+
+    # QISMAN tugash XATO EMAS va MUVAFFAQIYAT ham emas. `run_etl.py`
+    # `7` ni `partial` deb o'qiydi va navbat keyingi yurishda davom
+    # etadi — "hammasi bajarildi" degan YOLG'ON chiqmaydi.
+    if chiqish_qismam:
+        sys.exit(CHIQISH_QISMAN)
 
 
 if __name__ == "__main__":

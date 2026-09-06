@@ -56,6 +56,7 @@ Inson tasdig'i aynan shuni ushlaydi.
 """
 import json
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Sequence
 
 from api import categories as C
@@ -333,12 +334,22 @@ def taklif_yoz(company_id: int, product_id: int,
 
 
 def tasdiqla(company_id: int, product_id: int, code: str, kim: str,
-             qaror_id: Optional[int] = None) -> bool:
-    """Inson tasdig'i. `kim` — `company_account.username`, MAJBURIY.
+             qaror_id: Optional[int] = None, *,
+             ishonch: str, actor_id: Optional[int] = None) -> bool:
+    """Tasdiq yoziladi. `ishonch` MAJBURIY va standart qiymati YO'Q.
 
-    `kim` bo'sh bo'lsa baza CHECK bilan rad etadi
-    (`catalog_product_code_tasdiq_odam`) — bu ataylab: tasdiq odamsiz
-    yozilmasin.
+    O'LCHANGAN NUQSON (2026-09-02). Ilgari yagona shart `kim` bo'sh
+    bo'lmasligi edi va u MASHINANI TO'XTATMASDI: bazada 1 048 ta
+    "tasdiq" bor edi, `tasdiqlagan` ustunida atigi ikki qiymat
+    ('tizim:auto' va 'kompaniya') va ular 16 ta turli sekundda
+    yozilgan — ya'ni ~34 va ~290 qator/sekund. Bo'sh bo'lmagan
+    satr ODAM degani emas.
+
+    Endi MANBA yoziladi va u bazada tekshiriladi
+    (`catalog_product_code_tasdiq_manba_chk`). `ishonch` ning
+    standart qiymati ATAYLAB yo'q: har chaqiruvchi kim nomidan
+    yozayotganini OSHKOR aytishi shart. Avtomatika ham yoza oladi,
+    lekin `servis` deb belgilanadi va inson ulushiga KIRMAYDI.
     """
     if not (kim or "").strip():
         raise xatolar.Xato("FIELD_REQUIRED", {"maydon": "kim"})
@@ -348,25 +359,35 @@ def tasdiqla(company_id: int, product_id: int, code: str, kim: str,
     row = db.execute_returning(
         "UPDATE catalog_product_code "
         "SET tasdiqlandi = now(), tasdiqlagan = %(kim)s, rad_etildi = NULL, "
+        "    tasdiq_ishonch = %(ish)s, tasdiq_actor_id = %(aid)s, "
         # `COALESCE` — mavjud bog'lanish YO'QOLMAYDI: qayta tasdiqlash
         # audit izini o'chirib yubormasin.
         "    qaror_id = COALESCE(%(q)s, qaror_id) "
         "WHERE product_id = %(p)s AND code = %(k)s AND company_id = %(c)s "
         "RETURNING product_id",
         {"p": product_id, "k": code, "c": company_id, "kim": kim.strip(),
-         "q": qaror_id})
+         "q": qaror_id, "ish": ishonch, "aid": actor_id})
     return row is not None
 
 
-def rad_et(company_id: int, product_id: int, code: str) -> bool:
-    """Inson rad etdi. Qator O'CHIRILMAYDI — aks holda keyingi taklif
-    uni qayta chiqarardi va inson bir ishni takror qilardi."""
+def rad_et(company_id: int, product_id: int, code: str, *,
+           ishonch: str, actor_id: Optional[int] = None) -> bool:
+    """Taklif rad etildi. Qator O'CHIRILMAYDI — aks holda keyingi
+    taklif uni qayta chiqarardi va inson bir ishni takror qilardi.
+
+    RAD ETISH HAM QAROR. Ilgari bu yo'lda umuman hech qanday
+    kimlik yozilmasdi (`tasdiqlagan` NULL ga tushardi), ya'ni
+    "kim rad etdi" degan savol JAVOBSIZ edi. Endi tasdiq bilan
+    AYNI qoida.
+    """
     row = db.execute_returning(
         "UPDATE catalog_product_code "
-        "SET rad_etildi = now(), tasdiqlandi = NULL, tasdiqlagan = NULL "
+        "SET rad_etildi = now(), tasdiqlandi = NULL, tasdiqlagan = NULL, "
+        "    tasdiq_ishonch = %(ish)s, tasdiq_actor_id = %(aid)s "
         "WHERE product_id = %(p)s AND code = %(k)s AND company_id = %(c)s "
         "RETURNING product_id",
-        {"p": product_id, "k": code, "c": company_id})
+        {"p": product_id, "k": code, "c": company_id,
+         "ish": ishonch, "aid": actor_id})
     return row is not None
 
 
@@ -425,6 +446,45 @@ def moslik(company_id: int, only_open: bool = True,
                                                  if product_ids else None)})
 
 
+#: "Sizga mos" bo'limi qancha tenderni ko'rib chiqadi.
+#:
+#: `POST /catalog/match` va navbat filtrlari SHU BITTA raqamni
+#: ishlatadi. Ikki joyda ikki xil chegara turgan bo'lsa "Sizga
+#: mos" da ko'ringan tender navbat filtrida CHIQMASLIGI mumkin
+#: edi — va sabab hech qayerda ko'rinmasdi.
+MOSLIK_LIMIT = 1000
+
+
+def mos_tender_idlari(company_id: int, only_open: bool = True) -> set:
+    """"Sizga mos" bo'limidagi tenderlarning id lari — YAGONA manba.
+
+    NEGA ALOHIDA FUNKSIYA (2026-09-03). Bu ta'rifni endi UCH joy
+    so'raydi: `POST /catalog/match` (ro'yxatning o'zi), broker
+    navbati filtri va ko'rik navbati filtri. Har biri o'zicha
+    hisoblasa ular ASTA-SEKIN ajralib ketardi — bu loyihada
+    aynan shunday bo'lgan: hudud qoidasi ikki joyda yozilgani
+    uchun "Sizga mos" va navbat boshqa-boshqa javob berardi.
+
+    FAQAT KOD YO'LI. `/catalog/match` da matn yo'li ham bor, lekin
+    u `include_probable=true` bo'lgandagina qo'shiladi va interfeys
+    uni STANDART holda YUBORMAYDI. Ya'ni foydalanuvchi ko'radigan
+    "Sizga mos" — aynan shu to'plam. Matn yo'lini bu yerga qo'shish
+    filtrni ro'yxatdan KENGROQ qilardi.
+
+    KATALOG KODLANMAGAN bo'lsa BO'SH to'plam qaytadi. Chaqiruvchi
+    buni "moslik yo'q" deb emas, "katalog hali kodlanmagan" deb
+    ko'rsatishi kerak — ikkisi butunlay boshqa holat.
+    """
+    from api import queries
+
+    prods = db.query(queries.CATALOG_LIST_SQL, {"company_id": company_id})
+    if not prods:
+        return set()
+    rows = moslik(company_id, only_open=only_open, limit=MOSLIK_LIMIT,
+                  product_ids=[p["id"] for p in prods])
+    return {r["tender_id"] for r in rows}
+
+
 #: Bitta tenderning MOS POZITSIYALARI — dalil bilan.
 #:
 #: NEGA POZITSIYA QAYTADI: broker "bu tender menga mos" degan da'voni
@@ -460,11 +520,18 @@ ORDER BY g.tender_id, g.good_code
 ATRIBUT_CHEGARA = 0.05
 
 
-def _uchliklar(s: str) -> set:
+@lru_cache(maxsize=32768)
+def _uchliklar(s: str) -> frozenset:
+    """Belgi-uchliklar to'plami. KESHLANADI — sof funksiya.
+
+    `frozenset` qaytadi: chaqiruvchi to'plamni o'zgartirsa kesh
+    zaharlanardi.
+    """
     s = f"  {(s or '').lower().strip()}  "
-    return {s[i:i + 3] for i in range(len(s) - 2)}
+    return frozenset(s[i:i + 3] for i in range(len(s) - 2))
 
 
+@lru_cache(maxsize=65536)
 def _ozgarish(katalog_nomi: str, pozitsiya: str) -> float:
     """Katalog nomi va tender pozitsiyasining o'xshashligi, 0..1.
 
@@ -520,8 +587,11 @@ def pozitsiya_moslik(company_id: int,
         else:
             # Bir kodni bir necha mahsulot baham ko'rgan -> pozitsiya
             # nomiga eng yaqinini tanlaymiz.
-            eng = max(lst, key=lambda r: _ozgarish(r["product_name"], poz))
-            skor = _ozgarish(eng["product_name"], poz)
+            # BALL BIR MARTA hisoblanadi. Ilgari `max(key=...)` har
+            # da'vogar uchun hisoblardi, so'ng g'olib uchun YANA bir
+            # marta — ya'ni N+1 chaqiruv. Endi juftlik saqlanadi.
+            skor, eng = max(((_ozgarish(r["product_name"], poz), r)
+                             for r in lst), key=lambda t: t[0])
             if skor < ATRIBUT_CHEGARA:
                 # SIGNAL YO'Q -> TAXMIN QILMAYMIZ. Pozitsiya ko'rsatiladi,
                 # mahsulot nomi esa NULL. Tasodifiy nom yopishtirish
@@ -1268,7 +1338,8 @@ def qaror_yoz(company_id: int, kalit: str, atama: str, qaror: str,
 
 
 def atamaga_kod_biriktir(company_id: int, kalit: str, code: str,
-                         kim: str, qaror_id: Optional[int] = None) -> int:
+                         kim: str, qaror_id: Optional[int] = None, *,
+                         ishonch: str, actor_id: Optional[int] = None) -> int:
     """Kalitga tegishli MAHSULOTLARGA kodni biriktiradi. Qaytadi: soni.
 
     `qaror_id` — AUDIT IZI: bu biriktirma QAYSI inson qaroridan
@@ -1299,7 +1370,8 @@ def atamaga_kod_biriktir(company_id: int, kalit: str, code: str,
         if _atama.normal(xom) != kalit:
             continue
         taklif_yoz(company_id, p["id"], [{"code": code, "skor": None}])
-        if tasdiqla(company_id, p["id"], code, kim=kim, qaror_id=qaror_id):
+        if tasdiqla(company_id, p["id"], code, kim=kim, qaror_id=qaror_id,
+                    ishonch=ishonch, actor_id=actor_id):
             n += 1
     return n
 

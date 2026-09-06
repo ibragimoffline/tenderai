@@ -368,6 +368,35 @@ def _tolov(talablar: List[dict], profil: dict,
             "dalillar": dalillar}
 
 
+def hudud_mos(area_path: Optional[str],
+              regions: Optional[List[str]]) -> Optional[bool]:
+    """Tender hududi kompaniya e'lon qilgan hududlar ichidami.
+
+    `None` = O'LCHAB BO'LMAYDI — cheklov qo'yilmagan yoki tenderning
+    hududi noma'lum. Bu "mos emas" DEGANI EMAS: interfeysda ham,
+    malaka tekshiruvida ham ikkisi boshqacha ko'rsatiladi.
+
+    NEGA ALOHIDA FUNKSIYA (2026-09-03). Shu qoida ikki joyda kerak:
+    malaka tekshiruvi (`_hudud`) va katalog mosligi (`/catalog/match`
+    dagi belgi). Ikki joyda YOZILSA ajralib ketardi va aynan shu
+    ajralish foydalanuvchi ko'rgan nomuvofiqlikni keltirib chiqargan
+    edi: "Sizga mos" hududni umuman hisobga olmasdi, navbat esa uni
+    QATTIQ to'siq sifatida qo'llardi. Natijada katalogga mos 28
+    tenderdan 11 tasi navbatda ko'rinmasdi va SABABI hech qayerda
+    aytilmasdi.
+
+    PREFIKS bo'yicha: `33.2137` (Toshkent shahri) `33.2137.2138.2142`
+    (uning tumani) ni ham qamrab oladi. Oddiy `startswith` YETMAYDI —
+    u `33.21` ni `33.2137` ga ham moslashtirardi, ya'ni boshqa
+    viloyat "mos" bo'lib chiqardi. Shuning uchun nuqta TALAB
+    QILINADI.
+    """
+    if not regions or not area_path:
+        return None
+    return any(area_path == r or area_path.startswith(r + ".")
+               for r in regions)
+
+
 def _hudud(profil: dict, tender: dict) -> Dict[str, Any]:
     regions = profil.get("regions") or []
     area = tender.get("area_path") or ""
@@ -378,7 +407,7 @@ def _hudud(profil: dict, tender: dict) -> Dict[str, Any]:
     if not area:
         return {"status": "malumot_yoq",
                 "izoh": "Tender hududi ko'rsatilmagan.", "dalillar": []}
-    hit = any(area == r or area.startswith(r + ".") for r in regions)
+    hit = hudud_mos(area, regions)
     return {"status": "ok" if hit else "fail",
             "izoh": f"Tender hududi {area}, kompaniya {regions} -> "
                     + ("MOS" if hit else "MOS EMAS"),

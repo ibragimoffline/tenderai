@@ -10,6 +10,18 @@ import {
 } from '@/components/ui/select'
 import type { Category, Region, Status } from '@/types'
 
+// KORPUSDA MAVJUD VALYUTALAR.
+//
+// O'LCHANGAN NUQSON (2026-09-02): ro'yxat `UZS` va `USD` bilan
+// QOTIRILGAN edi, korpusda esa `EUR` (4 ta ochiq tender) va `CNY`
+// (1 ta) ham bor — ya'ni ular filtr orqali UMUMAN topilmasdi va
+// foydalanuvchi ularni "yo'q" deb o'qirdi.
+//
+// Ro'yxat hali ham qo'lda, lekin endi u QO'RIQLANADI:
+// `_tests/valyuta_test.py` bazadagi valyutalarni shu ro'yxat bilan
+// solishtiradi va yangi valyuta paydo bo'lsa YIQILADI.
+export const CURRENCIES = ['UZS', 'USD', 'EUR', 'CNY'] as const
+
 const SORT_OPTIONS: { value: string; label: TKey }[] = [
   { value: 'close_at', label: 'filters.sort.deadline' },
   { value: '-totalcost', label: 'filters.sort.cost' },
@@ -120,8 +132,9 @@ export default function Filters({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL}>{t('filters.currency')}</SelectItem>
-          <SelectItem value="UZS">UZS</SelectItem>
-          <SelectItem value="USD">USD</SelectItem>
+          {CURRENCIES.map((c) => (
+            <SelectItem key={c} value={c}>{c}</SelectItem>
+          ))}
         </SelectContent>
       </Select>
 

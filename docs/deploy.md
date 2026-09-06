@@ -107,6 +107,9 @@ olmasligi kerak.
 ## 5. Joylashtirish
 
 ```bash
+# 0) SOZLAMA TEKSHIRUVI — namunadan qolgan qiymatlarni ko'rsatadi
+deploy/bin/oldindan-tekshir.sh staging
+
 # 1) STAGING — har doim birinchi
 git push server main:refs/heads/main          # yoki: git push server v1.2.3
 deploy/bin/deploy.sh staging v1.2.3
@@ -126,6 +129,8 @@ joylashtiruvi **sog'liq tekshiruvidan o'tgach** o'zi yozadi.
 
 ### Joylashtirish qadamlari
 
+0. **Sozlama tekshiruvi** (`oldindan-tekshir.sh`) — to'ldirilmagan
+   qiymat bo'lsa **hech narsa qilinmasdan** to'xtaydi (§5b)
 1. `git archive` → yangi reliz katalogi (`releases/<vaqt>-<ref>`)
 2. `python -m venv` + `pip install -r requirements-api.txt`
 3. **Muhit fayli o'qiladi** (`/etc/tenderai/<muhit>.env`) va
@@ -139,6 +144,81 @@ joylashtiruvi **sog'liq tekshiruvidan o'tgach** o'zi yozadi.
 7. `systemctl restart tenderai-api@<muhit>` + timer'lar
 8. **Sog'liq tekshiruvi** — o'tmasa **avtomatik orqaga qaytariladi**
 9. Eski relizlar: oxirgi 5 tasi qoladi
+
+---
+
+## 5b. Sozlama tekshiruvi — namunadan qolgan qiymatlar
+
+**O'lchangan bo'shliq (2026-09-03).** `bootstrap.sh` muhit faylini
+**namunadan** nusxalaydi va shu holda qoldiradi. Serverda
+`password=REPLACE`, `example.uz` va namunaviy bcrypt xeshi bilan
+turgan sozlama **butunlay normal** ko'rinadi — hech narsa uni
+"to'ldirilmagan" deb belgilamaydi.
+
+Ular ilgari **kech** yoki **umuman** ko'rinmasdi:
+
+| Qiymat | Ilgari qachon ko'rinardi |
+|---|---|
+| `password=REPLACE` | 5-qadamda (migratsiya) — `venv` va frontend qurilgandan **keyin**, ~4-5 daqiqa |
+| `example.uz` (`APP_PUBLIC_URL`) | **HECH QACHON.** Joylashtirish o'tardi, havolalar mavjud bo'lmagan domenga ketaverardi |
+| Namunaviy bcrypt xeshi | Caddy qayta yuklanganda — **HTTPS ikkala domen uchun ham o'lardi** |
+| `API_PORT` ≠ Caddy porti | Ishlaganда: Caddy **502**, xizmat esa **sog'lom** ko'rinardi |
+
+```bash
+deploy/bin/oldindan-tekshir.sh production
+```
+
+`deploy.sh` uni **birinchi qadamda** chaqiradi — arxiv ochilishidan
+ham oldin. To'siq bo'lsa **hech narsa yaratilmaydi**.
+
+### Uch daraja
+
+| Daraja | Ma'nosi | Joylashtirish |
+|---|---|---|
+| `TO'SIQ` | bu qiymat bilan xizmat **ishlamaydi** yoki noto'g'ri ishlaydi | **to'xtaydi** |
+| `ogohlantirish` | xizmat ishlaydi, **himoya qatlami yo'q** | davom etadi |
+| `tekshirilmadi` | **o'lchab bo'lmadi** (asbob yo'q) | davom etadi |
+
+Uchinchisi `production_gate.py` dagi `BLOKLANGAN` bilan **ayni
+mantiq**: o'lchay olmaslik "o'tdi" **emas**. Caddy hali
+o'rnatilmagan bo'lsa port mosligi haqida **jim qolmaydi** —
+"tekshirilmadi" deb yoziladi, "port mos" degan yolg'on xulosa
+chiqmaydi.
+
+**Birinchi to'siqda to'xtamaydi:** operator hamma bo'shliqni **bir
+yurishda** ko'rsin. **Sir chop etmaydi** — faqat kalit nomlari
+(chiqish jurnalga tushadi).
+
+### Nima tekshiriladi
+
+1. **Tirnoq** — bo'shliqli qiymat tirnoqsiz bo'lsa `systemd` butun
+   qatorni oladi, shell esa birinchi bo'shliqda **kesadi** (§13.1).
+   O'sha safar faqat `XT_DB_DSN` tuzatilgandi; endi tekshiruv
+   **har qanday** qiymatga tegadi.
+2. **Huquq** — 0640 dan ochiq bo'lsa **ogohlantirish** (xizmat
+   ishlayveradi, shuning uchun to'siq emas).
+3. **Majburiy qiymatlar** — `APP_ENV` mosligi, `APP_PUBLIC_URL`
+   (HTTPS, mahalliy emas, namunaviy emas), ikkala DSN, `VITE_*`
+   nisbiyligi, production uchun `API_DOCS=0`,
+   `AUTH_COOKIE_SECURE=1`, `TRUST_PROXY=1`. Ikkala DSN **ayni**
+   bo'lsa to'siq: ilova DDL huquqi bilan ishlardi.
+4. **Bazaga ulanish** — `psql` bilan **haqiqatan** ulanadi va
+   `pgvector` borligini tekshiradi. Noto'g'ri host yoki `pg_hba`
+   faqat shunda ko'rinadi.
+5. **Caddy** — namunaviy domen/xesh, `APP_PUBLIC_URL` uchun sayt
+   bloki bor-yo'qligi, **port mosligi**, staging'da `basic_auth`.
+6. **Himoya qatlamlari** — zaxira katalogi (`backup.sh` ishlatadigan
+   **aynan** `${BACKUP_DIR}/<muhit>`, ota-katalog emas),
+   `BACKUP_REMOTE_CMD`, ogohlantirish kanali, `AI_PAID_ENABLED`.
+
+### Mashq qilindi
+
+`_tests/deploy_test.py` 17-bo'limi skriptni **yurgizadi**, o'qimaydi:
+xom namuna (rad etiladi va **nima** to'ldirilmagani nomma-nom
+ko'rsatiladi), to'ldirilgan sozlama (**0 to'siq**), tirnoqsiz DSN,
+port nomuvofiqligi, `basic_auth` siz staging va Caddyfile yo'qligi.
+`deploy.sh` uni `git archive` dan **oldin** chaqirishi ham
+qulflangan.
 
 ---
 

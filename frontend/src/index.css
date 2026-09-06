@@ -432,3 +432,11 @@
   border: 0;
   border-top: 1px solid var(--border);
 }
+
+/* AI yordamchi logotipi — sekin aylanadigan gradient.
+   `motion-safe:` bilan chaqiriladi, ya'ni `prefers-reduced-motion`
+   yoqilgan bo'lsa umuman yurmaydi. */
+@keyframes tai-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

@@ -5705,6 +5705,251 @@ hujjat, 0.31 GB.
 
 ---
 
+### 16.69 BITTA STANDART UCH JOYDA — AI KVOTASI (2026-09-04)
+
+`v_routing_agreement` ni ko'rib chiqishda yonidan chiqdi. Oylik AI
+byudjetining standarti **`50.00`** uchta mustaqil joyda yozilgan:
+
+| Joy | Shakl |
+|---|---|
+| `schema_patch_ai_chat.sql` → `v_ai_spend_current` | `COALESCE(q.monthly_usd, 50.00)` |
+| `api/ai_chat.py` → `SQL_QUOTA_CHECK` | `COALESCE(q.monthly_usd, 50.00)` |
+| `api/ai_chat.py` → `spend()` fallback | `{"limit_usd": 50.00}` |
+
+**Bugun zarar yo'q:** uchtasi ham bir xil. Xavf — o'zgartirishda.
+Kimdir limitni ko'tarsa, ehtimol bittasini topadi: `check_quota()`
+yangi chegara bilan o'tkazadi, interfeys esa eskisini ko'rsatadi
+(yoki teskarisi). Bu **"bir tuzatish, ikki chaqiruv joyi"** sinfi —
+`notify.py` da allaqachon bo'lgan.
+
+**Yechim `MOSLIK_MIN` naqshi bo'yicha:** bitta nomlangan doimiy
+(`ai.KVOTA_STANDART`), SQL unga parametr sifatida oladi yoki
+`ai_quota` ga `DEFAULT` qo'yiladi va `COALESCE` umuman olib
+tashlanadi. Ikkinchisi afzal: standart **bazada** turadi va uch
+joyning ikkitasi kerak bo'lmay qoladi.
+
+**Nega hozir tuzatilmadi:** navbat aralashmasin (§2.2 →
+`get_analysis` → kontekst blok → tugma). Belgi
+`api/ai_chat.py` da `TODO(§16.69)` bilan qo'yilgan, ya'ni
+`etl_coverage_test` uni ochiq ish sifatida sanaydi — oddiy
+izoh bo'lib qolmaydi.
+
+**Yonidagi ochiq belgi:** `TODO(§16.67)` — `detection`
+statistikasida minimal namuna sharti yo'q (`median_hours`).
+2026-09-04 da `n = 784`, xavf yo'q; lekin bu `MOSLIK_MIN` uchun
+**to'rtinchi** joy bo'ladi va u ham shu doimiyga ulanishi kerak.
+
+---
+
+### 16.70 QAMROV OGOHLANTIRISHI NIMA KESILGANINI AYTSIN (2026-09-04)
+
+**Qoida:** ikki xil to'liqsizlik — ikki xil jumla. Umumiy "to'liq
+emas" ogohlantirishi tuynukni **yashiradi**: o'qiganda "qamrov
+haqida aytilgan" degan taassurot beradi, holbuki u boshqa savolga
+javob beradi. Bu 12-sinfning nozik ko'rinishi — ogohlantirish
+to'g'ri, faqat boshqa savolga.
+
+Bir navbatda **uchta nusxa** topildi:
+
+| Joy | Nima kesilardi | Nima deyilardi |
+|---|---|---|
+| `ai_chat._t_get_my_catalog` | 1798 dan 200 ta | hech narsa (`count` = 1798) |
+| `requirement.prompt_block` | 44 dan 40 ta | "hujjatning BARCHASI emas" — *ajratilmagan* shartlar haqida |
+| `ai_docs.prompt_block` | 30 dan 8 ta FAYL | "talab o'zaklari atrofidagi bo'laklar" — *hujjat ichidagi* kesim haqida |
+
+Ikkinchisi va uchinchisi **pullik yo'lda** (Go/No-Go prompti) va
+shuning uchun jiddiyroq: chatdagi noto'g'ri javobni foydalanuvchi
+qayta so'raydi, Go/No-Go dagisini esa **tasdiqlaydi** — hukm
+brokerning ekraniga `go` bo'lib chiqadi.
+
+**Mexanizm:** `ai_chat.kesim()` — `korsatildi`/`jami`/`kesildi`
+juftligi. `kesildi` uch qiymat oladi va ular aralashmaydi:
+`0` (aniq kesilmagan), `n` (aniq son), `null` (**bilmaymiz** —
+jami o'lchanmagan). Uchinchisida ham matn beriladi: "bilmaymiz"
+ham to'ldiriladigan bo'shliq.
+
+`ai_docs` dagi shox jonli ma'lumotda hozir **uchramaydi** (8 dan
+ko'p *o'qiladigan* hujjatli tender yo'q) — soxta `meta` bilan
+tekshirilgan. Bu profilaktik tuzatish va shundayligi ochiq
+aytiladi.
+
+### 16.71 OCHIQ QOLGAN: `requirement_test` "usul ko'rsatilgan"
+
+`prompt_block` ning `usul` (naqsh/model) ko'rsatishi bo'yicha
+tekshiruv yiqiladi. Bu **tugallanmagan ish** — `api/requirement.py`
+va `_tests/requirement_test.py` ikkalasi ham tahrir ostida.
+
+Yozib qo'yilgani "ma'lum cheklov" ga aylanmasligi uchun: 2026-09-04
+holatiga `requirement_test` **234/235**, yagona yiqilgan tekshiruv
+shu. Tugatilgach bu bo'lim o'chiriladi.
+
+**Yopilgani (shu navbatda):** `_bosh_ochiq_tender()` fikstura
+hovuzi qurigan edi — 48 soatda 263 tender yopilgan va "ochiq +
+talabsiz" tender 3 taga tushgan; sinovning oldingi bo'limlari
+o'shalarni band qilgach, G bo'limi yiqilardi. Sinov endi o'z
+tenderini O'ZI yaratadi (`ZZ_TENDER_ID`, `ZZTEST-` nomi) va
+oxirida o'chiradi. Bu YANGI SINF edi: sinov kodga emas, **hovuz
+holatiga** bog'liq.
+
+---
+
+### 16.72 SINOV ILOVA ROLI BILAN YURSIN (2026-09-04)
+
+**Topilma:** `.env` `postgres` (SUPERUSER) bilan ulanadi. Superuser
+huquq tekshiruvlarini chetlab o'tadi, ya'ni grant asosidagi
+himoyalar **hech qachon sinalmagan**. `auth_test` da ERP chegarasi
+uchun ikki shox bor — huquq bilan yopiq (kuchli) va sanoqni
+solishtirish (zaif) — va doim **zaifi** ishlagan. Yashil natija
+haqiqiy chegarani emas, uning zaxira yo'lini tasdiqlagan.
+
+Bu `tsc --noEmit -p tsconfig.json` bilan bir sinf, xavfliroq
+ko'rinishda: u yerda tekshiruv yo'q edi, bu yerda tekshiruv bor,
+lekin **himoyasiz shox** tekshirilgan.
+
+**Yechim:** `DB_SET_ROLE=tai_app`. `tai_app` da
+`rolcanlogin = false` va a'zosi yo'q — u bilan **ulanib
+bo'lmaydi**. `SET ROLE` ulanishni talab qilmaydi va superuser
+imtiyozini shu sessiya uchun tushiradi. Hovuzga qaytganda
+`RESET ROLE`; bajarilmasa ulanish **yopiladi**.
+
+**Natija (o'lchandi):** `auth_test` birinchi marta huquq shoxidan
+o'tdi — `131/131`, va uchta tekshiruv "huquq bilan yopiq" deb
+yozildi. Yon ta'siri: ERP loyihasining o'z sinovi bazaga
+aralashsa ham `erp.opportunity` sanoq oynasi endi umuman
+ishlatilmaydi.
+
+**Supurish nima topdi:**
+
+| To'plam | Topilma |
+|---|---|
+| `xavfsizlik_test` | superuserni **ko'rgan**, `print` bilan aytgan, `check()` chaqirmagan — yashil qaytargan. Yonida `production_gate` to'g'ri gapni aytib turardi (13-sinf). Endi tekshiruv. |
+| `aktor_test` | `audit_jurnal` UPDATE/DELETE **huquq** bilan to'siladi, sinov esa faqat **trigger** xabarini tanirdi. Himoya kuchliroq, sinov yiqilardi. |
+
+**QOIDA:** himoya sinovi **natijani** tekshirsin, **mexanizmni**
+emas. Aks holda himoya kuchaysa sinov yiqiladi va kimdir uni
+"tuzatib" zaiflashtiradi.
+
+**OCHIQ QOLGAN — production uchun:** `SET ROLE` sinov muhiti uchun
+to'g'ri yaqinlashuv, lekin sessiya baribir `postgres` sifatida
+boshlanadi — `SECURITY DEFINER` funksiyalar, `search_path` va
+ba'zi sessiya sozlamalari boshqacha bo'lishi mumkin. Ishlab
+chiqarishda `rolcanlogin = true` bo'lgan **alohida login rol**
+kerak (`tai_app` a'zosi) va `XT_DB_DSN` o'shanga o'tadi.
+`production_gate` allaqachon superuserni FAIL deb belgilaydi.
+
+---
+
+### 16.73 BITTA O'LCHOV TUYNUGI — OLTITA TOPILMA (2026-09-04)
+
+5-sinfning ("izoh himoya deb hisoblangan") eng uzun zanjiri, va u
+bitta savoldan boshlandi: **bu yashil raqam nechta narsani ko'rdi?**
+
+| # | Topilma | Qanday ochildi |
+|---|---|---|
+| 1 | `tsc --noEmit -p tsconfig.json` — **0 fayl**, `exit 0`. Butun sessiya davomida "TSC=0" deb hisobot berilgan | Lokal fayl buzilganda `tsc` 0 qaytardi, xatoni **vitest** tutdi |
+| 2 | `run_tests.py` filtrlangan yurish o'zini **to'liq** deb ko'rsatardi | 1-topilma "qamrov aytilsin" qoidasini bergach, o'sha savol shu yerga qo'yildi |
+| 3 | `production_gate` eski formatdagi xulosani **jimgina** qabul qilardi | 2 ni yozgach: "eski xulosa nima bo'ladi?" |
+| 4 | Sinovlar **SUPERUSER** bilan yuradi — grant asosidagi himoyalar hech qachon sinalmagan | 3-to'siq eski xulosani yiqitganda darvoza yonida `rol: postgres · superuser: True` deb turardi |
+| 5 | `xavfsizlik_test` superuserni **ko'rgan**, `print` bilan aytgan, `check()` chaqirmagan — yashil qaytargan | 4 ni tuzatgach: "boshqa sinovlar ham rolga bog'liqmi?" degan supurish |
+| 6 | `aktor_test` `audit_jurnal` himoyasini **mexanizm** bo'yicha tekshirardi (trigger xabari), huquq esa triggergacha to'sadi | `tai_app` bilan to'liq yurish |
+
+**Har biri oldingisidan chiqdi**, va hech biri "yangi xato" emas
+edi: hammasi allaqachon bor, faqat **ko'rinmas**. Boshlanish
+nuqtasi bitta — qamrov aytilmagani.
+
+**QOIDA:** o'lchov natijasi yonida **qamrov raqami** bo'lsin.
+`0 xato` bilan `0 fayl, 0 xato` bir xil ko'rinmasin. Bu
+`multitenant` skanerida (69 → 139 funksiya) allaqachon
+o'rganilgan edi — yangisi shuki, **hisobot qatlamiga** ham
+tegishli: yashil raqam yetkazilganda, uning maxraji ham
+yetkazilsin.
+
+**Mexanizmlar (shu navbatda qurilgani):**
+
+| Qayerda | Nima |
+|---|---|
+| `production_gate._tsc_qamrovi()` | `tsc` nechta loyiha faylini ko'rgani; `< 20` bo'lsa FAIL |
+| `run_tests.py` | `toplam_jami/toplam_mavjud`, o'tkazib yuborilganlar nomma-nom |
+| `run_tests.py` | maxraj oldingi yurishdan kam bo'lsa ogohlantiradi |
+| `run_tests.py` | `rol` yoziladi; tekshiruv soni **faqat bir xil rol ichida** taqqoslanadi |
+| `production_gate` | qamrov o'lchanmagan / to'plam yo'qolgan / tekshiruv yo'qolgan / rol superuser — to'rttasi ham FAIL |
+
+**Nega rol ichida:** `postgres` bilan 3402, `tai_app` bilan 3280
+tekshiruv. Farq **almashish**, yo'qotish emas. Aralashtirib
+solishtirish qo'riqchini yolg'on qilardi — `tai_app` dan
+`postgres` ga o'tilganda son OSHADI va "hammasi joyida" deb
+ko'rinardi.
+
+**Qo'shimcha tasdiq:** `multitenant_test` grantga TAYANMAYDI
+(31/31 ikkala rolda ham) — ya'ni J1 dagi 46 so'rovlik IDOR ishi
+superuser ostida ham HAQIQIY narsani sinagan. Aks bo'lganda J1
+ning butun sinov bazasi soxta bo'lardi.
+
+**YETTINCHI HALQA — zanjirni qurayotgan kodda.** `rol` maydoni
+qo'shilgach u birinchi yurishda `NOMA'LUM` chiqdi: `run_tests.py`
+`.env` ni yuklamaydi (u faqat bola jarayonlarni ochadi va o'zi
+bazaga bormaydi). Ya'ni **o'lchov qo'shildi, hech qachon
+o'lchamadi** (3-sinf), va `NOMA'LUM` xato bo'lib ko'rinmasdi.
+
+**QOIDA:** yangi o'lchov maydoni qo'shilganda uning BIRINCHI
+yurishda HAQIQIY qiymat olgani tekshirilsin. Bu skanerni sinash
+va sinovni sinash qoidasining o'lchov maydonlariga ko'chirilgani:
+maydon bor-u doim `null`/`NOMA'LUM` bo'lsa — u o'lchov emas,
+bezak.
+
+**TUZATISH — mening o'z hisobotimda.** Avval "`tai_app` bilan
+3280, `postgres` bilan 3402 — ikki bazaviy raqam" deb aytgandim.
+Bu NOTO'G'RI edi: o'sha `3280` yurishda `auth_test` buzuq
+qo'riqchi bilan erta to'xtagan (hovuz ochilmasdan `rol_tekshir`
+chaqirilgan) va 131 o'rniga 11 tekshiruv bergan. Ikkala rejim
+ham aslida **3404** maxraj beradi; farq faqat `otdi` da
+(`postgres` 3402, `tai_app` 3403).
+
+Taqqoslashni rejim ichida qulflash BARIBIR to'g'ri — `erp_yopiq`
+shoxi tekshiruv SHAKLINI almashtiradi va kelajakda maxraj
+ajralishi mumkin. Ya'ni qoida **bugungi farqqa emas, mumkin
+bo'lgan farqqa** qurilgan. Lekin "ikki bazaviy raqam" da'vosi
+o'lchovga emas, **buzuq yurishga** tayangan edi.
+
+**BUZUQ YURISHDAN CHIQQAN RAQAM XULOSA ASOSIGA AYLANADI.**
+
+Bu alohida sinf va u SHU YERDA ikki qatlamdan o'tdi:
+
+    buzuq yurish  ->  hisobotga yozildi  ->  undan QOIDA chiqarildi
+
+`3280` raqami `auth_test` erta to'xtaganidan kelib chiqqan, lekin
+u "o'lchov" ko'rinishida yetkazilgan va uning ustiga qo'riqchi
+qoidasi asoslangan. Tuzatilmaganida u `xulosa.json` da abadiy
+qolardi va keyingi har taqqoslash uchun "asl holat" bo'lardi —
+11-sinf (tiklash mexanizmi qoldiqni abadiylashtiradi).
+
+**Tekshiruv:** yiqilgan yoki ERTA TO'XTAGAN yurishdan chiqqan
+raqamni bazaviy qiymat sifatida ishlatmang. `xulosa.json` da
+`yiqilgan` bo'sh emasmi — taqqoslashdan OLDIN shu so'raladi.
+Raqamni hisobotga yozayotganda ham: u qaysi yurishdan, o'sha
+yurish TO'LIQ tugaganmi?
+
+**RAQAM FAQAT FAYLDA EMAS — HISOBOT MATNIDA HAM YASHAYDI.**
+
+Bu suhbatda qoidaga aylangan raqamlarning ko'pi hech qanday
+faylda turmagan: `3280`, `123 sessiya`, `40 ta atama`,
+`6 bo'lak/s`. Ular hisobot matnida yozilgan, ya'ni
+**provenansi yo'q** — qaysi yurish, qaysi so'rov, qachon degan
+savolga javob qolmagan. `3280` ikki qatlamdan aynan shuning
+uchun o'tdi.
+
+**Shakl:** raqam QOIDAGA aylanayotganda manbasi ko'rsatilsin —
+bir qatorli havola yetarli:
+
+    3403/3404 (to'liq yurish, `DB_SET_ROLE=tai_app`, 2026-09-04,
+               `_test_natija/xulosa.json`)
+    1798 mahsulot (`CATALOG_LIST_SQL`, company_id=2, 2026-09-04)
+
+Og'ir emas, va u raqamni keyin QAYTA TEKSHIRISH mumkin qiladi.
+Provenanssiz raqam — qoidaning asosi bo'la olmaydi.
+
+---
+
 ## Qo'shimcha
 
 | Manba | Nima uchun |

@@ -4,14 +4,21 @@
 `notify` **2026-09-01 da ulandi** (T-1). Qolgan **ikki** qism
 **KEYINGA QOLDIRILGAN** va ular ishlayotgandek ko'rsatilmaydi.
 
-O'lchov sanasi: **2026-09-01**. Bazadagi `saved_search` qatorlari:
-**0 ta**.
+O'lchov sanasi: **2026-09-02**. Bazadagi `saved_search` qatorlari:
+**1 ta**.
+
+> **BIRINCHI HAQIQIY ISHLATISH** (2026-09-02). Asosiy kompaniyada
+> bitta qidiruv saqlangan ("Kompyuter test"). Bu sinov qoldig'i
+> emas — sinov hisoblari `zz` prefiksi bilan yuradi va tozalanadi.
+> Ya'ni "0 ta ishlatish" davri tugadi, lekin **bitta** qator hali
+> hech narsani isbotlamaydi: u imkoniyat topilishini ko'rsatadi,
+> foydali ekanini emas.
 
 ---
 
 ## 1. Nol ishlatishning ikki ma'nosi
 
-**0 ta** qator ikki xil narsani anglatishi mumkin va ular
+Nol yoki bir qator ikki xil narsani anglatishi mumkin va ular
 aralashtirilmasin:
 
 | Ma'no | Kim hal qiladi |

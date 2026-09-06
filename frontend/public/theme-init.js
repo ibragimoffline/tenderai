@@ -36,6 +36,11 @@
       window.matchMedia('(prefers-color-scheme: dark)').matches)
     if (dark) document.documentElement.classList.add('dark')
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+    // Manzil paneli rangi ham BIRINCHI BO'YASHDAN OLDIN qo'yiladi —
+    // aks holda qorong'i mavzuda panel bir lahza oq bo'lib turardi.
+    // Qiymatlar `src/theme.tsx` dagi `THEME_COLOR` bilan bir xil.
+    var tc = document.querySelector('meta[name="theme-color"]')
+    if (tc) tc.setAttribute('content', dark ? '#11151e' : '#f6f8fc')
     var l = localStorage.getItem('tender-ai:lang')
     if (l === 'ru' || l === 'en' || l === 'uz') document.documentElement.lang = l
   } catch (e) { /* localStorage yopiq — standart yorug' mavzu */ }

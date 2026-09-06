@@ -23,7 +23,7 @@ interface TenderDrawerProps {
   onClose: () => void
   onOpenDocuments?: (docType: string) => void
   /** AI-Chat ni SHU TENDER kontekstida ochish. */
-  onAskAi?: (tenderId: number) => void
+  onAskAi?: (tenderId: number, manba?: 'panel' | 'gonogo') => void
 }
 
 // O'ng tomondagi tafsilot paneli: lotlar + tovarlar. match berilsa ball/sabab ham.
@@ -157,7 +157,8 @@ export default function TenderDrawer({ id, match, onClose, onOpenDocuments,
 
               {/* Go/No-Go — qatnashish qarori: muddat, byudjet, sertifikat,
                   tajriba va resursni ham hisobga oladi. */}
-              <GoNoGo tenderId={t.id} />
+              <GoNoGo tenderId={t.id}
+                onAskAi={onAskAi && ((tid) => onAskAi(tid, 'gonogo'))} />
 
               {/* P0-6 — SO'RALGAN MIQDOR OMBORDA BORMI */}
               <StockCheck tenderId={t.id} />
@@ -177,7 +178,13 @@ export default function TenderDrawer({ id, match, onClose, onOpenDocuments,
               {match && (
                 <div className="mb-4 rounded-lg bg-secondary px-3.5 py-3">
                   <div className="tabular mb-1.5 text-body">
-                    {tr('drawer.matchScore')} <b>{match.score ?? 0}</b>/100
+                    {/* BALL YO'Q BO'LSA `0` EMAS. `match` ikki manbadan
+                        keladi va biri `score` bermaydi — `?? 0` uni
+                        "0/100 moslik" deb ko'rsatardi. */}
+                    {tr('drawer.matchScore')}{' '}
+                    {match.score == null
+                      ? <b title={tr('table.scoreNone')}>—</b>
+                      : <><b>{match.score}</b>/100</>}
                   </div>
                   {!!match.matched_keywords?.length && (
                     <div className="mb-1.5 flex flex-wrap gap-1.5">

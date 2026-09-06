@@ -398,6 +398,91 @@ class _Args:
 SOXTA_PREFIKS = "[SINOV]/doctext/"
 
 
+def test_navbat_adolati(conn) -> None:
+    """NAVBAT TARTIBI bir platformani ochlikka mahkum qilmasin.
+
+    O'LCHANGAN NUQSON (2026-09-03). `fetch_targets()` da tartib
+    `ORDER BY d.tender_id DESC` edi. Ikki platformaning ID fazolari
+    esa kesishmaydi:
+
+        xt-xarid          108 .. 8 538 264
+        uzex       20 000 475 229 .. 20 000 510 026
+
+    Ya'ni HAR uzex hujjati HAR xt-xarid hujjatidan oldin turardi.
+    O'lchangan navbat o'rinlari: uzex 1..342, xt-xarid 343..906.
+    Qadamda vaqt byudjeti bor (~25 daqiqa to'liq qamrov), shuning
+    uchun xt-xarid hujjatlariga NAVBAT YETIB BORMASDI —
+    matn qamrovi 31/595, uzex esa 2 925 ta.
+
+    Bu sinov FILTRNI emas, TARTIBNI tekshiradi: filtr ham, byudjet
+    ham to'g'ri edi.
+    """
+    section("5a. Navbat adolati — katta ID li platforma ochlik qilmasin")
+
+    # Ikki soxta platforma, ID fazolari AYNAN haqiqiydek uzoq.
+    KATTA = [(20_000_900_001 + i, "zzbig") for i in range(3)]
+    KICHIK = [(900_001 + i, "zzsmall") for i in range(3)]
+    yaratilgan = []
+    try:
+        with conn.cursor() as cur:
+            for tid, plat in KATTA + KICHIK:
+                cur.execute(
+                    "INSERT INTO tender (id, source_id, source_platform, "
+                    "  status, close_at, raw_json) "
+                    "VALUES (%s, %s, %s, 'open', "
+                    "        now() + interval '7 days', '{}') "
+                    "ON CONFLICT (id) DO UPDATE SET status='open', "
+                    "  close_at = now() + interval '7 days'",
+                    (tid, tid, plat))
+                ref = f"{SOXTA_PREFIKS}navbat-{tid}.pdf"
+                cur.execute(
+                    "INSERT INTO tender_document (tender_id, file_ref, "
+                    "  source_platform, fetched_at, holat, file_type, urinish) "
+                    "VALUES (%s, %s, %s, now(), 'navbatda', 'pdf', 0) "
+                    "ON CONFLICT (tender_id, file_ref) DO NOTHING",
+                    (tid, ref, plat))
+                yaratilgan.append(tid)
+            conn.commit()
+
+        hammasi = E.fetch_targets(conn, _Args())
+        soxta = [r for r in hammasi
+                 if r["source_platform"] in ("zzbig", "zzsmall")]
+        check("soxta qatorlar navbatda ko'rindi", len(soxta) == 6,
+              f"{len(soxta)} ta")
+        if len(soxta) != 6:
+            return
+
+        platformalar = [r["source_platform"] for r in soxta]
+        # ASOSIY TEKSHIRUV: kichik ID li platforma birinchi UCHTALIKKA
+        # tushsin. Eski tartibda u 4-o'rindan oldin CHIQMASDI.
+        birinchi_kichik = platformalar.index("zzsmall")
+        check("kichik ID li platforma OXIRGA surilmadi",
+              birinchi_kichik <= 2,
+              f"birinchi 'zzsmall' {birinchi_kichik + 1}-o'rinda "
+              f"(eski tartibda 4-o'rin edi): {platformalar}")
+
+        # Platforma ICHIDA tartib saqlansin — yangi tender oldin.
+        kichik_idlar = [r["tender_id"] for r in soxta
+                        if r["source_platform"] == "zzsmall"]
+        check("platforma ICHIDA tartib saqlandi (yangi tender oldin)",
+              kichik_idlar == sorted(kichik_idlar, reverse=True),
+              str(kichik_idlar))
+
+        # Tartib DETERMINISTIK bo'lsin — checkpoint/qayta yurish shunga
+        # tayanadi. Ikki chaqiruv bir xil ketma-ketlik berishi shart.
+        yana = [r["file_ref"] for r in E.fetch_targets(conn, _Args())
+                if r["source_platform"] in ("zzbig", "zzsmall")]
+        check("tartib DETERMINISTIK (ikki chaqiruv bir xil)",
+              yana == [r["file_ref"] for r in soxta])
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM tender_document WHERE file_ref LIKE %s",
+                        (SOXTA_PREFIKS + "navbat-%",))
+            cur.execute("DELETE FROM tender WHERE source_platform "
+                        "IN ('zzbig','zzsmall')")
+        conn.commit()
+
+
 def test_cache(conn) -> None:
     section("5. Kesh (takroriy yuklab olmaslik)")
     with conn.cursor() as cur:
@@ -578,6 +663,7 @@ def main() -> None:
             test_live(conn, requests.Session())
         else:
             print("\n=== 4. Haqiqiy hujjatlar — O'TKAZILDI (--offline) ===")
+        test_navbat_adolati(conn)
         test_cache(conn)
         report(conn)
     finally:

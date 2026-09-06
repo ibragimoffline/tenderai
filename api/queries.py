@@ -286,6 +286,30 @@ def build_order_by(sort: str) -> str:
     key = sort[1:] if desc else sort
     col = _SORT_WHITELIST.get(key, _SORT_WHITELIST[DEFAULT_SORT])
     direction = "DESC" if desc else "ASC"
+
+    # SUMMA SARALASHIDA VALYUTA BIRINCHI KALIT.
+    #
+    # O'LCHANGAN NUQSON (2026-09-02): saralash xom ustun bo'yicha
+    # edi va 1 000 USD ni 2 000 UZS dan PAST qo'yardi. Korpusda
+    # to'rt valyuta bor (UZS 727, USD 67, EUR 4, CNY 1), ya'ni
+    # taqqoslash MA'NOSIZ chiqardi.
+    #
+    # KURS O'YLAB TOPILMADI. Loyihada kurs ma'lumoti YO'Q va bu
+    # ataylab -- `api/pricing.py` allaqachon shu qoidani yozgan:
+    # "Tizimda kurs konvertatsiyasi yo'q". Yolg'on kurs bilan
+    # "to'g'ri" tartib yasash eng yomon yechim bo'lardi: natija
+    # ishonchli KO'RINARDI va tekshirib bo'lmasdi.
+    #
+    # Shuning uchun valyutalar ARALASHTIRILMAYDI: har valyuta o'z
+    # ichida to'g'ri tartiblanadi. Foydalanuvchi bitta valyuta
+    # ichida taqqoslaydi -- bu YAGONA ma'noli taqqoslash.
+    #
+    # Boshqa saralashlar (muddat, sana) valyutaga bog'liq EMAS va
+    # ular o'zgarmaydi.
+    if key == "totalcost":
+        return (f"ORDER BY t.currency ASC NULLS LAST, "
+                f"{col} {direction} NULLS LAST, t.id DESC")
+
     # Deadline saralashda NULL'lar oxirida bo'lsin (to'ldirilmagan sanalar pastda)
     return f"ORDER BY {col} {direction} NULLS LAST, t.id DESC"
 

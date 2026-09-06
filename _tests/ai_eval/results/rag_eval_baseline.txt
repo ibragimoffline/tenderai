@@ -1,16 +1,16 @@
 ==============================================================================
 RAG QIDIRUV VA IQTIBOS BAHOLASHI — BAZAVIY O'LCHOV
 ==============================================================================
-sana        : 2026-08-31 00:17:55
+sana        : 2026-09-02 22:06:04
 K           : 8
 holatlar    : 18 (7 javobli, 11 javobsiz)
 model       : multilingual-e5-small (384 o'lcham)
 
 A. QIDIRUV SIFATI — usullar taqqoslandi
   usul        Recall@K   Prec@K     MRR   nDCG@K    vaqt
-  leksik         0.693    0.161   0.583    0.560    0.8s
-  semantik       0.626    0.161   0.370    0.367   21.9s
-  gibrid         0.705    0.179   0.699    0.610    1.8s
+  leksik         0.657    0.143   0.536    0.533    1.4s
+  semantik       0.590    0.143   0.299    0.332    0.4s
+  gibrid         0.681    0.161   0.577    0.558    1.5s
 
   Metrikalar FAQAT javobli holatlar bo'yicha. Javobsizlarda mos
   bo'lak yo'q, ya'ni Recall ta'riflanmagan (NULL, nol EMAS).
@@ -37,9 +37,9 @@ F. JAVOB YO'Q BO'LGANDA (guruh B/C — qidiruv darajasi)
 G. TIL BO'YICHA — Recall@K
   G1. SAVOL yozuvi bo'yicha:
     usul           lotin
-    leksik         0.693
-    semantik       0.626
-    gibrid         0.705
+    leksik         0.657
+    semantik       0.590
+    gibrid         0.681
     DIQQAT: to'plamdagi HAMMA savol `lotin` — bu kesim
     hech narsa AJRATMAYDI. To'plamda o'zbek kirill va rus
     tilidagi savollar YO'Q. Ularni O'YLAB CHIQARMADIM:
@@ -47,9 +47,9 @@ G. TIL BO'YICHA — Recall@K
 
   G2. DALIL (hujjat) tili bo'yicha — ASOSIY O'Q:
     usul          kirill     lotin
-    leksik         0.750     0.617
-    semantik       0.583     0.683
-    gibrid         0.708     0.700
+    leksik         0.750     0.533
+    semantik       0.583     0.600
+    gibrid         0.708     0.644
     holat              4         3
     HAR HOLAT TILLARARO: savol lotin yozuvida, dalil esa kirill
     yoki lotin yozuvida. Sifat farqi SAVOL yozuvida emas,
@@ -66,7 +66,7 @@ H. HOLAT DARAJASIDA (gibrid)
   A1    A   lotin   kirill     1       8   1.000  1.000  1.000
   A2    A   lotin   kirill     3       8   0.333  0.143  0.156
   A3    A   lotin   kirill     1       8   1.000  0.500  0.631
-  A4    A   lotin   lotin      4       8   0.500  1.000  0.521
+  A4    A   lotin   lotin      3       8   0.333  0.143  0.156
   A5    A   lotin   lotin      1       8   1.000  1.000  1.000
   B1    B   lotin   -          0       8       —      —      —
   B2    B   lotin   -          0       8       —      —      —

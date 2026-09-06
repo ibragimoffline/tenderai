@@ -131,8 +131,14 @@ def test_render_qaror_emas_statik() -> None:
           "kutilmasa qaror OLDIN yetib borib ikki qator qoldirardi")
 
     # Ochish xatosi JIMGINA yutilmaydi.
+    #
+    # MATN EMAS, MEXANIZM tekshiriladi. Ilgari bu yerda aynan
+    # "o'lchov ochilmadi" iborasi qidirilardi va matn tozalanganda
+    # (foydalanuvchiga tushunarli "Qaror vaqti yozilmaydi: …" ga
+    # almashtirilganda) sinov yiqilgan edi — kafolat buzilmagan
+    # holda. Kafolat: xato HOLATGA yoziladi VA EKRANGA chiqadi.
     check("ochish xatosi EKRANDA ko'rinadi",
-          "setOchXato" in src and "o‘lchov ochilmadi" in src,
+          "setOchXato" in src and re.search(r"\{\s*ochXato\s*\}", src) is not None,
           "o'lchamay turib 'ishlayapti' ko'rinmasin")
 
     # Yangi qaror turlari mavjud.
@@ -609,6 +615,24 @@ def test_audit_izi(conn, cid) -> None:
 # =====================================================================
 # 7) PILOT KO'RINISHI — 40 taga qancha qolgani
 # =====================================================================
+def _sinov_aktori(db, cid: int) -> int:
+    """Sinov uchun ATRIBUTLANGAN aktor. Bor bo'lsa qayta ishlatiladi.
+
+    `_tozala()` aktorni o'chirmaydi (audit unga FK bilan bog'langan),
+    shuning uchun qayta yurishda mavjudini olamiz.
+    """
+    r = db.query_one("SELECT id FROM actor WHERE company_id=%(c)s "
+                     "  AND login='zzkodpilot'", {"c": cid})
+    if r:
+        db.execute_returning("UPDATE actor SET active=true WHERE id=%(i)s "
+                             "RETURNING id", {"i": r["id"]})
+        return int(r["id"])
+    return int(db.execute_returning(
+        "INSERT INTO actor (company_id, manba, login, ism, rol) "
+        "VALUES (%(c)s, 'mahalliy', 'zzkodpilot', 'ZZSINOV kod', "
+        "        'tasdiqlovchi') RETURNING id", {"c": cid})["id"])
+
+
 def test_pilot_korinishi(conn, cid) -> None:
     section("Pilot ko'rinishi: 40 ta ATAMA maqsadi")
     if conn is None:
@@ -626,12 +650,36 @@ def test_pilot_korinishi(conn, cid) -> None:
         check("maqsad 40", (p0.get("maqsad") or 0) == 40)
         boshlangich = p0.get("atama_soni") or 0
 
+        # ANONIM QAROR MAQSADGA SANALMAYDI.
+        #
+        # O'LCHANGAN NUQSON (2026-09-03): `v_kod_pilot` shunchaki
+        # `qaror IS NOT NULL` ni sanardi, ya'ni `kompaniya_sessiyasi`
+        # (anonim) va hatto `servis` (mashina) ham maqsadga kirardi.
+        # Sifat darvozasi esa FAQAT `aktorli` ni sanaydi — ekran
+        # "40/40 bajarildi" ko'rsatib turgan holda darvoza
+        # "0/40 TASDIQLANMAGAN" derdi. Endi ikkalasi BIR XIL shartda.
+        anon = PREFIKS + "_anonim"
+        K.qaror_ochish(cid, anon, "ZZ")
+        K.qaror_yoz(cid, anon, "ZZ", "kod", kim="s", code="26.30",
+                    ishonch="kompaniya_sessiyasi")
+        p_anon = K.pilot_holati(cid)
+        check("ANONIM qaror maqsadga SANALMAYDI",
+              (p_anon.get("atama_soni") or 0) == boshlangich,
+              f"{boshlangich} -> {p_anon.get('atama_soni')}")
+        check("lekin u YASHIRILMAYDI (`atributsiz_qaror`)",
+              (p_anon.get("atributsiz_qaror") or 0) >= 1,
+              str(p_anon.get("atributsiz_qaror")))
+
         # BIR ATAMAGA IKKI KOD maqsadni SOXTA yaqinlashtirmasin.
+        # Endi qarorlar ATRIBUTLANGAN bo'lishi shart, aks holda
+        # ular maqsadga umuman kirmaydi.
+        aid = _sinov_aktori(db, cid)
         k = PREFIKS + "_pilot"
         K.qaror_ochish(cid, k, "ZZ")
-        K.qaror_yoz(cid, k, "ZZ", "kod", kim="s", code="26.30", ishonch="kompaniya_sessiyasi")
+        K.qaror_yoz(cid, k, "ZZ", "kod", kim="s", code="26.30",
+                    actor_id=aid, ishonch="aktor_elon")
         K.qaror_yoz(cid, k, "ZZ", "kod", kim="s", code="26.20",
-                    qoshimcha_kod=True, ishonch="kompaniya_sessiyasi")
+                    qoshimcha_kod=True, actor_id=aid, ishonch="aktor_elon")
         p1 = K.pilot_holati(cid)
         check("ikki kod -> atama_soni FAQAT 1 oshdi",
               (p1.get("atama_soni") or 0) == boshlangich + 1,

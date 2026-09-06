@@ -1,6 +1,6 @@
 ---
 name: grill-me
-description: Bajarilgan ishni RAQIB sifatida buzishga urinish. Kod yozib bo'lgach, "tayyor" deyishdan OLDIN yurgiziladi. Bu loyihada takrorlangan o'n ikki nosozlik sinfini nomma-nom qidiradi va har biriga JAVOB talab qiladi. Foydalanuvchi "grill", "so'roq qil", "buzishga urin", "tekshir o'zingni" desa ham chaqiriladi.
+description: Bajarilgan ishni RAQIB sifatida buzishga urinish. Kod yozib bo'lgach, "tayyor" deyishdan OLDIN yurgiziladi. Bu loyihada takrorlangan o'n uch nosozlik sinfini nomma-nom qidiradi va har biriga JAVOB talab qiladi. Foydalanuvchi "grill", "so'roq qil", "buzishga urin", "tekshir o'zingni" desa ham chaqiriladi.
 ---
 
 # So'roq
@@ -33,7 +33,7 @@ qidiradigan xatoning o'zi: salbiy shartdan olingan xulosa.
 
 ---
 
-## O'n ikki sinf
+## O'n uch sinf
 
 Bularning har biri bu loyihada **haqiqatan sodir bo'lgan**. Taxminiy
 ro'yxat emas — kechirim.
@@ -295,6 +295,53 @@ qiymat oladi (`0.40 / 0.75 / 1.00`) va 0.85 chegarasi aslida
 `WHERE manba_turi = 'reyestr'` ning raqam kiyimidagi shakli.
 Isbotlanadigan chegara YO'Q. Maqsadni almashtirmang.
 
+### 13. IKKI QATLAM ALOHIDA TO'G'RI, ORASIDAGI HOLAT YO'QOLGAN
+
+Oldingi hech biriga o'xshamaydi: **tuzatiladigan xato ikkala
+qatlamda ham yo'q.** Server to'g'ri, komponent to'g'ri, sinovlar
+yashil — holat esa ular *orasida* yo'qoladi.
+
+> `POST /chat` `session_id` ni to'g'ri tiklaydi. `useChatStream`
+> `sessionId` ni to'g'ri saqlaydi. Lekin `App.tsx:562` `ChatPanel`
+> ni SHARTLI chizadi — panel yopilganda unmount bo'ladi va state
+> u bilan birga o'ladi. Natijada har ochilish yangi sessiya:
+> 133 sessiyaning 131 tasida ANIQ 2 xabar, bitta tender uchun
+> 28 ta alohida sessiya.
+>
+> IKKINCHI, jiddiyroq ko'rinishi shu faylda: `seansOch()` eski
+> suhbatni ekranga chiqarib `reset()` chaqirardi — u `sessionId`
+> ni ham nolga tushiradi. **Ekranda transkript, modelda bo'sh
+> kontekst.** Foydalanuvchi "yuqorida aytganimdek" deydi, model
+> hech narsa ko'rmaydi va ISHONCH BILAN javob beradi. Jimgina
+> yolg'on javobning aniq mexanizmi — va uni hech qanday sinov
+> ushlamasdi, chunki ikkala tomon ham "to'g'ri" edi.
+
+Umumiy shakl: holat qatlam ichida emas, **qatlamlar orasidagi
+umr chegarasida** yashaydi — komponent daraxtining shakli,
+jarayon umri, ulanish umri, kesh yashash muddati. Bularning
+hech biri "mantiq" emas, shuning uchun mantiq sinovlari ularni
+ko'rmaydi.
+
+Bu 3-sinf bilan qo'shni ("ulangan, lekin chaqirilmaydi"), lekin
+teskari: bu yerda hamma narsa chaqiriladi, faqat **orasidagi
+narsa yo'qoladi**.
+
+**Savol:** bu holat kimning umriga bog'langan? O'sha egasi
+qachon o'ladi va buni kim biladi?
+
+**Tekshiruv — MANTIQ EMAS, MA'LUMOT.** Ikki tomonni alohida
+sinash yetarli emas (ikkalasi ham o'tadi). O'rniga:
+
+| tekshiruv | nimani ochadi |
+|---|---|
+| Jurnalda *taqsimot* emas, **CHEGARA** ko'rinsa | 131/133 da aynan 2 xabar — bu uslub emas, to'siq |
+| Bir obyekt uchun bir necha yozuv qisqa vaqtda | ayni tender bo'yicha 106 juft sessiya, 5 daqiqa ichida |
+| Ekranda ko'ringan narsa so'rovda ham boradimi | transkript bor, `session_id` yo'q |
+
+Va React da alohida: **shartli chizilgan (`{x && <C/>}`) har
+komponent — umri qisqa idish.** Unda saqlangan hech narsa
+davomiylikka ishonmaydi.
+
 ---
 
 ## Skaner yozish standarti
@@ -319,7 +366,7 @@ Uch marta bir xil xato: **skaner O'Z NASRINI o'qidi.**
 1. **O'zgarishni sanang.** Nima tegdi? Har fayl uchun: bu o'zgarish
    nimani va'da qiladi?
 
-2. **O'n ikkita sinfni yurgizing.** Har biriga javob yozing — topilgan
+2. **O'n uchta sinfni yurgizing.** Har biriga javob yozing — topilgan
    narsa yoki nega tegishli emasligi.
 
 3. **Topilganini ISBOTLANG.** "Ehtimol muammo" — hisoblanmaydi.

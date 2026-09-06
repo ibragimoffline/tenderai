@@ -54,7 +54,7 @@ const PATHS: Record<string, ReactNode> = {
 }
 
 export interface IconProps {
-  name: keyof typeof PATHS | string
+  name: keyof typeof PATHS
   size?: number
   className?: string
 }

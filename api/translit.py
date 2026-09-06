@@ -33,7 +33,8 @@ ESLATMA: bu TRANSLITRATSIYA, tarjima emas. `qurilish` va `строительст
 har xil so'zlar, ular baribir topilmaydi. Buning uchun alohida sinonim
 lug'ati kerak (hozircha yo'q).
 """
-from typing import List
+from functools import lru_cache
+from typing import List, Tuple
 
 # --- 1) YIG'ISH jadvali -----------------------------------------------------
 # SQL `translate(str, from, to)`: `to` dan uzun qolgan `from` belgilari
@@ -96,6 +97,26 @@ _LONGEST_FIRST = sorted(set(list(_AMBIG) + [a for a, _ in _BASE]),
 _BASE_MAP = dict(_BASE)
 
 
+# KESHLAR — SOF FUNKSIYALAR uchun.
+#
+# O'LCHANGAN NUQSON (2026-09-02). "Sizga mos" bo'limi 4.9-8.1 s
+# yuklanardi. Profil: vaqtning 96% i `kodlash.pozitsiya_moslik` da,
+# uning ichida `_cyr_readings` 19 280 marta chaqirilgan va u
+# 16 151 990 ta `str.startswith` bajargan.
+#
+# SABAB TAKROR HISOB EDI, algoritm emas: bitta so'rovda `variants()`
+# 16 851 marta chaqirilardi, lekin TAKRORSIZ kirish atigi 1 048 ta —
+# ya'ni 16 barobar ortiqcha ish.
+#
+# Bu funksiyalar SOF: bir xil satr har doim bir xil natija beradi va
+# bazaga tegmaydi. Shuning uchun keshlash eskirish xavfini
+# TUG'DIRMAYDI.
+#
+# O'ZGARMAS TUR QAYTARILADI (tuple/frozenset): chaqiruvchi natijani
+# o'zgartirsa kesh ZAHARLANARDI va xato boshqa joyda chiqardi.
+
+
+@lru_cache(maxsize=16384)
 def fold_cyr(s: str) -> str:
     """Kirillni yig'ilgan shaklga. SQL_FOLD bilan bir xil natija berishi shart."""
     out = []
@@ -117,7 +138,8 @@ def to_lat(s: str) -> str:
     return r
 
 
-def _cyr_readings(q: str) -> List[str]:
+@lru_cache(maxsize=16384)
+def _cyr_readings(q: str) -> Tuple[str, ...]:
     """Lotin so'zning barcha kirill o'qilishlari (noaniq harflar tarmoqlanadi)."""
     results = [""]
     i = 0
@@ -132,10 +154,20 @@ def _cyr_readings(q: str) -> List[str]:
         else:
             results = [r + q[i] for r in results]
             i += 1
-    return [fold_cyr(r) for r in results]
+    return tuple(fold_cyr(r) for r in results)
 
 
 def variants(q: str) -> List[str]:
+    """Keshlangan ichki funksiyani chaqiradi va NUSXA qaytaradi.
+
+    Nusxa MAJBURIY: chaqiruvchi ro'yxatni o'zgartirsa kesh
+    zaharlanardi va xato butunlay boshqa joyda chiqardi.
+    """
+    return list(_variants(q))
+
+
+@lru_cache(maxsize=16384)
+def _variants(q: str) -> Tuple[str, ...]:
     """So'rovning barcha ehtimoliy yozuvlari — YIG'ILGAN alifboda.
 
     Qaytgan naqshlar SQL_FOLD bilan yig'ilgan ustunga LIKE orqali solishtiriladi
@@ -170,9 +202,10 @@ def variants(q: str) -> List[str]:
             continue
         seen.add(v)
         res.append(v)
-    return res[:MAX_VARIANTS]
+    return tuple(res[:MAX_VARIANTS])
 
 
+@lru_cache(maxsize=16384)
 def norm_text(s: str) -> str:
     """Python tomonda matnni solishtirishga tayyorlaydi (moslashtirish uchun).
 

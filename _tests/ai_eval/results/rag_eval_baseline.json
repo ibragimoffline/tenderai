@@ -41,12 +41,12 @@
           "guruh": "A",
           "til": "lotin",
           "dalil_til": "lotin",
-          "mos_bolak": 4,
+          "mos_bolak": 3,
           "qaytdi": 8,
-          "recall": 0.25,
-          "precision": 0.125,
-          "mrr": 0.3333333333333333,
-          "ndcg": 0.19519002499605084
+          "recall": 0.0,
+          "precision": 0.0,
+          "mrr": 0.0,
+          "ndcg": 0.0
         },
         "A5": {
           "guruh": "A",
@@ -203,19 +203,19 @@
           "ndcg": null
         }
       },
-      "vaqt_sek": 0.82,
-      "recall_at_k": 0.6928571428571428,
-      "precision_at_k": 0.16071428571428573,
-      "mrr": 0.5833333333333333,
-      "ndcg_at_k": 0.5604280297724167,
+      "vaqt_sek": 1.36,
+      "recall_at_k": 0.6571428571428571,
+      "precision_at_k": 0.14285714285714285,
+      "mrr": 0.5357142857142857,
+      "ndcg_at_k": 0.5325437404872666,
       "javobsizda_bosh_qaytdi": 8,
       "javobsizda_bosh_ulush": 0.7272727272727273,
       "til_recall": {
-        "lotin": 0.6928571428571428
+        "lotin": 0.6571428571428571
       },
       "dalil_til_recall": {
         "kirill": 0.75,
-        "lotin": 0.6166666666666667
+        "lotin": 0.5333333333333333
       },
       "dalil_til_soni": {
         "kirill": 4,
@@ -261,12 +261,12 @@
           "guruh": "A",
           "til": "lotin",
           "dalil_til": "lotin",
-          "mos_bolak": 4,
+          "mos_bolak": 3,
           "qaytdi": 8,
-          "recall": 0.25,
-          "precision": 0.125,
-          "mrr": 0.5,
-          "ndcg": 0.24630238874073
+          "recall": 0.0,
+          "precision": 0.0,
+          "mrr": 0.0,
+          "ndcg": 0.0
         },
         "A5": {
           "guruh": "A",
@@ -423,19 +423,19 @@
           "ndcg": null
         }
       },
-      "vaqt_sek": 21.88,
-      "recall_at_k": 0.6261904761904763,
-      "precision_at_k": 0.16071428571428573,
-      "mrr": 0.3704081632653061,
-      "ndcg_at_k": 0.3671031920066138,
+      "vaqt_sek": 0.36,
+      "recall_at_k": 0.5904761904761905,
+      "precision_at_k": 0.14285714285714285,
+      "mrr": 0.2989795918367347,
+      "ndcg_at_k": 0.3319171364722238,
       "javobsizda_bosh_qaytdi": 0,
       "javobsizda_bosh_ulush": 0.0,
       "til_recall": {
-        "lotin": 0.6261904761904763
+        "lotin": 0.5904761904761905
       },
       "dalil_til_recall": {
         "kirill": 0.5833333333333334,
-        "lotin": 0.6833333333333332
+        "lotin": 0.6
       },
       "dalil_til_soni": {
         "kirill": 4,
@@ -481,12 +481,12 @@
           "guruh": "A",
           "til": "lotin",
           "dalil_til": "lotin",
-          "mos_bolak": 4,
+          "mos_bolak": 3,
           "qaytdi": 8,
-          "recall": 0.5,
-          "precision": 0.25,
-          "mrr": 1.0,
-          "ndcg": 0.5205067333228022
+          "recall": 0.3333333333333333,
+          "precision": 0.125,
+          "mrr": 0.14285714285714285,
+          "ndcg": 0.15642624200758548
         },
         "A5": {
           "guruh": "A",
@@ -643,19 +643,19 @@
           "ndcg": null
         }
       },
-      "vaqt_sek": 1.84,
-      "recall_at_k": 0.7047619047619048,
-      "precision_at_k": 0.17857142857142858,
-      "mrr": 0.6989795918367347,
-      "ndcg_at_k": 0.6101636673321836,
+      "vaqt_sek": 1.49,
+      "recall_at_k": 0.680952380952381,
+      "precision_at_k": 0.16071428571428573,
+      "mrr": 0.576530612244898,
+      "ndcg_at_k": 0.5581521685728671,
       "javobsizda_bosh_qaytdi": 0,
       "javobsizda_bosh_ulush": 0.0,
       "til_recall": {
-        "lotin": 0.7047619047619048
+        "lotin": 0.680952380952381
       },
       "dalil_til_recall": {
         "kirill": 0.7083333333333334,
-        "lotin": 0.7000000000000001
+        "lotin": 0.6444444444444445
       },
       "dalil_til_soni": {
         "kirill": 4,
@@ -694,7 +694,7 @@
       "tur": "javob_bor",
       "til": "lotin",
       "tender_id": 7886728,
-      "mos_bolak": 4
+      "mos_bolak": 3
     },
     {
       "id": "A5",
@@ -815,7 +815,7 @@
     "A1": 1,
     "A2": 3,
     "A3": 1,
-    "A4": 4,
+    "A4": 3,
     "A5": 1,
     "B1": 0,
     "B2": 0,
@@ -831,13 +831,64 @@
     "E1": 0,
     "E2": 0
   },
+  "til_qamrov": {
+    "usul": "gibrid",
+    "tillar": {
+      "uz_lat": {
+        "holat": 7,
+        "recall_at_k": 0.680952380952381,
+        "precision_at_k": 0.16071428571428573,
+        "mrr": 0.576530612244898,
+        "ndcg_at_k": 0.5581521685728671
+      },
+      "uz_cyr": {
+        "holat": 7,
+        "recall_at_k": 0.5523809523809524,
+        "precision_at_k": 0.10714285714285714,
+        "mrr": 0.19523809523809524,
+        "ndcg_at_k": 0.25391337122357005
+      },
+      "ru": {
+        "holat": 7,
+        "recall_at_k": 0.42857142857142855,
+        "precision_at_k": 0.07142857142857142,
+        "mrr": 0.2619047619047619,
+        "ndcg_at_k": 0.30441853622449394
+      }
+    },
+    "provenans": {
+      "uz_lat": {
+        "manba": [
+          "asl"
+        ],
+        "inson_korigi": true
+      },
+      "uz_cyr": {
+        "manba": [
+          "translit_auto"
+        ],
+        "inson_korigi": false
+      },
+      "ru": {
+        "manba": [
+          "muallif"
+        ],
+        "inson_korigi": false
+      }
+    },
+    "recall_tushishi": {
+      "uz_cyr": -0.1286,
+      "ru": -0.2524
+    },
+    "izoh": "`uz_cyr` mashina transliteratsiyasi, `ru` muallif yozgan -- IKKALASI HAM inson ko'rigidan o'tmagan. Raqamlar YO'NALISH beradi."
+  },
   "iqtibos": {
     "javobli_holat": 7,
     "iqtibos_mumkin": 7,
     "citation_hit_rate": 1.0,
     "izoh": "Iqtibos KELTIRISH MUMKINLIGI o'lchanadi: qaytgan bo'laklar orasida dalil bormi. Model AYNAN o'shanga ko'rsatdimi — bu MODEL chaqiruvini talab qiladi va bu yerda o'lchanmaydi."
   },
-  "sana": "2026-08-31 00:17:55",
+  "sana": "2026-09-02 22:06:04",
   "embed_model": "multilingual-e5-small",
   "embed_dims": 384,
   "cheklovlar": [

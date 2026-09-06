@@ -34,7 +34,14 @@ const STATUS: Record<string, { cls: string; text: TKey }> = {
   },
 }
 
-export default function GoNoGo({ tenderId }: { tenderId: number }) {
+/**
+ * @param onAskAi Tahlil haqida suhbat ochadi (`manba='gonogo'`).
+ *   Berilmasa tugma CHIZILMAYDI — panel chatsiz ham ishlaydi.
+ */
+export default function GoNoGo({ tenderId, onAskAi }: {
+  tenderId: number
+  onAskAi?: (tenderId: number) => void
+}) {
   const t = useT()
   const [data, setData] = useState<GoNoGoResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -96,6 +103,23 @@ export default function GoNoGo({ tenderId }: { tenderId: number }) {
         </div>
 
         <p className="text-body leading-relaxed">{data!.summary_uz}</p>
+
+        {/* ZANJIR SHU YERDA UZILARDI. Foydalanuvchi hukmni ko'radi va
+            "nega?" deb so'ramoqchi bo'ladi — lekin chat boshqa joyda
+            va u tahlilni KO'RMAGAN. Natijada model yagona yo'lni
+            tanlardi: `run_gonogo`, ya'ni endigina ko'rilgan
+            natijani 30-60 soniyada QAYTA hisoblash.
+            Endi suhbat `manba='gonogo'` bilan ochiladi va server
+            tizim blokiga saqlangan tahlil sharhini qo'yadi
+            (`api/tahlil.py`). */}
+        {onAskAi && (
+          <Button variant="outline" size="sm" className="w-full justify-start"
+            onClick={() => onAskAi(tenderId)}
+            title={t('gonogo.askTitle')}>
+            <Icon name="sparkle" size={13} />
+            {t('gonogo.ask')}
+          </Button>
+        )}
 
         {!!data!.blockers?.length && (
           <div className="rounded-lg border border-urgent/40 bg-urgent-soft px-3 py-2">

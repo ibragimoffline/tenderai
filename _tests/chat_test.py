@@ -368,6 +368,125 @@ def test_toollar(cid: int, tid: int, yopiq: int):
 # =========================================================================
 # 6. SSE formati
 # =========================================================================
+def test_interfeys():
+    """AI YORDAMCHI INTERFEYSI — soxta tugma bo'lmasin, tarix ulansin.
+
+    O'LCHANGAN NUQSON (2026-09-02, ikkitasi).
+
+    1. TARIX ULANMAGAN EDI. Backend `GET /chat/sessions`,
+       `/chat/sessions/{id}` va `DELETE` ni ANCHADAN BERI beradi,
+       lekin `api.ts` da chat metodlari UMUMAN yo'q edi. Suhbat
+       sahifa yangilanishi bilan yo'qolardi va `chat_session`
+       jadvali to'lib borardi -- ya'ni imkoniyat bor edi, uni
+       CHAQIRADIGAN narsa yo'q edi.
+
+    2. TAYYOR NAMUNADA SOXTA BOSHQARUVLAR bor edi. Qo'shilgan
+       interfeys namunasida "Deep Research", "Reason", mikrofon va
+       "Upload Files" tugmalari bo'lgan; ularning hech biri
+       backendda MAVJUD EMAS, "Upload" esa `setTimeout` bilan
+       TAQLID qilinardi va soxta `Document.pdf` qo'shardi.
+
+       Ishlamaydigan tugma -- eng qimmat nuqson turi: foydalanuvchi
+       uni bosadi, hech narsa bo'lmaydi va BUTUN mahsulotga
+       ishonmay qo'yadi.
+    """
+    print("\n[11] Interfeys — soxta boshqaruv yo'q, tarix ulangan")
+    kok = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def oqi(*p):
+        with open(os.path.join(kok, *p), encoding="utf-8") as f:
+            return f.read()
+
+    def kodgina(src: str) -> str:
+        """IZOHLARNI tashlaydi.
+
+        SHU SINOVDA YUZ BERGAN XATO: qo'riqchilar faylning O'Z
+        IZOHIDAGI iborani topib yiqilgandi -- izohda "Deep Research
+        OLIB TASHLANDI" deb yozilgan edi va tekshiruv uni MAVJUD
+        boshqaruv deb o'qidi. Matn emas, KOD tekshirilsin.
+        """
+        chiq, i, n = [], 0, len(src)
+        while i < n:
+            if src.startswith("//", i):
+                j = src.find(chr(10), i)
+                i = n if j < 0 else j
+            elif src.startswith("/*", i):
+                j = src.find("*/", i + 2)
+                i = n if j < 0 else j + 2
+            else:
+                chiq.append(src[i])
+                i += 1
+        return "".join(chiq)
+
+    ui = kodgina(oqi("frontend", "src", "components", "ui",
+                     "ai-assistant-interface.tsx"))
+
+    # --- SOXTA BOSHQARUVLAR YO'Q ---
+    for nom in ("Deep Research", "deepResearch", "Reason", "reasonEnabled",
+                "Mic", "Upload Files", "handleUploadFile",
+                "showUploadAnimation", "Document.pdf"):
+        check(f"soxta boshqaruv YO'Q: `{nom}`", nom not in ui)
+    # Namunadagi TAQLID: `setTimeout` bilan "yuklash".
+    check("yuklash TAQLIDI yo'q (`setTimeout`)", "setTimeout" not in ui)
+
+    # --- MAVZU TOKENLARI, qotirilgan rang emas ---
+    # Loyihada qorong'i mavzu bor; `bg-white` unda oq ustiga oq
+    # matn berardi.
+    for rang in ("bg-white", "text-gray-500", "text-gray-700",
+                 "border-gray-200", "bg-gray-100"):
+        check(f"qotirilgan rang YO'Q: `{rang}`", rang not in ui)
+    check("mavzu tokenlari ishlatiladi",
+          "bg-card" in ui and "text-muted-foreground" in ui)
+
+    # --- Vite: `use client` ma'nosiz ---
+    check("`use client` yo'q (loyiha Vite'da)", '"use client"' not in ui)
+
+    # --- HARAKATGA SEZGIRLIK hurmat qilinadi ---
+    check("logotip aylanishi `prefers-reduced-motion` ni hurmat qiladi",
+          "motion-safe:" in ui)
+
+    # --- MATNLAR i18n DA ---
+    check("inglizcha matn QOTIRILMAGAN",
+          "Ready to assist" not in ui and "Ask me anything" not in ui)
+    check("i18n ishlatiladi", "useT" in ui)
+
+    # --- TARIX HAQIQATAN ULANGAN ---
+    apits = oqi("frontend", "src", "api.ts")
+    for m in ("chatSessions", "chatHistory", "chatArchive"):
+        check(f"`api.{m}` mavjud", f"{m}:" in apits)
+    panel = oqi("frontend", "src", "components", "ChatPanel.tsx")
+    for m in ("api.chatSessions", "api.chatHistory", "api.chatArchive"):
+        check(f"ChatPanel `{m}` ni CHAQIRADI", m in panel)
+    check("interfeys ChatPanel ga ULANGAN",
+          "AIAssistantInterface" in panel)
+    # XATO YUTILMASIN: bo'sh ro'yxat va yiqilgan so'rov BOSHQA holat.
+    check("tarix xatosi KO'RSATILADI", "chat.history.failed" in panel)
+    # Saqlangan XATOLI javob ham ko'rinsin.
+    check("saqlangan xatoli javob YASHIRILMAYDI", "m.error ?" in panel)
+    # ARXIVLASH -- o'chirish emas (jurnal va xarajat saqlanadi).
+    check("arxivlash ishlatiladi, o'chirish emas",
+          "chatArchive" in apits and "archived" not in apits.lower()
+          or "DELETE" in apits)
+
+    # --- i18n UCH TILDA to'liq ---
+    kalitlar = ["chat.welcome", "chat.welcome.hint", "chat.cat.tender",
+                "chat.cat.docs", "chat.cat.decide", "chat.history",
+                "chat.history.empty", "chat.history.failed"]
+    for til in ("uz", "ru", "en"):
+        src = oqi("frontend", "src", "locales", f"{til}.ts")
+        yoq = [k for k in kalitlar if f"'{k}':" not in src]
+        check(f"{til}: interfeys kalitlari to'liq", not yoq, str(yoq))
+
+    # --- Icon nomi TUR bilan qo'riqlanadi ---
+    # `| string` birlashmani BEKOR QILADI: xato nom jimgina bo'sh
+    # ikonka berardi va `tsc` uni ko'rmasdi. Aynan shunday xato
+    # shu ishda yuz berdi (`name="clock"` -- bunday ikonka yo'q).
+    icon = oqi("frontend", "src", "components", "Icon.tsx")
+    check("`Icon` nomi UNION bilan qulflangan (`| string` yo'q)",
+          "name: keyof typeof PATHS" in icon
+          and "keyof typeof PATHS | string" not in icon)
+
+
 def test_sse():
     print("\n[6] SSE hodisa formati")
     s = ai_chat._sse("token", {"text": "salom"})
@@ -385,6 +504,7 @@ def main():
 
     test_xavfsizlik()
     test_sse()
+    test_interfeys()
 
     db.init_pool()
     try:

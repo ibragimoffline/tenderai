@@ -65,6 +65,25 @@ _yaratilgan = {"company": [], "actor": [], "tender": [], "requirement": [],
                "routing": []}
 
 
+class SoxtaRequest:
+    """`aktor.aniqla()` uchun minimal so'rov.
+
+    YAGONA STUB. Ilgari `test_api` ichida mahalliy nusxasi bor edi va
+    13-bo'lim yana bittasini yaratgan edi — ikki stub vaqt o'tishi
+    bilan HAR XIL xatti-harakat qilib, sinovlar bir-biriga zid
+    natija berardi. `aniqla()` `headers` va `state` ni o'qiydi.
+    """
+
+    def __init__(self, headers, service=False):
+        self.headers = headers
+
+        class S:
+            pass
+        self.state = S()
+        self.state.service = service
+        self.state.account = None if service else {"id": 1}
+
+
 def check(nom, ok, tafsilot=""):
     _natija.append((nom, ok, tafsilot))
     print(f"  [{'PASS' if ok else 'FAIL'}] {nom}" + (f" -- {tafsilot}" if tafsilot else ""))
@@ -513,8 +532,26 @@ def test_audit_tuzatish(db):
             db.execute_returning(sql, {})
             check(f"audit_jurnal {op} TAQIQLANGAN", False, "bajarildi!")
         except Exception as e:                                # noqa: BLE001
-            check(f"audit_jurnal {op} TAQIQLANGAN",
-                  "FAQAT QO" in str(e), str(e).splitlines()[0][:70])
+            # IKKI XIL QO'RIQCHI — IKKALASI HAM QABUL QILINADI.
+            #
+            # O'LCHANGAN NUQSON (2026-09-04). Shart faqat
+            # TRIGGER xabarini ("FAQAT QO'SHISH...") tanirdi.
+            # Ilova roli (`tai_app`) bilan yurganda `audit_jurnal`
+            # ga UPDATE/DELETE HUQUQ darajasida to'siladi va xato
+            # boshqacha keladi ("нет доступа к таблице") — ya'ni
+            # himoya KUCHLIROQ, sinov esa YIQILARDI.
+            #
+            # `auth_test` dagi `erp_yopiq` bilan bir shakl: huquq
+            # OLDIN to'sadi, trigger KEYIN aytadi. Sinov "amal
+            # bajarilmadimi" ni tekshirsin, QAYSI qatlam to'sganini
+            # emas.
+            xato = str(e)
+            trigger = "FAQAT QO" in xato
+            huquq = ("нет доступа" in xato or "permission denied" in xato
+                     or "доступ" in xato.lower())
+            check(f"audit_jurnal {op} TAQIQLANGAN", trigger or huquq,
+                  ("trigger" if trigger else "huquq" if huquq else "?")
+                  + ": " + xato.splitlines()[0][:60])
 
 
 def test_api(db, a_cid, b_cid, a_aktor, b_aktor):
@@ -522,18 +559,6 @@ def test_api(db, a_cid, b_cid, a_aktor, b_aktor):
     from fastapi.testclient import TestClient
     from api.main import app
     from api import aktor as A
-
-    class SoxtaRequest:
-        """`aktor.aniqla()` uchun minimal so'rov."""
-
-        def __init__(self, headers, service=False):
-            self.headers = headers
-
-            class S:
-                pass
-            self.state = S()
-            self.state.service = service
-            self.state.account = None if service else {"id": 1}
 
     # B ijarachisi A ning aktorini KO'RSATADI.
     try:
@@ -644,6 +669,243 @@ def test_api(db, a_cid, b_cid, a_aktor, b_aktor):
 
 
 # =====================================================================
+# 13. ERP -> AKTOR KO'PRIGI (provisioning)
+# =====================================================================
+#
+# O'LCHANGAN MUAMMO (2026-09-03): `erp.v_tai_actor` da UCH FAOL odam
+# bor edi, `public.actor` da ijarachi 2 uchun NOL qator. Natijada
+# `_erp_sessiyadan()` ning IKKINCHI sharti hech qachon bajarilmasdi va
+# har inson qarori `kompaniya_sessiyasi` darajasida yozilardi.
+#
+# NEGA BU YERDA ERP SESSIYASI YARATILMAYDI: `auth_test.py` `erp.app_user`
+# ga TEGILMAGANINI tekshiradi (qator soni va `max(updated_at)`).
+# Sinov ERP sxemasiga yozsa o'sha tekshiruv yiqilardi va chegara
+# shartnomasi buzilardi. Shuning uchun bu yerda XARITA qismi
+# (ikkinchi shart) sinaladi; token mosligi (birinchi shart) uchun
+# TIRIK ERP sessiyasi kerak va u sinovdan TASHQARIDA qoladi.
+def test_erp_kopik(db, a_cid, b_cid, a_aktor):
+    from api import aktor as A
+    bolim("13. ERP -> aktor ko'prigi")
+
+    # HOVUZNI QAYTA OCHAMIZ. 12-bo'lim `with TestClient(app)` ishlatadi
+    # va undan CHIQISHDA lifespan `close_pool()` ni chaqiradi. Busiz bu
+    # bo'lim `DBUnavailable: DB pool ishga tushmagan` bilan yiqilardi —
+    # sinov mantig'i emas, tartib artefakti.
+    db.init_pool()
+
+    # --- 2) Yaroqsiz/xaritalanmagan ERP sessiyasi -> ANIQ xato -------
+    # JIMGINA pastroq darajaga TUSHIRILMASLIGI shart: "isbot bor"
+    # degan noto'g'ri taassurot qolmasin.
+    try:
+        A.aniqla(SoxtaRequest({A.ERP_SESSIYA_HEADER: "zzsinov-yaroqsiz-token"}),
+                 a_cid)
+        check("xaritalanmagan ERP sessiyasi RAD etiladi", False,
+              "istisno chiqmadi")
+    except A.RuxsatXato as e:
+        check("xaritalanmagan ERP sessiyasi RAD etiladi",
+              e.kod == "ACTOR_ERP_SESSION_INVALID", str(e.kod))
+        check("jimgina `kompaniya_sessiyasi` ga TUSHIRILMAYDI", True,
+              "403 qaytdi, daraja pasaytirilmadi")
+
+    # --- 5) Soxta `x-actor` `erp_sessiya` ga KO'TARA OLMAYDI ---------
+    k = A.aniqla(SoxtaRequest({A.AKTOR_HEADER: str(a_aktor)}), a_cid)
+    check("`x-actor` eng ko'pi `aktor_elon` beradi",
+          k.ishonch == "aktor_elon", k.ishonch)
+    check("`x-actor` `erp_sessiya` ga KO'TARMAYDI",
+          k.ishonch != "erp_sessiya", k.ishonch)
+
+    # --- 3) Nofaol aktor -> rad --------------------------------------
+    db.execute_returning("UPDATE actor SET active=false WHERE id=%(i)s "
+                         "RETURNING id", {"i": a_aktor})
+    try:
+        A.aniqla(SoxtaRequest({A.AKTOR_HEADER: str(a_aktor)}), a_cid)
+        check("nofaol aktor RAD etiladi", False, "istisno chiqmadi")
+    except A.RuxsatXato as e:
+        check("nofaol aktor RAD etiladi", e.kod == "ACTOR_INACTIVE", str(e.kod))
+    db.execute_returning("UPDATE actor SET active=true WHERE id=%(i)s "
+                         "RETURNING id", {"i": a_aktor})
+
+    # --- 4) Boshqa ijarachining aktori -> rad (404, "bor" demaydi) ---
+    try:
+        A.aniqla(SoxtaRequest({A.AKTOR_HEADER: str(a_aktor)}), b_cid)
+        check("begona ijarachining aktori RAD etiladi", False,
+              "istisno chiqmadi")
+    except A.RuxsatXato as e:
+        check("begona ijarachining aktori RAD etiladi",
+              e.kod == "ACTOR_NOT_FOUND", str(e.kod))
+
+    # --- 6) Takroriy ERP xaritasi -> BAZA to'sadi --------------------
+    ZZ_EUID = 999_000_001            # ERP da yo'q — ataylab
+
+    def _erp_aktor(cid, login):
+        """Bor bo'lsa QAYTA ISHLATADI.
+
+        `_tozala()` aktorni O'CHIRMAYDI (audit `actor` ga FK bilan
+        bog'langan), faqat `active=false` qiladi. Shuning uchun ikkinchi
+        yurishda qator JOYIDA turadi va `qosh()` unikal indeksga
+        urilardi — sinov mantig'i emas, qoldiq artefakti.
+        """
+        bor = db.query_one(
+            "SELECT id FROM actor WHERE company_id=%(c)s AND erp_user_id=%(e)s",
+            {"c": cid, "e": ZZ_EUID})
+        if bor:
+            _yaratilgan["actor"].append(int(bor["id"]))
+            return bor
+        r = A.qosh(cid, login=login, ism="ZZSINOV ERP", rol="koruvchi",
+                   manba="erp", erp_user_id=ZZ_EUID)
+        _yaratilgan["actor"].append(int(r["id"]))
+        return r
+
+    _erp_aktor(b_cid, "zzsinov_erp_1")
+    try:
+        r2 = A.qosh(b_cid, login="zzsinov_erp_2", ism="ZZSINOV ERP 2",
+                    rol="koruvchi", manba="erp", erp_user_id=ZZ_EUID)
+        _yaratilgan["actor"].append(int(r2["id"]))
+        check("bitta `erp_user_id` IKKI marta xaritalanmaydi", False,
+              "ikkinchi qator yozildi")
+    except Exception as e:                                    # noqa: BLE001
+        check("bitta `erp_user_id` IKKI marta xaritalanmaydi",
+              "actor_erp_bir_marta" in str(e), str(e)[:90])
+
+    # Bir xil `erp_user_id` BOSHQA ijarachida — RUXSAT (indeks
+    # kompaniya bo'yicha). Ijarachilararo himoya bu yerda emas:
+    # `company_id` SESSIYADAN olinadi, so'rov tanasidan emas.
+    r3 = _erp_aktor(a_cid, "zzsinov_erp_1")
+    check("indeks KOMPANIYA bo'yicha — boshqa ijarachida mumkin",
+          db.query_one("SELECT company_id FROM actor WHERE id=%(i)s",
+                       {"i": r3["id"]})["company_id"] == a_cid)
+
+    # --- 7) Sinxronizatsiya IDEMPOTENT -------------------------------
+    if not A.erp_kontekst_ready():
+        check("ERP view i YO'Q -> sinxron `bajarildi=False` (nol EMAS)",
+              A.erp_sinxron(b_cid)["bajarildi"] is False)
+        return
+
+    # XARITANI TOZALAYMIZ — aks holda sinov O'Z QOLDIG'INI sinaydi.
+    #
+    # `_tozala()` aktorni faqat `active=false` qiladi. Natijada IKKINCHI
+    # yurishda sinxronizatsiya "yaratish" yo'liga umuman kirmasdi
+    # (`yaratildi=0`) va "ikkinchi yurishda yangi aktor yaratilmaydi"
+    # tekshiruvi BO'SH TO'PLAMDA o'tardi — ya'ni hech narsa isbotlamasdi.
+    # Bu yerda ERP xaritasini haqiqatan olib tashlaymiz; audit yoki
+    # qaror bilan bog'langan qator o'chmaydi va u holda o'tkazamiz.
+    ochirilmagan = []
+    for a in db.query("SELECT id FROM actor WHERE company_id=%(c)s "
+                      "  AND erp_user_id IS NOT NULL", {"c": b_cid}):
+        try:
+            db.execute_returning("DELETE FROM actor WHERE id=%(i)s RETURNING id",
+                                 {"i": a["id"]})
+        except Exception:                                     # noqa: BLE001
+            ochirilmagan.append(int(a["id"]))
+    check("ERP xaritasi sinovdan OLDIN tozalandi (deterministik yurish)",
+          not ochirilmagan,
+          f"bog'langani uchun qolgan: {ochirilmagan}")
+
+    quruq = A.erp_sinxron(b_cid, quruq=True)
+    check("quruq yurish hech narsa yozmaydi",
+          all(r["amal"] in ("yaratiladi", "nofaollashtiriladi", "otkazildi",
+                            "ozgarmadi")
+              for r in quruq["natija"]), str(quruq["xulosa"]))
+    oldin = db.query_one("SELECT count(*) n FROM actor WHERE company_id=%(c)s",
+                         {"c": b_cid})["n"]
+
+    s1 = A.erp_sinxron(b_cid)
+    for r in s1["natija"]:
+        if r.get("actor_id"):
+            _yaratilgan["actor"].append(int(r["actor_id"]))
+    # BIRINCHI yurish HAQIQATAN yaratganini tasdiqlaymiz — busiz
+    # "ikkinchi yurish yaratmadi" tekshiruvi ma'nosiz bo'lardi.
+    check("birinchi yurish aktor YARATDI (yo'l haqiqatan yurildi)",
+          s1["xulosa"].get("yaratildi", 0) > 0, str(s1["xulosa"]))
+    s2 = A.erp_sinxron(b_cid)
+    check("ikkinchi yurishda YANGI aktor yaratilmaydi",
+          s2["xulosa"].get("yaratildi", 0) == 0, str(s2["xulosa"]))
+    keyin = db.query_one("SELECT count(*) n FROM actor WHERE company_id=%(c)s",
+                         {"c": b_cid})["n"]
+    check("aktor soni ikkinchi yurishdan keyin O'ZGARMAYDI",
+          keyin == oldin + s1["xulosa"].get("yaratildi", 0),
+          f"{oldin} -> {keyin}, yaratildi={s1['xulosa'].get('yaratildi', 0)}")
+
+    # --- NOFAOLLASHTIRISH yo'li MAJBURAN yurgiziladi ------------------
+    #
+    # NEGA MAJBURAN: sinxronizatsiya nofaol ERP odamiga aktor YARATMAYDI,
+    # shuning uchun "nofaol -> faol aktor yo'q" tekshiruvi BO'SH
+    # TO'PLAMDA o'tardi va hech narsa isbotlamasdi. Bu yerda avval
+    # qo'lda FAOL aktor yaratamiz, keyin sinxronizatsiya uni
+    # nofaollashtirishi SHART.
+    nofaol_erp = db.query_one(
+        "SELECT DISTINCT erp_user_id, login, ism FROM erp.v_tai_actor "
+        " WHERE NOT faol LIMIT 1")
+    if nofaol_erp is None:
+        check("ERP da nofaol odam yo'q — nofaollashtirish YO'LI SINALMADI",
+              False, "fikstura yetishmadi (ERP da hamma faol)")
+    else:
+        mavjud = db.query_one(
+            "SELECT id FROM actor WHERE company_id=%(c)s AND erp_user_id=%(e)s",
+            {"c": b_cid, "e": nofaol_erp["erp_user_id"]})
+        if mavjud:
+            aid = int(mavjud["id"])
+            db.execute_returning("UPDATE actor SET active=true WHERE id=%(i)s "
+                                 "RETURNING id", {"i": aid})
+        else:
+            row = A.qosh(b_cid, login="zzsinov_nofaol",
+                         ism="ZZSINOV nofaol", rol="koruvchi", manba="erp",
+                         erp_user_id=nofaol_erp["erp_user_id"])
+            aid = int(row["id"])
+        _yaratilgan["actor"].append(aid)
+        check("fikstura: nofaol ERP odami FAOL aktor bo'lib turibdi",
+              db.query_one("SELECT active FROM actor WHERE id=%(i)s",
+                           {"i": aid})["active"] is True)
+
+        s3 = A.erp_sinxron(b_cid)
+        check("sinxronizatsiya uni NOFAOLLASHTIRDI",
+              db.query_one("SELECT active FROM actor WHERE id=%(i)s",
+                           {"i": aid})["active"] is False,
+              str(s3["xulosa"]))
+        # TESKARI YO'NALISH AVTOMATIK EMAS: qayta yurgizish uni
+        # FAOLLASHTIRMAYDI (bu vakolat qaytarish bo'lardi).
+        A.erp_sinxron(b_cid)
+        check("qayta sinxronizatsiya uni FAOLLASHTIRMAYDI",
+              db.query_one("SELECT active FROM actor WHERE id=%(i)s",
+                           {"i": aid})["active"] is False)
+
+    # --- NOMA'LUM ROL yo'li MAJBURAN yurgiziladi ----------------------
+    #
+    # Hamma ERP roli xaritada bo'lgani uchun bu tekshiruv ham BO'SH
+    # to'plamda o'tardi. Xaritadan bitta rolni VAQTINCHA olib tashlaymiz.
+    erp_rollar = [r["rol"] for r in db.query(
+        "SELECT DISTINCT rol FROM erp.v_tai_actor WHERE faol")]
+    sinov_rol = next((r for r in erp_rollar if r in A.ROL_XARITASI), None)
+    if sinov_rol is None:
+        check("ERP da faol, xaritalangan rol yo'q — NOMA'LUM ROL SINALMADI",
+              False, "fikstura yetishmadi")
+    else:
+        asl = dict(A.ROL_XARITASI)
+        try:
+            A.ROL_XARITASI.pop(sinov_rol)
+            s4 = A.erp_sinxron(b_cid, quruq=True)
+            tegishli = [r for r in s4["natija"] if r["erp_rol"] == sinov_rol]
+            check(f"noma'lum ERP roli ({sinov_rol!r}) XARITALANMAYDI",
+                  bool(tegishli) and all(r["amal"] == "otkazildi"
+                                         for r in tegishli),
+                  str([(r["login"], r["amal"]) for r in tegishli][:3]))
+            check("sabab AYTILADI (jimgina o'tkazilmaydi)",
+                  all("xaritalanmagan" in (r["sabab"] or "")
+                      for r in tegishli),
+                  str([r["sabab"] for r in tegishli][:1]))
+            check("jimgina eng past vakolatga TUSHIRILMAYDI",
+                  all(r["tai_rol"] is None for r in tegishli))
+        finally:
+            A.ROL_XARITASI.clear()
+            A.ROL_XARITASI.update(asl)
+
+    # SIR SIZMAYDI: javobda token bo'lmasin.
+    matn = str(A.erp_nomzodlar(b_cid))
+    check("javobda `token_hash` YO'Q",
+          "token_hash" not in matn and "expires_at" not in matn)
+
+
+# =====================================================================
 def main():
     ap = argparse.ArgumentParser(description="Aktor kimligi sinovi")
     rejim.bayroqlar(ap)
@@ -675,6 +937,7 @@ def main():
                 test_izchillik(db, a_cid, a_a)
                 test_audit_tuzatish(db)
                 test_api(db, a_cid, b_cid, a_a, b_a)
+                test_erp_kopik(db, a_cid, b_cid, a_a)
             finally:
                 _tozala(db)
 

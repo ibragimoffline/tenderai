@@ -155,8 +155,11 @@ def test_kodda_soxta_yol_yoq() -> None:
           req.count('Xato("ACTOR_REQUIRED_FOR_TRUST"') == 2)
 
     main = io.open(os.path.join(ROOT, "api", "main.py"), encoding="utf-8").read()
+    # `uncertain` QO'SHILDI (2026-09-02): ko'ruvchi shubhasini
+    # aytolmasa, u eng kam qarshilikli tugmani — `approved` ni —
+    # bosardi va o'lchov JIMGINA buzilardi.
     check("API sxemasi holatni Literal bilan qulflaydi",
-          'Literal["approved", "rejected", "corrected"]' in main
+          'Literal["approved", "rejected", "corrected", "uncertain"]' in main
           and 'Literal["approved", "rejected"]' in main,
           "noto'g'ri holat FastAPI darajasida 422 beradi")
 
@@ -168,9 +171,18 @@ def test_konstantalar() -> None:
     check("MASHINA_HOLATLARI = extracted + pending_review",
           R.MASHINA_HOLATLARI == {"extracted", "pending_review"},
           str(sorted(R.MASHINA_HOLATLARI)))
-    check("INSON_QARORLARI = approved + rejected + corrected",
-          R.INSON_QARORLARI == {"approved", "rejected", "corrected"},
+    check("INSON_QARORLARI = approved + rejected + corrected + uncertain",
+          R.INSON_QARORLARI == {"approved", "rejected", "corrected",
+                                "uncertain"},
           str(sorted(R.INSON_QARORLARI)))
+    # `uncertain` HAM inson qarori — "ko'rilmagan" EMAS. Agar u
+    # mashina o'qiga tushib qolsa, shubha "hali ko'rilmagan" bo'lib
+    # sanalardi va navbat raqami yolg'on chiqardi.
+    check("`uncertain` INSON o'qida (mashina o'qida EMAS)",
+          "uncertain" in R.INSON_QARORLARI
+          and "uncertain" not in R.MASHINA_HOLATLARI)
+    check("har inson qarorining AMALI bor",
+          set(R.AMAL) == R.INSON_QARORLARI, str(sorted(R.AMAL)))
     check("ikki to'plam KESISHMAYDI",
           not (R.MASHINA_HOLATLARI & R.INSON_QARORLARI),
           "bir holat ikkala o'qqa tegishli bo'lolmaydi")
@@ -532,12 +544,20 @@ def test_halqa_olchovi(conn) -> None:
         print(f"      {r[0]:16s} jami={r[1]:>6} qaror={r[2]:>5} "
               f"navbat={r[3]:>5} = {r[4]}%")
 
-    # QATLAMLAR BIR-BIRIDAN FARQ QILADI. "Halqa bo'sh" degan BITTA
-    # raqam bu farqni yashirardi: kod tasdig'i ishlayapti, talab
-    # ko'rigi esa bir marta ham ishlatilmagan.
+    # QATLAMLAR ALOHIDA O'LCHANADI. Ilgari bu yerda "foizlar bir
+    # xil bo'lmasin" deb tekshirilardi va u 2026-09-02 da yiqildi:
+    # halol hisoblagichdan keyin uchala qatlam ham 0.0% bo'ldi.
+    #
+    # ESKI TEKSHIRUV NOTO'G'RI EDI: u MA'LUMOT TASODIFINI qulflagan
+    # edi ("raqamlar har xil"), TUZILMANI emas. Uchala qatlamning
+    # bir xil bo'lishi mutlaqo qonuniy holat — masalan hech biri
+    # boshlanmagan bo'lsa. Tekshirilishi kerak bo'lgan narsa —
+    # qatlamlar ALOHIDA qatorda qaytishi va har biri O'Z dalilini
+    # olib yurishi.
     foizlar = {r[0]: float(r[4] or 0) for r in qatorlar}
-    check("qatlamlar bir xil EMAS (bitta raqam yetarli emas)",
-          len(set(foizlar.values())) > 1, str(foizlar))
+    check("uchala qatlam ALOHIDA qatorda qaytadi",
+          set(foizlar) == {"kod_tasdigi", "talab_korigi", "yonaltirish"},
+          str(sorted(foizlar)))
 
     # PILOT HOLATI — eskirgan to'plam yangisini bloklaydi.
     with conn.cursor() as cur:

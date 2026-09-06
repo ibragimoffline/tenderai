@@ -521,6 +521,254 @@ def test_endpoint() -> None:
 
 
 # =====================================================================
+# =====================================================================
+# 8) HUJJAT KASHFI — "qator UMUMAN yo'q" holati ko'rinadimi
+# =====================================================================
+#
+# O'LCHANGAN MUAMMO (2026-09-03): xt-xarid hujjat kashfi 2026-07-26 dan
+# beri yurmagan (148 ochiq tender, 0 hujjat) va buni 39 kun HECH NARSA
+# ko'rsatmadi. Sabab: `v_document_processing_coverage` MAVJUD hujjat
+# qatorlari ustidan foiz hisoblaydi — nol qatorli tender maxrajga
+# tushmaydi va 0/0 ko'rinmaydi.
+#
+# Bu bo'lim ikkala tomonni qulflaydi: KO'RINISH (view) va MEXANIZM
+# (`run_etl.py` da qadam chaqiriladimi, musbat tasdiq to'g'ri joydami).
+def test_kashf_statik() -> None:
+    section("Statik: kashf qadami chaqiriladimi va tasdiq TO'G'RI joydami")
+    yol = os.path.join(ROOT, "run_etl.py")
+    with io.open(yol, encoding="utf-8") as f:
+        kod = _kodsiz(f.read())
+
+    check("`etl_details.py` quvurga qo'shiladi", '"etl_details.py"' in kod)
+    check("soatlik yurishda `--only-open` beriladi", '"--only-open"' in kod)
+    check("musbat tasdiq bor (`siljish_tekshir`)",
+          '"xt-xarid hujjat kashfi"' in kod)
+
+    # TARTIB QULFI. `expire_stale_tenders()` `open` ni `expired` ga
+    # o'tkazadi: tasdiq undan KEYIN o'lchansa, hujjatsiz tender BIRORTA
+    # HUJJAT OLINMASDAN hisobdan chiqib ketardi va tekshiruv SOXTA
+    # "kamaydi" deb yashil bo'lardi. Chaqiruv joyi bo'yicha tekshiramiz
+    # (funksiya TA'RIFI fayl boshida turadi — u hisobga olinmasin).
+    i_tasdiq = kod.find('siljish_tekshir("xt-xarid hujjat kashfi"')
+    i_supur = kod.find("n_exp = expire_stale_tenders(done)")
+    check("tasdiq supurishdan OLDIN o'lchanadi",
+          i_tasdiq != -1 and i_supur != -1 and i_tasdiq < i_supur,
+          f"tasdiq={i_tasdiq} supurish={i_supur}")
+
+
+def test_kashf_korinishi(conn) -> None:
+    section("Baza: v_hujjatsiz_ochiq_tender invariantlari")
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT source_platform, ochiq_tender, kutilgan, hujjatli, "
+            "       hujjatsiz, hujjatsiz_foiz "
+            "  FROM v_hujjatsiz_ochiq_tender ORDER BY source_platform")
+        qatorlar = cur.fetchall()
+
+    # PLATFORMA RO'YXATI QAT'IY: `GROUP BY` bo'lganda ochiq tenderi
+    # qolmagan platforma qatori UMUMAN chiqmasdi va operator uni
+    # "muammo yo'q" deb o'qirdi (`v_notify_saglik` dagi xato).
+    check("platforma ro'yxati QAT'IY — har doim 2 qator",
+          len(qatorlar) == 2, f"olingan={len(qatorlar)}")
+    check("platformalar kutilganidek",
+          [r[0] for r in qatorlar] == ["uzex", "xt-xarid"],
+          str([r[0] for r in qatorlar]))
+
+    for platforma, ochiq, kutilgan, hujjatli, hujjatsiz, foiz in qatorlar:
+        # QOLDIQSIZ TOIFALASH — yig'indi jamiga teng bo'lsin.
+        check(f"{platforma}: hujjatli + hujjatsiz == kutilgan",
+              hujjatli + hujjatsiz == kutilgan,
+              f"{hujjatli}+{hujjatsiz} != {kutilgan}")
+        check(f"{platforma}: kutilgan <= ochiq_tender",
+              kutilgan <= ochiq, f"{kutilgan} > {ochiq}")
+
+        # O'LCHOVSIZLIK `0` GA AYLANMASIN. Maxraj nol bo'lganda foiz
+        # `NULL` bo'lishi SHART: `0%` "muammo yo'q" degan ma'no beradi,
+        # holbuki hech narsa o'lchanmagan.
+        check(f"{platforma}: kutilgan=0 <=> foiz NULL",
+              (kutilgan == 0) == (foiz is None),
+              f"kutilgan={kutilgan} foiz={foiz}")
+
+        # MUHLAT: yangi ko'rilgan tenderda hujjat hali bo'lmasligi normal.
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM tender WHERE status='open' "
+                " AND source_platform=%s "
+                " AND first_seen_at >= now() - interval '2 hours'",
+                (platforma,))
+            yosh = cur.fetchone()[0]
+        check(f"{platforma}: muhlat hurmat qilinadi (kutilgan == ochiq - yosh)",
+              kutilgan == ochiq - yosh, f"{kutilgan} != {ochiq} - {yosh}")
+
+
+def test_kashf_hujjat_qoshilsa(conn) -> None:
+    section("Baza: hujjat qo'shilsa tender `hujjatsiz` dan chiqadimi")
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT t.id, t.source_platform FROM tender t "
+            " WHERE t.status = 'open' "
+            "   AND t.first_seen_at < now() - interval '2 hours' "
+            "   AND NOT EXISTS (SELECT 1 FROM tender_document d "
+            "                    WHERE d.tender_id = t.id) "
+            " ORDER BY t.id LIMIT 1")
+        r = cur.fetchone()
+
+    if r is None:
+        # Bu HAM o'lchov: bo'sh tender qolmagan bo'lsa ikkala platforma
+        # ham `hujjatsiz = 0` deyishi SHART. Aks holda ko'rinish va
+        # ma'lumot bir-biriga zid.
+        with conn.cursor() as cur:
+            cur.execute("SELECT coalesce(sum(hujjatsiz), 0) "
+                        "  FROM v_hujjatsiz_ochiq_tender")
+            check("hujjatsiz tender yo'q -> ko'rinish ham 0 deydi",
+                  cur.fetchone()[0] == 0)
+        return
+
+    tid, platforma = r
+
+    def hujjatsiz_soni() -> int:
+        with conn.cursor() as cur:
+            cur.execute("SELECT hujjatsiz FROM v_hujjatsiz_ochiq_tender "
+                        " WHERE source_platform = %s", (platforma,))
+            return cur.fetchone()[0]
+
+    oldin = hujjatsiz_soni()
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO tender_document (tender_id, file_ref, source_platform,"
+            " fetched_at, holat, urinish) "
+            "VALUES (%s, %s, %s, now(), 'navbatda', 0)",
+            (tid, PREFIKS + "kashf.pdf", platforma))
+    keyin = hujjatsiz_soni()
+    check("hujjat qo'shilsa `hujjatsiz` KAMAYADI",
+          keyin == oldin - 1, f"{oldin} -> {keyin}")
+
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM tender_document WHERE file_ref LIKE %s",
+                    (PREFIKS + "%",))
+    check("tozalangach hisob QAYTADI",
+          hujjatsiz_soni() == oldin, f"kutilgan={oldin}")
+
+
+def test_kashf_ops_holat(conn) -> None:
+    section("Baza: v_ops_holat da `hujjat_kashfi` komponenti")
+    with conn.cursor() as cur:
+        cur.execute("SELECT kesim, holat, qiymat FROM v_ops_holat "
+                    " WHERE komponent = 'hujjat_kashfi' ORDER BY kesim")
+        qatorlar = cur.fetchall()
+        cur.execute("SELECT source_platform, kutilgan, hujjatsiz_foiz "
+                    "  FROM v_hujjatsiz_ochiq_tender ORDER BY source_platform")
+        manba = {p: (k, f) for p, k, f in cur.fetchall()}
+
+    check("ikkala platforma ham operator ekranida bor", len(qatorlar) == 2,
+          f"olingan={len(qatorlar)}")
+    for kesim, holat, qiymat in qatorlar:
+        check(f"{kesim}: holat lug'atdan",
+              holat in ("ok", "ogoh", "xato", "nomalum"), str(holat))
+        kutilgan, foiz = manba.get(kesim, (None, None))
+        # O'LCHOVSIZ HOLAT `ok` DEB KO'RSATILMAYDI.
+        check(f"{kesim}: kutilgan=0 <=> holat 'nomalum'",
+              (kutilgan == 0) == (holat == "nomalum"),
+              f"kutilgan={kutilgan} holat={holat}")
+        if foiz is not None:
+            kutilgan_holat = ("xato" if foiz >= 50
+                              else "ogoh" if foiz > 0 else "ok")
+            check(f"{kesim}: chegara qoidasi bajarilgan ({foiz}%)",
+                  holat == kutilgan_holat, f"{holat} != {kutilgan_holat}")
+
+
+# =====================================================================
+# 9) SABAB — "rejalashtirilmagan" umumiy QOP bo'lib qolmasin
+# =====================================================================
+#
+# O'LCHANGAN MUAMMO (2026-09-03): `rejalashtirilmagan` 7 028 qator edi
+# va u "nega" degan savolga javob bermasdi. Javobsiz qop ikki xil
+# narsani bir raqamda saqlaydi — QARORGA KERAKMAS hujjat (tender
+# yakunlangan, bu normal) va QARORGA KERAK hujjat (bu nuqson).
+# Birinchisi ikkinchisini bekitadi.
+def test_sabab_qoldiqsiz(conn) -> None:
+    section("Sabab: har hujjat AYNAN bitta sababga tushadi")
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM v_document_state WHERE sabab IS NULL")
+        bosh = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM v_document_state")
+        jami = cur.fetchone()[0]
+        cur.execute("SELECT coalesce(sum(n), 0) FROM v_document_qamrov_sabab")
+        yigindi = cur.fetchone()[0]
+        cur.execute("SELECT coalesce(sum(n), 0) FROM v_document_qamrov_sabab "
+                    " WHERE sabab = 'sabab_nomalum'")
+        nomalum = cur.fetchone()[0]
+
+    check("`sabab` HECH QAYERDA null emas", bosh == 0, f"{bosh} ta null")
+    check("qamrov yig'indisi holat soniga TENG (qoldiqsiz)",
+          jami == yigindi, f"{jami} vs {yigindi}")
+    # LUG'ATSIZ status JIMGINA "yakunlangan" ga qo'shilmasin.
+    check("`sabab_nomalum` = 0 (dim_status to'liq)", nomalum == 0,
+          f"{nomalum} ta hujjat lug'atsiz statusli tenderda")
+
+
+def test_sabab_dim_statusdan(conn) -> None:
+    """Sabab QATTIQ RO'YXATDAN emas, `dim_status.is_terminal` dan chiqsin.
+
+    Qattiq yozilgan status ro'yxati manba yangi status qo'shganda
+    JIMGINA eskirardi — bu loyihada o'sha sinf xato takrorlangan.
+    """
+    section("Sabab: `dim_status.is_terminal` dan kelib chiqadi")
+    TID_YAKUN, TID_JARAYON = 990_000_101, 990_000_102
+    try:
+        with conn.cursor() as cur:
+            # Yakuniy status (is_terminal = true)
+            cur.execute("SELECT status_code FROM dim_status "
+                        " WHERE domain='tender' AND is_terminal LIMIT 1")
+            yakuniy = cur.fetchone()[0]
+            # Yakuniy EMAS, lekin 'open' ham emas — baholash bosqichi
+            cur.execute("SELECT status_code FROM dim_status "
+                        " WHERE domain='tender' AND NOT is_terminal "
+                        "   AND status_code <> 'open' LIMIT 1")
+            r = cur.fetchone()
+            jarayon = r[0] if r else None
+
+            for tid, st in ((TID_YAKUN, yakuniy), (TID_JARAYON, jarayon)):
+                if st is None:
+                    continue
+                cur.execute(
+                    "INSERT INTO tender (id, source_id, source_platform, "
+                    "  status, raw_json) VALUES (%s, %s, 'zzsabab', %s, '{}') "
+                    "ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status",
+                    (tid, tid, st))
+                cur.execute(
+                    "INSERT INTO tender_document (tender_id, file_ref, "
+                    "  source_platform, fetched_at, holat, urinish) "
+                    "VALUES (%s, %s, 'zzsabab', now(), "
+                    "        'rejalashtirilmagan', 0) "
+                    "ON CONFLICT (tender_id, file_ref) DO NOTHING",
+                    (tid, PREFIKS + f"sabab-{tid}.pdf"))
+
+            cur.execute("SELECT tender_id, sabab FROM v_document_state "
+                        " WHERE tender_id = ANY(%s)",
+                        ([TID_YAKUN, TID_JARAYON],))
+            s = dict(cur.fetchall())
+
+        check(f"yakuniy status ({yakuniy!r}) -> 'tender_yakunlangan'",
+              s.get(TID_YAKUN) == "tender_yakunlangan", str(s.get(TID_YAKUN)))
+        if jarayon:
+            # ENG MUHIM: baholash bosqichidagi tender YAKUNLANGAN EMAS.
+            # Eski umumiy qopda u yakunlanganlar bilan bir raqamda edi.
+            check(f"baholash bosqichi ({jarayon!r}) -> 'tender_jarayonda'",
+                  s.get(TID_JARAYON) == "tender_jarayonda",
+                  str(s.get(TID_JARAYON)))
+            check("baholash bosqichi YAKUNLANGAN deb sanalmaydi",
+                  s.get(TID_JARAYON) != "tender_yakunlangan")
+        else:
+            check("dim_status da baholash bosqichi bor", False,
+                  "fikstura yetishmadi")
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM tender_document WHERE file_ref LIKE %s",
+                        (PREFIKS + "sabab-%",))
+            cur.execute("DELETE FROM tender WHERE source_platform='zzsabab'")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Hujjat qamrovi sinovi")
     rejim.bayroqlar(ap)
@@ -532,6 +780,7 @@ def main() -> None:
 
     test_delete_insert_yoq()
     test_qayta_urinish_statik()
+    test_kashf_statik()
     test_endpoint()
 
     conn = db_conn()
@@ -550,6 +799,11 @@ def main() -> None:
         test_qamrov_yigiladi(conn)
         test_holat_dalildan(conn)
         test_yetim_matnlar(conn)
+        test_kashf_korinishi(conn)
+        test_kashf_hujjat_qoshilsa(conn)
+        test_kashf_ops_holat(conn)
+        test_sabab_qoldiqsiz(conn)
+        test_sabab_dim_statusdan(conn)
         if tid is not None:
             test_baza_qulflari(conn, tid)
             test_hayot_sikli(conn, tid)

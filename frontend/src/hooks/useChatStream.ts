@@ -39,6 +39,13 @@ export interface ChatDone {
   citations: Citation[]
 }
 
+/**
+ * Suhbat QAYERDAN boshlangani. `eval` bu yerda ATAYLAB YO'Q:
+ * uni faqat `_tests/ai_eval/run_eval.py` yozadi va server ham
+ * mijozdan qabul qilmaydi.
+ */
+export type ChatManba = 'panel' | 'global' | 'gonogo' | 'match'
+
 export interface ChatState {
   /** Oqib kelayotgan javob matni (markdown). */
   text: string
@@ -87,9 +94,33 @@ export function useChatStream() {
     setState(BOSH)
   }, [stop])
 
+  /**
+   * MAVJUD SESSIYANI DAVOM ETTIRADI.
+   *
+   * O'LCHANGAN NUQSON (2026-09-04). `sessionId` FAQAT shu hook'ning
+   * state'ida yashardi. Panel yopilganda `ChatPanel` unmount bo'lardi
+   * (`App.tsx` uni shartli chizadi), state yo'qolardi va keyingi
+   * savol `session_id: null` bilan ketardi -- ya'ni HAR OCHILISH
+   * yangi sessiya.
+   *
+   * Jurnalda bu shunday ko'rindi: 133 sessiyadan 131 tasida ANIQ
+   * 2 xabar (1 savol + 1 javob), ayni tender bo'yicha 114 juft
+   * sessiyaning 106 tasi 5 daqiqa ichida, bitta tender uchun 28 ta
+   * alohida sessiya. "2 xabar/sessiya" o'lchovi FOYDALANUVCHI
+   * USLUBI deb o'qilgan edi -- aslida u shu nuqsonning izi.
+   *
+   * `reset()` DAN FARQI: u hammasini tozalaydi (`sessionId` ni ham),
+   * bu esa yangi kontekstni ochib sessiya ipini SAQLAYDI.
+   */
+  const davom = useCallback((sessionId: string | null) => {
+    stop()
+    setState({ ...BOSH, sessionId })
+  }, [stop])
+
   const send = useCallback(async (
     message: string,
-    opts: { sessionId?: string | null; tenderId?: number | null; lang?: string } = {},
+    opts: { sessionId?: string | null; tenderId?: number | null
+            lang?: string; manba?: ChatManba } = {},
   ) => {
     stop()
     const ac = new AbortController()
@@ -109,6 +140,10 @@ export function useChatStream() {
           session_id: opts.sessionId ?? null,
           tender_id: opts.tenderId ?? null,
           lang: opts.lang ?? null,
+          // MANBA -- faqat YANGI sessiya ochilganda ma'noga ega
+          // (server `session_id` bo'lsa uni o'qimaydi). Belgisiz
+          // sessiya o'lchovda "noma'lum" bo'lib qoladi.
+          manba: opts.manba ?? null,
         }),
         signal: ac.signal,
       })
@@ -203,5 +238,5 @@ export function useChatStream() {
     }
   }, [stop])
 
-  return { state, send, stop, reset }
+  return { state, send, stop, reset, davom }
 }

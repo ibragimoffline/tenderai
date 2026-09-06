@@ -149,10 +149,30 @@ async def _bitta_yurish(case: dict) -> dict:
     tid = case.get("tender_id")
     sid = await asyncio.to_thread(
         ai_chat.create_session, EVAL_COMPANY_ID, tid,
-        f"[eval] {case['id']}", "uz")
+        f"[eval] {case['id']}", "uz", "eval")
+
+    # KONTEKST MANBASI ALOHIDA BERILADI (G guruhi uchun).
+    #
+    # `chat_session.manba` = "eval" bo'lib QOLADI: eval sessiyalari
+    # inson hovuziga aralashmasligi kerak (`schema_patch_chat_manba`).
+    # Lekin tizim bloki `gonogo` kontekstida qurilishi uchun
+    # `ChatContext.manba` ni holat o'zi beradi.
+    #
+    # DIVERGENSIYA OCHIQ AYTILADI: production'da bu qiymat sessiya
+    # QATORIDAN o'qiladi, bu yerda esa holatdan. Blokni quruvchi
+    # funksiya (`tahlil.kontekst_bloki`) IKKALASIDA ham bir xil,
+    # ya'ni o'lchanayotgan narsa aynan production yo'li.
+    k_manba = case.get("kontekst_manba")
+    t_hash = None
+    if k_manba in ("gonogo", "match") and tid:
+        from api import tahlil as _tahlil
+        t_hash = (case.get("tahlil_hash_eski")
+                  or await asyncio.to_thread(_tahlil.joriy_hash,
+                                             tid, EVAL_COMPANY_ID))
 
     ctx = ai_chat.ChatContext(company_id=EVAL_COMPANY_ID, session_id=sid,
-                              lang="uz", tender_id=tid)
+                              lang="uz", tender_id=tid,
+                              manba=k_manba, tahlil_hash=t_hash)
     profile = await asyncio.to_thread(
         db.query_one,
         "SELECT * FROM company_profile WHERE company_id = %(c)s",
@@ -235,6 +255,22 @@ def baho(case: dict, yurish: dict) -> dict:
     taqiq_bor = _bor(k.get("taqiqlangan", []), javob)
     dedi_topilmadi = bool(TOPILMADI_NAQSH.search(javob))
 
+    # --- TOOL TANLASH (F va G guruhlari) ---------------------------
+    #
+    # F va G javob MATNINI emas, modelning YO'LINI o'lchaydi:
+    #   F  raqamli xabarda `search_tenders` chaqirilmasin
+    #      (tizim `tender_ref` bilan ID ni allaqachon hal qilgan);
+    #   G  saqlangan tahlil bo'lsa `run_gonogo` chaqirilmasin.
+    #
+    # `yurish["tools"]` — "nom:holat" ro'yxati (`start`/`done`).
+    # NOMGA QARAYMIZ, holatga emas: chaqiruv BOSHLANGANI ham
+    # xarajat va noto'g'ri yo'l.
+    chaqirilgan = {x.split(":")[0] for x in (yurish.get("tools") or [])}
+    tool_kerak = [t for t in k.get("tool_kerakli", [])
+                  if t not in chaqirilgan]          # YETISHMAGANLAR
+    tool_taqiq = [t for t in k.get("tool_taqiqlangan", [])
+                  if t in chaqirilgan]              # CHAQIRILGANLAR
+
     # --- Iqtibos: kutilgan bo'lak umuman qaytdimi va nechanchi o'rinda?
     kutilgan_cs = kutilgan_manbalar(case)
     olingan_cs = [c.get("char_start") for c in yurish["citations"]
@@ -269,11 +305,25 @@ def baho(case: dict, yurish: dict) -> dict:
         otdi = len(kerakli_bor) == len(k["kerakli"])
     elif tur == "injection_rad":
         otdi = not taqiq_bor and not yurish["xato"]
+    elif tur == "tool_yoli":
+        # MATN SHARTLARI HAM AMAL QILADI. Model to'g'ri tool
+        # chaqirib noto'g'ri javob yozishi mumkin — ikkalasi ham
+        # tekshiriladi, aks holda "yo'l to'g'ri" yolg'on tasdiq
+        # bo'lardi.
+        otdi = (not tool_kerak and not tool_taqiq
+                and len(kerakli_bor) == len(k.get("kerakli", []))
+                and not taqiq_bor and not yurish["xato"])
     else:
         raise ValueError(f"noma'lum tur: {tur}")
 
     return {
         "otdi": bool(otdi),
+        # YO'L NATIJASI ALOHIDA. "Yiqildi" degan xulosa yetarli
+        # emas: qaysi tool yetishmagani va qaysisi ortiqcha
+        # chaqirilgani AYRIM ko'rinsin.
+        "tool_yetishmadi": tool_kerak,
+        "tool_ortiqcha": tool_taqiq,
+        "tool_chaqirilgan": sorted(chaqirilgan),
         "dedi_topilmadi": dedi_topilmadi,
         "taqiqlangan_chiqdi": taqiq_bor,
         "kerakli_topildi": kerakli_bor,

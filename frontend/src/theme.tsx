@@ -23,6 +23,15 @@ export const THEME_KEY = 'tender-ai:theme'
 
 const mq = () => window.matchMedia('(prefers-color-scheme: dark)')
 
+/** Brauzer chrome rangi — `index.css` dagi `--background` bilan AYNAN
+ *  bir xil bo'lishi kerak (yorug' `:root`, qorong'i `.dark`).
+ *  `theme-init.js` da ham shu ikki qiymat turadi: u React dan oldin,
+ *  birinchi bo'yashdan avval ishlaydi. Qiymat o'zgarsa — uch joyda ham. */
+export const THEME_COLOR: Record<ResolvedTheme, string> = {
+  light: '#f6f8fc',
+  dark: '#11151e',
+}
+
 export function readThemeChoice(): ThemeChoice {
   const v = localStorage.getItem(THEME_KEY)
   return v === 'light' || v === 'dark' ? v : 'system'
@@ -42,6 +51,11 @@ export function applyTheme(resolved: ResolvedTheme): void {
   // kalendari, avtoto'ldirish foni) `color-scheme` ga qaraydi. Busiz
   // qorong'i sahifada oq skrollbar va oq kalendar qolib ketardi.
   root.style.colorScheme = resolved
+  // Mobil brauzerning manzil paneli sahifa foni bilan qo'shilib ketsin.
+  // Tag `index.html` da turadi; topilmasa jimgina o'tiladi — mavzu
+  // almashishi bundan to'xtamasligi kerak.
+  document.querySelector('meta[name="theme-color"]')
+    ?.setAttribute('content', THEME_COLOR[resolved])
 }
 
 interface ThemeCtx {

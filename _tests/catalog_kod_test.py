@@ -321,6 +321,68 @@ def test_baza(db):
 
 
 # =====================================================================
+def test_provenans(db):
+    """"Kodi bor" va "ISHONCHLI kodi bor" BIR RAQAMDA turmasin.
+
+    O'LCHANGAN MUAMMO (2026-09-03). `v_catalog_kod_qamrov` ikki foiz
+    beradi va ikkalasi ham ANIQLIKNI (kod 8 belgimi yoki 5) o'lchaydi,
+    ISHONCHNI emas:
+
+        aniq_foiz        25.97   (467 ta 8 belgili kod)
+        har_qanday_foiz  58.29   (1 048 ta kodli mahsulot)
+
+    Provenans o'lchanganda manzara TESKARI:
+
+        tasdiqlagan='tizim:auto', ishonch='servis'            467
+        tasdiqlagan='kompaniya',  ishonch='kuzatuvdan_oldin'  581
+        ishonch IN ('erp_sessiya','aktor_elon')                 0
+
+    Ya'ni `aniq_kod` — eng ishonchli to'plam kabi o'qiladi, aslida u
+    100% MASHINA qo'ygan. Va ikki raqam TASODIFAN teng (25.97):
+    467 ta "aniq" kod aynan 467 ta mashina kodining o'zi — shuning
+    uchun "aniqlik" deb o'qilgan foiz aslida "mashina" degani edi.
+
+    Bu sinov ikki o'lchov ARALASHMASLIGINI qulflaydi.
+    """
+    bolim("Provenans: aniqlik va ishonch ARALASHMAYDI")
+    r = db.query_one("""
+        SELECT * FROM v_catalog_kod_provenans
+         WHERE company_id = (SELECT min(id) FROM company_account WHERE active)""")
+    if not r:
+        check("v_catalog_kod_provenans qatori bor", False, "faol ijarachi yo'q")
+        return
+
+    # QOLDIQSIZ TOIFALASH — sinflar o'zaro istisno va jamiga teng.
+    yigindi = (r["kodsiz"] + r["rad_etilgan"] + r["nomzod"]
+               + r["provenans_nomalum"] + r["mashina_tasdigi"]
+               + r["anonim_tasdiq"] + r["inson_tasdigi"])
+    check("sinflar yig'indisi mahsulot soniga TENG",
+          yigindi == r["mahsulot"], f"{yigindi} != {r['mahsulot']}")
+
+    # ASOSIY INVARIANT: qamrov va inson tasdig'i ALOHIDA raqam.
+    check("`inson_foiz` `qamrov_foiz` dan ALOHIDA",
+          r["inson_foiz"] <= r["qamrov_foiz"],
+          f"inson={r['inson_foiz']} qamrov={r['qamrov_foiz']}")
+    # Mashina tasdig'i INSON tasdig'i deb sanalmaydi.
+    check("mashina tasdig'i `inson_tasdigi` ga QO'SHILMAYDI",
+          r["inson_tasdigi"] == db.scalar("""
+              SELECT count(DISTINCT product_id) FROM catalog_product_code
+               WHERE tasdiq_ishonch IN ('erp_sessiya','aktor_elon')"""),
+          f"inson_tasdigi={r['inson_tasdigi']}")
+
+    # ANIQLIK — MUSTAQIL o'lchov, ishonch sinfiga bog'liq emas.
+    check("`aniq_kodli` ishonch sinfidan MUSTAQIL ustun",
+          r["aniq_kodli"] is not None and r["faqat_keng"] is not None)
+    check("aniq + faqat_keng = kodli mahsulotlar",
+          r["aniq_kodli"] + r["faqat_keng"] == r["mahsulot"] - r["kodsiz"],
+          f"{r['aniq_kodli']}+{r['faqat_keng']} vs "
+          f"{r['mahsulot'] - r['kodsiz']}")
+
+    # DALIL: `qaror_id` bo'lmasa "qaysi qoida qo'ydi" javobsiz qoladi.
+    check("`dalilli` ustuni BOR (dalilsizni yashirmaydi)",
+          r["dalilli"] is not None, str(r["dalilli"]))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Katalog kodlash sinovi")
     rejim.bayroqlar(ap)
@@ -344,6 +406,7 @@ def main():
             db.init_pool()
             test_avtomatik_yol_tugadi(db)
             test_baza(db)
+            test_provenans(db)
         except Exception as e:                                # noqa: BLE001
             check("bazali tekshiruv", False, str(e)[:100])
 

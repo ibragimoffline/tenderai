@@ -644,6 +644,23 @@ def test_yetim_yurish(conn) -> None:
                 "        now() - interval '9 hours 55 minutes', 'tugadi') "
                 "RETURNING id")
             d = cur.fetchone()[0]
+            # E) UZOQ BOSHLANGAN, LEKIN TIRIK — yurak urib turibdi.
+            #
+            # O'LCHANGAN NUQSON (2026-09-03): shart `started_at < now() - N`
+            # edi, ya'ni "qachon BOSHLANGAN". `v_etl_osilgan` va
+            # `v_ops_holat` esa "qachondan beri JIM" deb hisoblaydi —
+            # bitta tizimda "osilgan" ning IKKI TA'RIFI bor edi.
+            # Byudjeti kattaroq (`ETL_MAX_SECONDS=2400+`) TIRIK yurish
+            # shu yerda `error` deb yopilardi, ko'rinishda esa sog'lom
+            # ko'rinardi: YOZUV YOLG'ON, jarayon esa yurishda davom
+            # etardi. Bu qator o'sha ziddiyatni qulflaydi.
+            cur.execute(
+                "INSERT INTO etl_run (source_platform, status, started_at, "
+                "  heartbeat_at, processed) "
+                "VALUES ('_sinov','running', now() - interval '5 hours', "
+                "        now() - interval '1 minute', 900) "
+                "RETURNING id")
+            e = cur.fetchone()[0]
 
         yopildi = run_etl.close_stale_runs(2.0)
         check("yetim qatorlar yopildi", yopildi >= 3, f"{yopildi} ta")
@@ -651,7 +668,7 @@ def test_yetim_yurish(conn) -> None:
         with conn.cursor() as cur:
             cur.execute("SELECT id, status, terminal_reason, davomiylik_sek, xato "
                         "FROM v_etl_run_olchov WHERE id = ANY(%s) ORDER BY id",
-                        ([a, b, c, d],))
+                        ([a, b, c, d, e],))
             r = {x[0]: x for x in cur.fetchall()}
 
         # ZIDDIYATLI O'QILISH BO'LMASIN: yurish uzilgan bo'lsa
@@ -675,9 +692,80 @@ def test_yetim_yurish(conn) -> None:
               r[b][3] is None,
               "o'lchanmagan narsa nolga aylantirilmaydi")
         check("YANGI yurishga tegilmadi", r[c][1] == "running", str(r[c][1]))
+        # TIRIK YURISH O'LDIRILMAYDI — "osilgan" HEARTBEAT bilan
+        # o'lchanadi, boshlanish vaqti bilan emas. Ta'rif
+        # `v_etl_osilgan` dagi bilan AYNAN bir xil bo'lishi shart.
+        check("5 soat yurgan, LEKIN TIRIK yurish yopilmadi",
+              r[e][1] == "running",
+              f"{r[e][1]} — yurak 1 daqiqa oldin urgan edi")
+        # -------------------------------------------------------------
+        # DARVOZA: HOST va MANBA ajratiladimi (0074)
+        # -------------------------------------------------------------
+        # O'LCHANGAN MUAMMO (2026-09-03): `v_etl_saglik` da faqat
+        # `uzildi` ustuni bor edi. "Biz aybdormiz" (host o'ldirdi) va
+        # "manba yiqildi" BIR `xato` ustunida yig'ilardi, holbuki SRE
+        # qarori ikkisida BUTUNLAY BOSHQA. Va `terminal_reason`
+        # 2026-08-30 gacha yozilmagani uchun 12 ta HAQIQIY host
+        # uzilishi tasnifsiz qolardi — host ulushi PAST ko'rinardi.
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM etl_run WHERE source_platform='_darvoza'")
+            # a) yangi uslub: terminal_reason yozilgan
+            cur.execute(
+                "INSERT INTO etl_run (source_platform, status, started_at, "
+                "  finished_at, heartbeat_at, terminal_reason, error) "
+                "VALUES ('_darvoza','error', now()-interval '1 hour', "
+                "        now()-interval '59 minutes', now()-interval '59 minutes',"
+                "        'uzildi', 'yurish tugamasdan uzildi ...')")
+            # b) ESKI uslub: terminal_reason YO'Q, faqat matn
+            cur.execute(
+                "INSERT INTO etl_run (source_platform, status, started_at, "
+                "  finished_at, heartbeat_at, error) "
+                "VALUES ('_darvoza','error', now()-interval '2 hours', "
+                "        now()-interval '119 minutes', now()-interval '119 minutes',"
+                "        'yurish tugamasdan uzildi (kompyuter uxlagan)')")
+            # c) MANBA xatosi — host aybdor EMAS
+            cur.execute(
+                "INSERT INTO etl_run (source_platform, status, started_at, "
+                "  finished_at, heartbeat_at, terminal_reason, error) "
+                "VALUES ('_darvoza','error', now()-interval '3 hours', "
+                "        now()-interval '179 minutes', now()-interval '179 minutes',"
+                "        'manba_xato', 'HTTP 503 manba javob bermadi')")
+            # d) sog'lom yurish
+            cur.execute(
+                "INSERT INTO etl_run (source_platform, status, started_at, "
+                "  finished_at, heartbeat_at, terminal_reason) "
+                "VALUES ('_darvoza','ok', now()-interval '4 hours', "
+                "        now()-interval '4 hours' + interval '30 seconds', "
+                "        now()-interval '4 hours' + interval '30 seconds', 'tugadi')")
+
+            cur.execute(
+                "SELECT yurish, ok, xato, host_uzildi, manba_xato, "
+                "       tasniflanmagan, foydali_foiz, ort_sek_ok, darvoza "
+                "  FROM v_etl_saglik WHERE source_platform='_darvoza'")
+            g = cur.fetchone()
+
+        check("darvoza: eski VA yangi uslubdagi uzilish HOST deb sanaldi",
+              g[3] == 2, f"host_uzildi={g[3]}, kutilgan 2")
+        check("darvoza: manba xatosi HOST ga QO'SHILMADI",
+              g[4] == 1 and g[3] == 2, f"manba={g[4]} host={g[3]}")
+        # QOLDIQSIZ TOIFALASH — yig'indi jamiga teng.
+        check("darvoza: xato == host + manba + tasniflanmagan",
+              g[2] == g[3] + g[4] + g[5],
+              f"{g[2]} != {g[3]}+{g[4]}+{g[5]}")
+        check("darvoza: tasniflanmagan ustuni BOR va u nolga aylantirilmaydi",
+              g[5] == 0, str(g[5]))
+        # `ort_sek_ok` FAQAT sog'lom yurishlarni oladi. Aks holda
+        # uzilgan yurishning soatlari o'rtachani shishirardi va
+        # "ETL sekin" degan YOLG'ON xulosa chiqardi.
+        check("darvoza: ort_sek_ok faqat SOG'LOM yurishdan (30s)",
+              g[7] is not None and 25 <= float(g[7]) <= 35,
+              f"{g[7]}s — uzilganlar qo'shilsa soatlar chiqardi")
+        check("darvoza: host uzilishi bo'lsa hukm 'host_uziladi'",
+              g[8] == "host_uziladi", str(g[8]))
     finally:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM etl_run WHERE source_platform='_sinov'")
+            cur.execute("DELETE FROM etl_run WHERE source_platform='_darvoza'")
 
 
 # =====================================================================

@@ -83,11 +83,45 @@ def test_tuzilma():
         ("caddy", "Caddyfile"),
         ("bin", "deploy.sh"), ("bin", "rollback.sh"), ("bin", "backup.sh"),
         ("bin", "restore-test.sh"), ("bin", "health-check.sh"),
-        ("bin", "bootstrap.sh"),
+        ("bin", "bootstrap.sh"), ("bin", "oldindan-tekshir.sh"),
         ("env", "staging.env.example"), ("env", "production.env.example"),
     ]
     for p in kerak:
         check("/".join(p), os.path.exists(os.path.join(D, *p)))
+
+    # --- QATOR OXIRI: `\r` skriptni Linux'da O'LDIRADI --------------------
+    # O'LCHANGAN XAVF (2026-09-03). `core.autocrlf=true` Windows'da
+    # checkout paytida LF ni CRLF ga o'giradi. Repozitoriyadagi nusxa
+    # LF bo'lib qoladi, ya'ni SERVER zarar ko'rmaydi — lekin MASHQ
+    # ko'radi: 16- va 17-bo'limlar shu skriptlarni HAQIQATAN
+    # yurgizadi va CRLF bilan `bash` birinchi qatordayoq yiqiladi
+    # ("/usr/bin/env bash^M: bad interpreter").
+    #
+    # O'LCHANDI: `run_etl.sh` ishchi nusxada ALLAQACHON CRLF edi va
+    # buni hech narsa ko'rsatmasdi. `.gitattributes` shuning uchun
+    # qo'shildi.
+    ga = os.path.join(ROOT, ".gitattributes")
+    check("`.gitattributes` mavjud", os.path.isfile(ga))
+    if os.path.isfile(ga):
+        g = io.open(ga, encoding="utf-8").read()
+        for naqsh in ("*.sh text eol=lf", "*.service text eol=lf",
+                      "Caddyfile text eol=lf"):
+            check(f"`.gitattributes`: {naqsh}", naqsh in g)
+
+    # NAQSH EMAS, NATIJA tekshiriladi: ishchi nusxada `\r` bormi.
+    # Windows'da bu HAQIQIY tekshiruv (checkout o'girib qo'yishi
+    # mumkin), Linux'da esa har doim toza — ya'ni u yerda bu
+    # tekshiruv hech narsa isbotlamaydi va shuni bilib turamiz.
+    crlf = []
+    for dirpath, _dn, fnames in os.walk(D):
+        for fn in fnames:
+            if not fn.endswith((".sh", ".service", ".timer")) \
+                    and fn != "Caddyfile":
+                continue
+            p = os.path.join(dirpath, fn)
+            if b"\r" in io.open(p, "rb").read():
+                crlf.append(os.path.relpath(p, ROOT))
+    check("joylashtirish fayllarida `\\r` YO'Q", not crlf, str(crlf[:3]))
 
 
 def test_sirlar():
@@ -681,14 +715,25 @@ def _shimlar(qutі, jurnal):
     yoz("sudo", "#!/bin/sh" + N + 'exec "$@"' + N)
     yoz("systemctl",
         "#!/bin/sh" + N + 'echo "systemctl $*" >> "' + jurnal + '"' + N)
+    # `psql` — mashqda BAZA YO'Q. `deploy.sh` endi `oldindan-tekshir.sh`
+    # ni chaqiradi va u DSN larni HAQIQATAN ulanib tekshiradi (taxmin
+    # emas, o'lchov). Shimsiz mashq bazaning yo'qligidan yiqilardi —
+    # ya'ni 16-bo'lim o'lchayotgan narsaga aloqasi yo'q sababdan.
+    yoz("psql", "#!/bin/sh" + N + "echo 1" + N + "exit 0" + N)
     if os.name == "nt":
         # `$L`/`$T` — SHELL o'zgaruvchilari (qo'sh tirnoq ichida
         # yoyiladi). PowerShell ning O'Z `$false` i esa `\$` bilan
         # QOCHIRILADI, aks holda shell uni bo'sh satrga aylantirardi
         # va junction hech qachon yaratilmasdi (JIMGINA).
+        #
+        # `\\$` IKKI belgi bilan yozilgan: Python `"\$"` ni HOZIR
+        # `\$` deb qoldiradi, lekin buni `SyntaxWarning` bilan
+        # ogohlantiradi va kelgusi versiyada TO'XTATADI. O'shanda
+        # butun mashq mexanizmi (16- va 17-bo'limlar) ishlamay
+        # qolardi — qobiqqa yetib boradigan matn esa AYNI.
         ps = ("powershell.exe -NoProfile -NonInteractive -Command \""
               "if (Test-Path -LiteralPath '$L') {"
-              " (New-Object System.IO.DirectoryInfo('$L')).Delete(\$false)"
+              " (New-Object System.IO.DirectoryInfo('$L')).Delete(\\$false)"
               " };"
               " New-Item -ItemType Junction -Path '$L' -Target '$T'"
               " | Out-Null\" >/dev/null 2>&1")
@@ -932,8 +977,39 @@ def test_mashq():
         # --- deploy.sh: PRODUCTION DARVOZASI -----------------------------
         pildiz = os.path.join(baza, "opt", "production")
         os.makedirs(os.path.join(pildiz, "releases"))
+
+        # PRODUCTION uchun ALOHIDA muhit fayli. Sabab: `deploy.sh`
+        # endi `oldindan-tekshir.sh` ni chaqiradi va u `APP_ENV` ni
+        # joylashtirilayotgan muhit bilan SOLISHTIRADI — yuqoridagi
+        # `staging.env` bilan production joylashtiruvi (to'g'ri
+        # ravishda) rad etilardi. Bitta fayl ikki muhitga
+        # ISHLATILMASLIGI kerak, mashqda ham.
+        penv = os.path.join(baza, "production.env")
+        pzaxira = os.path.join(baza, "zaxira")
+        os.makedirs(os.path.join(pzaxira, "production"), exist_ok=True)
+        io.open(penv, "w", encoding="utf-8", newline=chr(10)).write(
+            chr(10).join([
+                "APP_ENV=production",
+                "API_PORT=8000",
+                "API_DOCS=0",
+                "AUTH_COOKIE_SECURE=1",
+                "TRUST_PROXY=1",
+                "CORS_ORIGINS=",
+                "APP_PUBLIC_URL=https://tender.mashq.uz",
+                "VITE_API_BASE=/api",
+                'XT_DB_DSN="dbname=t user=tai_app password=p1 host=127.0.0.1"',
+                'XT_DB_DSN_OWNER="dbname=t user=postgres password=p2 host=127.0.0.1"',
+                "BACKUP_DIR=" + _posix_yol(bash, pzaxira),
+                "",
+            ]))
         pmuhit = {"TENDERAI_ILDIZ": _posix_yol(bash, pildiz),
-                  "TENDERAI_STAGING_ILDIZ": _posix_yol(bash, ildiz)}
+                  "TENDERAI_STAGING_ILDIZ": _posix_yol(bash, ildiz),
+                  "TENDERAI_ENVFILE": _posix_yol(bash, penv),
+                  # Caddy mashq mashinasida yo'q -> "tekshirilmadi"
+                  # (to'siq EMAS). Aniq ko'rsatiladi, chunki
+                  # `/etc/caddy/Caddyfile` HAQIQATAN bor bo'lsa
+                  # mashq server sozlamasini o'qib qolardi.
+                  "TENDERAI_CADDYFILE": "/mavjud/bolmagan/Caddyfile"}
         tasdiq = os.path.join(ildiz, ".verified")
         if os.path.exists(tasdiq):
             os.remove(tasdiq)
@@ -970,6 +1046,312 @@ def test_mashq():
         shutil.rmtree(baza, ignore_errors=True)
 
 # =====================================================================
+def test_joylashuv_izchilligi():
+    """Proksi ortidagi sozlamalar ZIDDIYATI ISHGA TUSHISHDA tutilsin.
+
+    O'LCHANGAN XAVF (2026-09-03). Uchta sozlama bir-biriga bog'liq,
+    lekin uch xil joyda: `APP_PUBLIC_URL`, `TRUST_PROXY`,
+    `AUTH_COOKIE_SECURE`. `deploy/env/*.example` to'g'ri, lekin
+    haqiqiy `/etc/tenderai/<muhit>.env` QO'LDA tahrirlanadi
+    (`docs/deploy.md` §3) — ziddiyat qonuniy yo'l bilan paydo bo'ladi.
+
+    ENG XAVFLISI: `http://` + `AUTH_COOKIE_SECURE=1`. Brauzer
+    `Secure` cookie ni shifrlanmagan ulanish orqali YUBORMAYDI,
+    ya'ni xizmat ko'tariladi, `/health` va `/ready` YASHIL bo'ladi
+    va HECH KIM KIRA OLMAYDI. "Yashil, lekin o'lik" — bu loyihada
+    takrorlangan sinf, shuning uchun u TO'XTATADI.
+    """
+    bolim("Joylashuv izchilligi — ishga tushish tekshiruvi")
+    import os as _os
+    from api import main as M
+
+    eski = (M.COOKIE_SECURE, M.TRUST_PROXY, _os.environ.get("APP_ENV"))
+
+    def holat(muhit, url, secure, proxy):
+        _os.environ["APP_ENV"] = muhit
+        M.COOKIE_SECURE, M.TRUST_PROXY = secure, proxy
+        try:
+            M.joylashuv_tekshir(url)
+            return "otdi"
+        except M.JoylashuvXato:
+            return "toxtatdi"
+
+    try:
+        check("dev + http + secure -> O'TADI (localhost normal)",
+              holat("dev", "http://localhost:5173", True, False) == "otdi")
+        # ASOSIY TEKSHIRUV.
+        check("prod + http + AUTH_COOKIE_SECURE=1 -> TO'XTATADI",
+              holat("production", "http://tender.uz", True, True) == "toxtatdi",
+              "aks holda xizmat yashil, kirish esa IMKONSIZ bo'lardi")
+        check("prod + http + AUTH_COOKIE_SECURE=0 -> O'TADI (ichki tarmoq)",
+              holat("production", "http://tender.uz", False, True) == "otdi")
+        check("prod + https + TRUST_PROXY=1 -> O'TADI",
+              holat("production", "https://tender.uz", True, True) == "otdi")
+        # Bu ZIDDIYAT, lekin xizmat ISHLAYDI -> ogohlantirish, to'xtatish EMAS.
+        check("prod + https + TRUST_PROXY=0 -> O'TADI (ogohlantirish bilan)",
+              holat("production", "https://tender.uz", True, False) == "otdi",
+              "xizmat ishlaydi; nosozlik jurnalda ko'rinadi")
+    finally:
+        M.COOKIE_SECURE, M.TRUST_PROXY = eski[0], eski[1]
+        if eski[2] is None:
+            _os.environ.pop("APP_ENV", None)
+        else:
+            _os.environ["APP_ENV"] = eski[2]
+
+    # Namunalar shu sozlamalarni E'LON QILSIN — operator ularni
+    # ko'rmasa, qo'lda yozilgan faylda ular UMUMAN bo'lmasdi.
+    for nom in ("staging", "production"):
+        yol = os.path.join(ROOT, "deploy", "env", f"{nom}.env.example")
+        matn = io.open(yol, encoding="utf-8").read()
+        check(f"{nom}.env.example da TRUST_PROXY=1", "TRUST_PROXY=1" in matn)
+        check(f"{nom}.env.example da AUTH_COOKIE_SECURE=1",
+              "AUTH_COOKIE_SECURE=1" in matn)
+
+
+# =============================================================================
+# 17. JOYLASHTIRISHDAN OLDINGI TEKSHIRUV — U HAM YURGIZILADI
+# =============================================================================
+# NEGA KERAK EDI: `bootstrap.sh` muhit faylini NAMUNADAN nusxalaydi
+# va shu holda qoldiradi. `password=REPLACE`, `example.uz` va
+# namunaviy bcrypt xeshi bilan turgan server BUTUNLAY NORMAL
+# ko'rinadi — hech narsa uni "to'ldirilmagan" demaydi.
+#
+# `deploy.sh` ularni KECH ushlardi (migratsiya qadamida — `venv`,
+# `npm ci` va frontend qurilmasidan keyin), `example.uz` ni esa
+# UMUMAN ushlamasdi: joylashtirish muvaffaqiyatli tugardi va
+# bildirishnoma havolalari mavjud bo'lmagan domenga ketaverardi.
+#
+# Bu bo'lim 16-bo'lim uslubida: skript O'QILMAYDI, YURGIZILADI.
+# =============================================================================
+
+def _oldindan_qur(baza, posix=None, ozgartir=None, caddy_ozgartir=None):
+    r"""Mashq uchun muhit fayli va Caddyfile yasaydi (namunadan).
+
+    `posix` — yo'lni SHU bash ko'radigan shaklga o'tkazadi. Windows
+    yo'li (`C:\...`) muhit fayliga yozilsa, uni shell SOURCE
+    qilganda teskari chiziqlar YO'QOLADI va `BACKUP_DIR` mavjud
+    bo'lmagan yo'lga aylanadi — mashqning O'ZI soxta to'siq
+    yasardi.
+    """
+    posix = posix or (lambda x: x)
+    N = chr(10)
+    env = io.open(os.path.join(D, "env", "production.env.example"),
+                  encoding="utf-8").read()
+    cad = io.open(os.path.join(D, "caddy", "Caddyfile"),
+                  encoding="utf-8").read()
+    # Namunani ISHLAYDIGAN holatga keltiramiz — keyin sinov uni
+    # ataylab BUZADI va skript buni ko'rishi kerak.
+    # `backup.sh` `${BACKUP_DIR}/${MUHIT}` ga yozadi — ichki
+    # katalog ham yasaladi, aks holda mashq soxta to'siq berardi.
+    zaxira = os.path.join(baza, "zaxira")
+    for m in ("staging", "production"):
+        os.makedirs(os.path.join(zaxira, m), exist_ok=True)
+    almash = [
+        ("APP_PUBLIC_URL=https://tender.example.uz",
+         "APP_PUBLIC_URL=https://tender.mycompany.uz"),
+        ('XT_DB_DSN="dbname=tenderai_production user=tai_service '
+         'password=REPLACE host=127.0.0.1 port=5432"',
+         'XT_DB_DSN="dbname=t user=tai_app password=p1 host=127.0.0.1 port=5432"'),
+        ('XT_DB_DSN_OWNER="dbname=tenderai_production user=postgres '
+         'password=REPLACE host=127.0.0.1 port=5432"',
+         'XT_DB_DSN_OWNER="dbname=t user=postgres password=p2 host=127.0.0.1 port=5432"'),
+        ("BACKUP_DIR=/var/backups/tenderai", "BACKUP_DIR=" + posix(zaxira)),
+    ]
+    for a, b in almash:
+        env = env.replace(a, b)
+    cad = (cad.replace("staging.example.uz", "staging.mycompany.uz")
+              .replace("tender.example.uz", "tender.mycompany.uz")
+              .replace("$2a$14$REPLACE_WITH_YOUR_OWN_BCRYPT_HASH",
+                       "$2a$14$" + "a" * 53))
+    if ozgartir:
+        env = ozgartir(env)
+    if caddy_ozgartir:
+        cad = caddy_ozgartir(cad)
+    ey = os.path.join(baza, "muhit.env")
+    cy = os.path.join(baza, "Caddyfile")
+    io.open(ey, "w", encoding="utf-8", newline=N).write(env)
+    io.open(cy, "w", encoding="utf-8", newline=N).write(cad)
+    return ey, cy
+
+
+def test_oldindan_tekshiruv():
+    bolim("17. JOYLASHTIRISHDAN OLDINGI TEKSHIRUV (yurgiziladi)")
+
+    skript = os.path.join(D, "bin", "oldindan-tekshir.sh")
+    check("`oldindan-tekshir.sh` mavjud", os.path.isfile(skript))
+    if not os.path.isfile(skript):
+        return
+
+    # ULANISH: `deploy.sh` uni QIMMAT qadamlardan OLDIN chaqirsin.
+    # Aks holda tekshiruv bor, lekin foydasi yo'q — nuqson baribir
+    # `venv` va `npm ci` dan keyin chiqardi.
+    d = oqi("bin", "deploy.sh")
+    check("`deploy.sh` uni CHAQIRADI", "oldindan-tekshir.sh" in d)
+    if "oldindan-tekshir.sh" in d:
+        check("chaqiruv `python3 -m venv` dan OLDIN",
+              d.index("oldindan-tekshir.sh") < d.index("python3 -m venv"))
+        check("chaqiruv `git archive` dan OLDIN",
+              d.index("oldindan-tekshir.sh") < d.index("git archive"))
+    b = oqi("bin", "bootstrap.sh")
+    check("`bootstrap.sh` operatorga uni KO'RSATADI",
+          "oldindan-tekshir.sh" in b)
+
+    bash = _mashq_bash()
+    check("mashq muhiti bor (repozitoriyani ko'radigan `bash`)",
+          bash is not None,
+          "" if bash else "topilmadi — skript YURGIZILMADI, faqat O'QILDI")
+    if not bash:
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_oldindan_")
+    try:
+        # `psql` SHIMI. Busiz mashq mahalliy bazaga tayanardi va u
+        # CI da bo'lmaydi — ya'ni "toza sozlama" holati hech qachon
+        # toza chiqmasdi.
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        N = chr(10)
+
+        def shim(nom, matn):
+            y = os.path.join(qutі, nom)
+            io.open(y, "w", encoding="utf-8", newline=N).write(matn)
+            os.chmod(y, 0o755)
+
+        shim("psql", "#!/bin/sh" + N + "echo 1" + N + "exit 0" + N)
+        shim_p = _posix_yol(bash, qutі)
+
+        def pq(yol):
+            return _posix_yol(bash, yol)
+
+        def yurgiz(muhit, envfile, caddyfile):
+            e = dict(os.environ)
+            e["TENDERAI_ENVFILE"] = _posix_yol(bash, envfile)
+            e["TENDERAI_CADDYFILE"] = _posix_yol(bash, caddyfile)
+            yol = shim_p
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 yol, "deploy/bin/oldindan-tekshir.sh", muhit],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=180)
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+        # --- A) XOM NAMUNA: hammasi to'ldirilmagan --------------------
+        xom = os.path.join(baza, "xom")
+        os.makedirs(xom, exist_ok=True)
+        ey = os.path.join(xom, "muhit.env")
+        cy = os.path.join(xom, "Caddyfile")
+        shutil.copy(os.path.join(D, "env", "production.env.example"), ey)
+        shutil.copy(os.path.join(D, "caddy", "Caddyfile"), cy)
+        kod, chiq = yurgiz("production", ey, cy)
+        check("xom namuna: JOYLASHTIRIB BO'LMAYDI", kod == 1, f"kod={kod}")
+        check("xom namuna: `password=REPLACE` ko'rsatiladi",
+              chiq.count("NAMUNAVIY (password=REPLACE)") == 2)
+        check("xom namuna: `example.uz` domeni ko'rsatiladi",
+              "APP_PUBLIC_URL hali NAMUNAVIY domen" in chiq)
+        check("xom namuna: namunaviy bcrypt xeshi ko'rsatiladi",
+              "NAMUNAVIY bcrypt xeshi" in chiq)
+        check("xom namuna: Caddy domeni ham ko'rsatiladi",
+              "Caddyfile da NAMUNAVIY domen" in chiq)
+
+        # --- B) TO'LDIRILGAN: to'siq QOLMASIN -------------------------
+        toza = os.path.join(baza, "toza")
+        os.makedirs(toza, exist_ok=True)
+        ey, cy = _oldindan_qur(toza, pq)
+        kod, chiq = yurgiz("production", ey, cy)
+        tosiq = chiq.count("[TO'SIQ]")
+        check("to'ldirilgan sozlama: TO'SIQ yo'q", tosiq == 0,
+              chiq if tosiq else "")
+        check("to'ldirilgan sozlama: joylashtirish MUMKIN", kod == 0,
+              f"kod={kod}")
+        check("to'ldirilgan sozlama: baza ULANISHI tekshirildi",
+              "XT_DB_DSN ulanadi" in chiq and "pgvector o'rnatilgan" in chiq)
+
+        # HUQUQ — TO'SIQ EMAS, ogohlantirish: ochiq fayl bilan xizmat
+        # bekam-ko'st ishlaydi. NTFS da `chmod 640` baribir `644`
+        # bo'lib ko'rinadi, shuning uchun sinov FAQAT `644` yo'nalishini
+        # tasdiqlaydi — u ikkala tizimda ham ANIQ.
+        os.chmod(ey, 0o644)
+        kod, chiq = yurgiz("production", ey, cy)
+        check("ochiq huquq: OGOHLANTIRADI, lekin to'xtatmaydi",
+              "BOSHQALAR uchun ochiq" in chiq and chiq.count("[TO'SIQ]") == 0,
+              f"kod={kod}")
+
+        # --- C) 13.1 NUQSONI: TIRNOQSIZ DSN --------------------------
+        # Bitta fayl, ikki parser: systemd butun qatorni oladi, shell
+        # birinchi bo'shliqda KESADI. O'sha safar faqat `XT_DB_DSN`
+        # tuzatilgan edi; endi tekshiruv HAR QANDAY qiymatga tegadi.
+        tir = os.path.join(baza, "tirnoqsiz")
+        os.makedirs(tir, exist_ok=True)
+        ey, cy = _oldindan_qur(
+            tir, pq, lambda s: s.replace(
+                'XT_DB_DSN="dbname=t user=tai_app password=p1 host=127.0.0.1 port=5432"',
+                'XT_DB_DSN=dbname=t user=tai_app password=p1 host=127.0.0.1 port=5432'))
+        kod, chiq = yurgiz("production", ey, cy)
+        check("tirnoqsiz DSN: TIRNOQ tekshiruvi ushlaydi",
+              "TIRNOQSIZ" in chiq and "XT_DB_DSN" in chiq)
+        check("tirnoqsiz DSN: KESILGANI ham ko'rinadi",
+              "tirnoq tufayli KESILGAN" in chiq)
+        check("tirnoqsiz DSN: joylashtirib bo'lmaydi", kod == 1)
+
+        # --- D) PORT: Caddy va API kelishmasa Caddy 502 beradi -------
+        prt = os.path.join(baza, "port")
+        os.makedirs(prt, exist_ok=True)
+        ey, cy = _oldindan_qur(prt, pq,
+                               lambda s: s.replace("API_PORT=8000",
+                                                   "API_PORT=9999"))
+        kod, chiq = yurgiz("production", ey, cy)
+        check("port nomuvofiqligi ushlanadi", "PORT MOS EMAS" in chiq)
+
+        # --- E) STAGING OCHIQ QOLMASIN -------------------------------
+        stg = os.path.join(baza, "staging")
+        os.makedirs(stg, exist_ok=True)
+        ey, cy = _oldindan_qur(
+            stg, pq,
+            lambda s: (s.replace("APP_ENV=production", "APP_ENV=staging")
+                        .replace("APP_PUBLIC_URL=https://tender.mycompany.uz",
+                                 "APP_PUBLIC_URL=https://staging.mycompany.uz")
+                        .replace("API_PORT=8000", "API_PORT=8001")),
+            lambda c: re.sub(r"basic_auth \{[^}]*\}", "", c))
+        kod, chiq = yurgiz("staging", ey, cy)
+        check("staging `basic_auth` siz qolsa TO'XTATADI",
+              "staging OCHIQ" in chiq, chiq[-400:] if "staging OCHIQ" not in chiq else "")
+
+        # --- E2) ZAXIRA: `backup.sh` ICHKI katalogga yozadi ----------
+        # Ota-katalogni tekshirish IKKI TOMONLAMA soxta natija
+        # berardi: `bootstrap.sh` oraliq katalogni root nomidan
+        # yaratadi (yozib bo'lmaydi -> soxta to'siq), ichki katalog
+        # esa yo'q bo'lishi mumkin (soxta ok, zaxira BIRINCHI
+        # yurishda yiqilardi).
+        zx = os.path.join(baza, "zaxira_ota")
+        os.makedirs(zx, exist_ok=True)      # ATAYLAB ichki katalogsiz
+        ey, cy = _oldindan_qur(
+            os.path.join(baza, "toza"), pq,
+            lambda s: re.sub(r"(?m)^BACKUP_DIR=.*$",
+                             "BACKUP_DIR=" + pq(zx), s))
+        kod, chiq = yurgiz("production", ey, cy)
+        check("zaxira: ICHKI katalog yo'qligi ushlanadi",
+              "zaxira katalogi yo'q" in chiq and "production" in chiq)
+        os.makedirs(os.path.join(zx, "production"), exist_ok=True)
+        kod, chiq = yurgiz("production", ey, cy)
+        check("zaxira: ichki katalog bo'lsa O'TADI",
+              "zaxira katalogi yoziladi" in chiq and kod == 0, f"kod={kod}")
+
+        # --- F) O'LCHAB BO'LMAGANI "O'TDI" BO'LIB SANALMASIN ---------
+        # `production_gate.py` dagi `BLOKLANGAN` bilan ayni mantiq:
+        # tekshira olmaslik yaxshi xabar EMAS va u JIM ham qolmaydi.
+        # Caddy hali o'rnatilmagan bo'lishi mumkin (birinchi
+        # joylashtirish), shuning uchun bu TO'XTATMAYDI — lekin
+        # "port mos" degan YOLG'ON xulosa ham chiqmaydi.
+        ey, cy = _oldindan_qur(os.path.join(baza, "toza"), pq)
+        kod, chiq = yurgiz("production", ey,
+                           os.path.join(baza, "bunday-fayl-yoq"))
+        check("Caddyfile yo'q: JIMGINA o'tmaydi",
+              "[tekshirilmadi]" in chiq and "Caddyfile yo'q" in chiq)
+        check("Caddyfile yo'q: 'port mos' degan YOLG'ON xulosa yo'q",
+              "port mos" not in chiq)
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -994,7 +1376,9 @@ def main():
     test_tashqi_nusxa()
     test_ogohlantirish()
     test_hujjat()
+    test_joylashuv_izchilligi()
     test_mashq()
+    test_oldindan_tekshiruv()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

@@ -46,7 +46,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # BUTUN TO'PLAMNI o'ldiradi. `import_test` aynan shu sababdan
 # 143 ta tekshiruvni bajarmasdan yiqilardi. Tafsilot: _tests/konsol.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import konsol  # noqa: E402
+import konsol
+import rejim  # noqa: E402
 
 konsol.sozla()
 
@@ -164,6 +165,15 @@ def test_db():
     from api.main import app
 
     with TestClient(app) as c:
+        # HUQUQ SHOXI SINALSIN — superuser bilan u CHETLAB O'TILADI.
+        # `rejim.rol_tekshir()` yiqiladi (skip EMAS): sabab va chiqish
+        # yo'li matnda. Pastdagi `erp_yopiq` shoxi aynan shunga
+        # bog'liq.
+        #
+        # `TestClient` ICHIDA: hovuz `lifespan` da ochiladi, undan
+        # oldin `db` so'rov qabul qilmaydi.
+        rejim.rol_tekshir(db)
+
         if not A.schema_ready():
             print("  SKIP schema_patch_auth_2.sql qo'llanmagan")
             return

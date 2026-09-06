@@ -1,15 +1,30 @@
-# QATOR OXIRI — skriptlar uchun HAR DOIM LF.
+# =============================================================================
+# QATOR OXIRI — qobiq skriptlari HAMMA JOYDA LF bo'lsin
+# =============================================================================
+# O'LCHANGAN XAVF (2026-09-03). `core.autocrlf=true` Windows'da
+# checkout paytida LF ni CRLF ga o'giradi. Repozitoriyadagi nusxa
+# LF bo'lib qoladi va serverga `git archive` orqali TO'G'RI ketadi —
+# ya'ni ishlab chiqarish zarar ko'rmaydi.
 #
-# Ishlab chiqish Windows da yuriladi, joylashtirish esa Linux da.
-# `core.autocrlf=true` bo'lgan mashinada `.sh` fayl CRLF bilan
-# saqlansa, `#!/usr/bin/env bash\r` qatoridagi `\r` interpretator
-# nomining bir qismi bo'lib qoladi va yadro `bash\r` ni topa olmaydi:
+# ZARAR KO'RADIGANI — MASHQ. `_tests/deploy_test.py` 16- va
+# 17-bo'limlari joylashtirish skriptlarini HAQIQATAN yurgizadi.
+# CRLF bilan `bash` birinchi qatordayoq yiqiladi:
 #
-#     bash: ./deploy.sh: /usr/bin/env^M: bad interpreter
+#     bash: ./deploy.sh: /usr/bin/env bash^M: bad interpreter
 #
-# Xato joylashtirish paytida, serverda chiqadi — ya'ni eng qimmat
-# joyda. Shuning uchun qator oxiri repozitoriyda QOTIRILADI.
-*.sh    text eol=lf
+# O'LCHANDI: `run_etl.sh` ishchi nusxada ALLAQACHON CRLF edi
+# (`deploy/bin/*.sh` esa LF — ular checkout'dan keyin qayta
+# yozilgani uchun). Ya'ni toza klonda mashq JIMGINA yura olmasdi
+# va buni faqat sinov yiqilgandagina bilardik.
+#
+# `eol=lf` ni `text` bilan birga yozish SHART: `text` normallashtirishni
+# yoqadi, `eol=lf` esa checkout'da ham LF ni qoldiradi.
+*.sh text eol=lf
+
+# systemd birliklari va Caddy konfiguratsiyasi ham FAQAT Linux'da
+# o'qiladi. `systemd` CRLF ni qabul qiladi, lekin qiymat oxirida
+# ko'rinmas `\r` qoladi — masalan `EnvironmentFile=/etc/tenderai/x.env\r`
+# topilmaydi va sabab hech qayerda yozilmaydi.
 *.service text eol=lf
 *.timer   text eol=lf
 Caddyfile text eol=lf

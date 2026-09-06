@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from api import db, xatolar
 
@@ -414,7 +414,14 @@ def prompt_block(tender_id: int, company_id: int,
     "talablar yo'q" degan yolg'on taassurot bo'lmaydi.
     """
     rows = db.query("""
-        SELECT name, method, attrs->>'qiymat' AS qiymat,
+        SELECT
+               -- KESILGANINI BILISH UCHUN. Oyna funksiyasi `LIMIT`
+               -- dan OLDIN hisoblanadi, ya'ni bu FILTRDAN o'tgan
+               -- HAMMASINING soni. Alohida `COUNT` so'rovi kerak
+               -- emas va ikki so'rov orasida ma'lumot o'zgarib
+               -- ketish ehtimoli ham yo'q.
+               count(*) OVER () AS _jami,
+               name, method, attrs->>'qiymat' AS qiymat,
                attrs->>'tur' AS tur, is_mandatory, confidence,
                file_ref, char_start, review_status, corrected_value,
                -- MODELGA AYTILADIGAN GAP DALILGA TAYANSIN.
@@ -469,6 +476,26 @@ def prompt_block(tender_id: int, company_id: int,
         izoh.append(f"DIQQAT: {past} ta talabning ishonchi past — ular "
                     "hujjatda TO'LDIRILMAGAN yoki chalkash yozilgan. "
                     "Ularni ANIQ ma'lumot sifatida ishlatma.")
+    # KESILGANI ALOHIDA AYTILADI.
+    #
+    # Quyidagi umumiy ogohlantirish ("hujjatning barchasi emas")
+    # BOSHQA narsa haqida: u hujjatda AJRATILMAGAN shartlar
+    # bo'lishi mumkinligini aytadi. Bu yerdagi kesim esa
+    # AJRATILGAN talablarning bir qismi ko'rsatilmaganini bildiradi
+    # — va uni aytmaslik yomonroq: model 40 ta talabni TO'LIQ
+    # ro'yxat deb o'qib, "boshqa majburiy shart yo'q" degan
+    # xulosaga kelardi.
+    #
+    # O'lchandi (2026-09-04): 4 ta tenderda 40 dan ko'p talab bor
+    # (eng kattasi 44). Bu blok PULLIK Go/No-Go promptiga kiradi.
+    jami = int(rows[0].get("_jami") or len(rows))
+    kesildi = max(0, jami - len(rows))
+    if kesildi:
+        izoh.append(
+            f"DIQQAT: bu tenderda {jami} ta ajratilgan talab bor, "
+            f"yuqorida FAQAT {len(rows)} tasi (majburiy va ishonchi "
+            f"yuqori bo'lganlari). Qolgan {kesildi} tasi bu yerda YO'Q "
+            f"— 'boshqa shart yo'q' deb XULOSA CHIQARMA.")
     izoh.append("Bu ro'yxat hujjatning BARCHASI emas — quyidagi xom "
                 "matnda qo'shimcha shartlar bo'lishi mumkin.")
     return "\n".join(qatorlar + izoh)
@@ -575,11 +602,22 @@ MASHINA_HOLATLARI = frozenset({
 
 #: INSON qo'yadigan holatlar. Har biri `reviewed_by` + `reviewed_at`
 #: + `review_action` ni TALAB qiladi (baza cheklovi).
-INSON_QARORLARI = frozenset({"approved", "rejected", "corrected"})
+#: `uncertain` — KO'RUVCHI ISHONCHI KOMIL EMAS.
+#:
+#: Ilgari faqat uchta yo'l bor edi va shubhadagi ko'ruvchi
+#: MAJBURAN ulardan birini tanlardi. Amalda shubha "approved"
+#: bo'lib yozilardi, chunki u eng kam qarshilikli tugma. Bu
+#: o'lchovni JIMGINA buzardi: aniqlik yuqori ko'rinardi.
+#:
+#: `uncertain` HAM inson qarori — aktor, vaqt va amal shu
+#: darajada majburiy. U "ko'rilmagan" DEGANI EMAS.
+INSON_QARORLARI = frozenset({"approved", "rejected", "corrected",
+                             "uncertain"})
 
 #: Holat -> inson amali. Baza `tender_requirement_amal_chk` bilan
 #: shu moslikni majburlaydi, bu yerda esa yagona manba.
-AMAL = {"approved": "approve", "rejected": "reject", "corrected": "correct"}
+AMAL = {"approved": "approve", "rejected": "reject",
+        "corrected": "correct", "uncertain": "uncertain"}
 
 #: `mashina_holat` lug'ati.
 #:   manba       — platformaning RASMIY reyestr yozuvi (xulosa emas)
@@ -588,12 +626,24 @@ MASHINA_MANBA = "manba"
 MASHINA_AJRATILGAN = "ajratilgan"
 
 
-SQL_REVIEW_QUEUE = """
-SELECT tender_id, tender_name, close_at, kutayotgan, modeldan, naqshdan,
-       eng_past_ishonch, past_ishonchli, ajratilgan
-FROM v_requirement_review
-WHERE company_id = %(company_id)s
-LIMIT %(limit)s
+#: Ko'rib chiqish navbatining ustunlari va manbai.
+#:
+#: `tender t` JOIN QILINADI — `queries.build_text_search()` aynan shu
+#: taxallusni kutadi va qidiruv qoidasi SHU YERDA QAYTA YOZILMAYDI.
+#: Takrorlash "bosh ro'yxatda topiladi, navbatda topilmaydi"
+#: holatini yasardi: `translit.variants()` lotin/kirill/o'zbek
+#: shakllarini kengaytiradi va uni qo'lda takrorlash mumkin emas.
+SQL_REVIEW_QUEUE_FROM = """
+FROM v_requirement_review v
+JOIN tender t ON t.id = v.tender_id
+"""
+
+#: Tartib VIEW ichida ham bor, lekin JOIN dan keyin unga
+#: ISHONIB BO'LMAYDI (planner uni saqlashi shart emas). Shuning
+#: uchun ANIQ yoziladi — view'dagi bilan AYNI: muddati yaqin
+#: birinchi, keyin eng past ishonch.
+SQL_REVIEW_QUEUE_TARTIB = """
+ORDER BY v.close_at NULLS LAST, v.eng_past_ishonch NULLS LAST
 """
 
 #: TANLANMA QIYSHIQLIGI — ATAYLAB YUMSHATILGAN.
@@ -656,10 +706,11 @@ UPDATE tender_requirement
        -- INSON AYNAN NIMA QILDI. `review_status` dan kelib chiqadi,
        -- lekin ALOHIDA yoziladi va CHECK ikkalasining mosligini
        -- majburlaydi — ya'ni holatni yozib amalni unutib bo'lmaydi.
-       review_action   = CASE %(status)s
-                             WHEN 'approved'  THEN 'approve'
-                             WHEN 'rejected'  THEN 'reject'
-                             WHEN 'corrected' THEN 'correct' END
+       -- `AMAL` lug'atidan PARAMETR bilan keladi. Ilgari bu yerda
+       -- `CASE` bor edi, ya'ni moslik IKKI joyda yozilgan edi
+       -- (Python va SQL) va yangi holat qo'shilganda ulardan biri
+       -- unutilishi mumkin edi.
+       review_action   = %(amal)s
  WHERE id = %(id)s AND company_id = %(company_id)s
 RETURNING id, tender_id, review_status, review_action, doc_type,
           reviewed_by, reviewed_actor_id, reviewed_ishonch,
@@ -667,10 +718,156 @@ RETURNING id, tender_id, review_status, review_action, doc_type,
 """
 
 
-def review_queue(company_id: int, limit: int = 100) -> List[dict]:
-    """Ko'rib chiqish navbati. Muddati yaqin tenderlar birinchi."""
-    return db.query(SQL_REVIEW_QUEUE, {"company_id": company_id,
-                                       "limit": limit})
+#: Talab manbai bo'yicha filtr. Ustunlar `v_requirement_review` da
+#: allaqachon sanab qo'yilgan — yangi so'rov kerak emas.
+MANBA_FILTRLARI = {"naqsh": "v.naqshdan > 0", "llm": "v.modeldan > 0"}
+
+
+def _review_queue_where(company_id: int, q: Optional[str],
+                        region: Optional[str], faqat_past: bool,
+                        manba: Optional[str], otgan: bool,
+                        katalog_ids: Optional[List[int]]
+                        ) -> Tuple[str, Dict[str, Any]]:
+    """Ko'rib chiqish navbatining filtri."""
+    from api import queries
+
+    clauses = ["v.company_id = %(company_id)s"]
+    params: Dict[str, Any] = {"company_id": company_id}
+
+    if not otgan:
+        # MUDDATI O'TGAN TENDER STANDART HOLDA CHIQARILADI.
+        #
+        # O'LCHANGAN NUQSON (2026-09-03). `v_requirement_review` da
+        # muddat sharti YO'Q, tartib esa `close_at` bo'yicha O'SISH —
+        # ya'ni eng erta yopilganlar ENG TEPADA turadi. Natijada
+        # ko'rik navbatining BUTUN BIRINCHI SAHIFASI allaqachon
+        # yopilgan tenderlardan iborat edi:
+        #
+        #     jami 989 · ochiq 455 · MUDDATI O'TGAN 534
+        #     birinchi 10 qatorning 10 tasi ham o'tgan
+        #
+        # Ya'ni ko'ruvchining ko'rinadigan butun ish yuki O'LIK
+        # tenderlar edi va buni hech narsa ko'rsatmasdi. Broker
+        # navbatida bu nuqson yo'q — `v_routing_queue` muddatni
+        # tekshiradi; ikki navbat bir xil qoidada bo'lsin.
+        #
+        # YASHIRILMAYDI, CHIQARILADI: `otgan=True` bilan ular
+        # baribir ko'rinadi. Ko'rik natijasi J6 oltin to'plamiga
+        # ham ketadi va yopilgan tenderning yorlig'i ham qimmatli —
+        # lekin u KUNDALIK ish yukini ko'mib tashlamasin.
+        clauses.append("(v.close_at IS NULL OR v.close_at > now())")
+    if faqat_past:
+        # PAST ISHONCH — ko'rikning eng qimmat qismi. `> 0` yetadi:
+        # chegara `v_requirement_review` da (`confidence < 0.60`) va
+        # uni bu yerda TAKRORLASH ikkinchi haqiqat yasardi.
+        clauses.append("v.past_ishonchli > 0")
+    if katalog_ids is not None:
+        # "SIZGA MOS" — ta'rif `kodlash.mos_tender_idlari()` da.
+        # Bo'sh ro'yxat "filtr yo'q" emas, "moslik yo'q" degani.
+        clauses.append("v.tender_id = ANY(%(katalog_ids)s::bigint[])")
+        params["katalog_ids"] = katalog_ids
+    if manba:
+        if manba not in MANBA_FILTRLARI:
+            raise xatolar.Xato("INVALID_ENUM",
+                               {"maydon": "manba", "qiymat": manba})
+        clauses.append(MANBA_FILTRLARI[manba])
+    if region:
+        clauses.append("(t.area_path = %(region)s"
+                       " OR t.area_path LIKE %(region)s || '.%%')")
+        params["region"] = region
+    if q:
+        clause, q_params = queries.build_text_search(q)
+        if clause:
+            clauses.append(clause)
+            params.update(q_params)
+    return "WHERE " + " AND ".join(clauses), params
+
+
+def review_queue(company_id: int, limit: int = 100,
+                 q: Optional[str] = None, region: Optional[str] = None,
+                 faqat_past: bool = False, manba: Optional[str] = None,
+                 otgan: bool = False,
+                 katalog: bool = False) -> Tuple[List[dict], int]:
+    """Ko'rib chiqish navbati. Muddati yaqin tenderlar birinchi.
+
+    QATORLAR **va** MOS KELGANLARNING JAMI SONI qaytariladi.
+
+    NEGA JAMI ALOHIDA (2026-09-03): `limit` 100, navbat esa 484.
+    Faqat qatorlarni bersak interfeys "100 ta" derdi va filtr
+    natijasi JIMGINA kesilardi — qidirilgan tender ro'yxatda
+    bo'lmasa foydalanuvchi buni "yo'q" deb o'qirdi.
+    """
+    # KATALOG FILTRI — id lar YAGONA manbadan.
+    #
+    # `only_open` NAVBAT QAMROVIGA ERGASHADI: `otgan=True` bo'lsa
+    # navbat yopilgan tenderlarni ham ko'rsatadi va katalog to'plami
+    # ham shunday bo'lishi kerak. Aks holda ikki filtr birga
+    # qo'yilganda natija HAR DOIM bo'sh chiqardi — va sabab
+    # ko'rinmasdi.
+    katalog_ids = None
+    if katalog:
+        from api import kodlash
+        katalog_ids = sorted(
+            kodlash.mos_tender_idlari(company_id, only_open=not otgan))
+    where, params = _review_queue_where(company_id, q, region,
+                                        faqat_past, manba, otgan,
+                                        katalog_ids)
+    jami = db.scalar(f"SELECT count(*) {SQL_REVIEW_QUEUE_FROM} {where}",
+                     params) or 0
+    qatorlar = db.query(
+        f"SELECT v.tender_id, v.tender_name, v.close_at, v.kutayotgan,"
+        f"       v.modeldan, v.naqshdan, v.eng_past_ishonch,"
+        f"       v.past_ishonchli, v.ajratilgan"
+        f" {SQL_REVIEW_QUEUE_FROM} {where} {SQL_REVIEW_QUEUE_TARTIB}"
+        f" LIMIT %(limit)s", {**params, "limit": limit})
+    return qatorlar, int(jami)
+
+
+def review_queue_manbalar(company_id: int, q: Optional[str] = None,
+                          region: Optional[str] = None,
+                          faqat_past: bool = False, otgan: bool = False,
+                          katalog: bool = False) -> Dict[str, int]:
+    """Har manba QANCHA natija berishini oldindan aytadi.
+
+    O'LCHANGAN NUQSON (2026-09-03). "Manba" filtri qo'shilganda
+    ko'rinishdagi `naqshdan` / `modeldan` ustunlariga qaraldi, lekin
+    ular HAQIQATAN farq qiladimi degan savol berilmadi. Javob:
+    YO'Q.
+
+        naqsh   document  pending_review  8455
+        reyestr api       extracted       2654   <- ko'rikka kirmaydi
+        naqshdan>0: 989 tender · modeldan>0: 0 tender
+
+    Ko'rik navbatiga faqat `pending_review` qatorlari kiradi, ular
+    esa faqat `naqsh` va `llm` dan chiqadi — reyestr qatorlari
+    `extracted` bilan yoziladi. LLM qatlami pullik va qulflangan
+    (`api/ai.paid_guard`), ya'ni hech qachon yurmagan. Natijada
+    "Naqshdan" hech narsani o'zgartirmasdi, "Modeldan" esa ro'yxatni
+    bo'shatardi — foydalanuvchi ikkalasini ham BUZUQ deb o'qidi.
+
+    FILTR OLIB TASHLANMADI, ROST GAPIRADIGAN QILINDI. LLM ajratish
+    yurgan kunda u o'z-o'zidan foydali bo'ladi; bugun esa "Modeldan
+    (0)" yozuvi sababni AYTADI. Hech narsa o'zgartira olmaydigan
+    boshqaruv elementi — boshqaruv yo'qligidan YOMONROQ: u
+    interfeys buzuq degan xulosani o'rgatadi.
+
+    SONLAR BOSHQA FILTRLARNI HISOBGA OLADI: savol "shu manbani
+    tanlasam nechta qoladi", "umuman nechta bor" emas.
+    """
+    katalog_ids = None
+    if katalog:
+        from api import kodlash
+        katalog_ids = sorted(
+            kodlash.mos_tender_idlari(company_id, only_open=not otgan))
+    # `manba=None` — shartning O'ZI chiqarib tashlanadi, aks holda
+    # har variant o'zini o'zi sanardi.
+    where, params = _review_queue_where(company_id, q, region, faqat_past,
+                                        None, otgan, katalog_ids)
+    r = db.query_one(
+        f"SELECT count(*) FILTER (WHERE {MANBA_FILTRLARI['naqsh']}) AS naqsh,"
+        f"       count(*) FILTER (WHERE {MANBA_FILTRLARI['llm']})   AS llm"
+        f" {SQL_REVIEW_QUEUE_FROM} {where}", params) or {}
+    return {"naqsh": int(r.get("naqsh") or 0), "llm": int(r.get("llm") or 0)}
 
 
 def review_items(tender_id: int, company_id: int) -> List[dict]:
@@ -749,7 +946,7 @@ def review_set(req_id: int, company_id: int, status: str,
         "id": req_id, "company_id": company_id, "status": status,
         "corrected": (corrected or "").strip()[:2000] or None,
         "note": (note or "").strip()[:2000] or None, "by": by,
-        "actor_id": actor_id, "ishonch": ishonch,
+        "actor_id": actor_id, "ishonch": ishonch, "amal": AMAL[status],
         "doc_type": doc_type,
         "blind": (blind_value or "").strip()[:2000] or None})
 
@@ -806,7 +1003,8 @@ GURUH_N = 10
 
 
 def pilot_yarat(company_id: int, blind_n: int = BLIND_N,
-                guruh_n: int = GURUH_N) -> Dict[str, Any]:
+                guruh_n: int = GURUH_N,
+                yaratgan: str = "nomalum") -> Dict[str, Any]:
     """Pilot to'plamini quradi: muddat + tasodif + summa.
 
     TO'PLAM BIR MARTA MUZLAYDI. Agar kompaniyada pilot allaqachon
@@ -825,13 +1023,36 @@ def pilot_yarat(company_id: int, blind_n: int = BLIND_N,
     kelishmovchilik darajasi bitta guruhning xususiyatini
     ko'rsatardi.
     """
-    bor = db.scalar("""SELECT count(*) FROM review_pilot
-                       WHERE company_id = %(c)s""", {"c": company_id}) or 0
-    if bor:
-        return {"qoshildi": 0, "jami": int(bor), "mavjud": True,
+    # AVLOD TEKSHIRUVI — "qator bormi" EMAS, "FAOL avlod bormi".
+    #
+    # O'LCHANGAN NUQSON (2026-09-03): shart `count(*) > 0` edi, ya'ni
+    # BITTA qator ham yangi pilotni ABADIY to'sardi. Jadvalda holat
+    # ustuni umuman yo'q edi, shuning uchun tugagan yoki eskirgan
+    # pilotni belgilash JOYI ham yo'q edi — yagona yo'l tarixiy
+    # dalilni SQL bilan o'chirish bo'lardi, bu esa namunani va
+    # "30 tenderda mediana" maxrajini yo'q qilardi.
+    #
+    # Endi holat `v_pilot_avlod` da DALILDAN hisoblanadi va yangi
+    # avlod `faol` avlod BO'LMAGANDA ochiladi. Eski avlod JOYIDA
+    # QOLADI — u boshqa `avlod` raqami ostida saqlanadi.
+    faol = db.query_one("""
+        SELECT avlod, tenderlar, hali_ochiq, qarorli_tender
+          FROM v_pilot_avlod
+         WHERE company_id = %(c)s AND holat = 'faol'
+         ORDER BY avlod DESC LIMIT 1""", {"c": company_id})
+    if faol:
+        return {"qoshildi": 0, "jami": int(faol["tenderlar"]), "mavjud": True,
+                "avlod": int(faol["avlod"]), "holat": "faol",
+                "hali_ochiq": int(faol["hali_ochiq"]),
+                "qarorli_tender": int(faol["qarorli_tender"]),
                 "blind": int(db.scalar("""SELECT count(*) FROM review_pilot
-                    WHERE company_id = %(c)s AND rejim = 'blind'""",
-                    {"c": company_id}) or 0)}
+                    WHERE company_id = %(c)s AND avlod = %(a)s
+                      AND rejim = 'blind'""",
+                    {"c": company_id, "a": faol["avlod"]}) or 0)}
+
+    yangi_avlod = int(db.scalar("""
+        SELECT COALESCE(max(avlod), 0) + 1 FROM review_pilot_avlod
+         WHERE company_id = %(c)s""", {"c": company_id}) or 1)
 
     tanlangan: List[dict] = []
     korilgan: set = set()
@@ -883,22 +1104,61 @@ def pilot_yarat(company_id: int, blind_n: int = BLIND_N,
                 aralash.append(guruhlar[g].pop(0))
         i += 1
 
+    # AVLOD REYESTRI AVVAL yoziladi: `review_pilot` qatorlari unga
+    # tayanadi va reyestrsiz avlod `v_pilot_avlod` da UMUMAN
+    # ko'rinmasdi — pilot "yo'q" bo'lib qolardi.
+    db.execute_returning("""
+        INSERT INTO review_pilot_avlod (company_id, avlod, yaratgan)
+        VALUES (%(c)s, %(a)s, %(k)s)
+        ON CONFLICT (company_id, avlod) DO NOTHING
+        RETURNING avlod""",
+        {"c": company_id, "a": yangi_avlod, "k": yaratgan})
+
     yozildi = 0
     for tartib, x in enumerate(aralash, 1):
         r = db.execute_returning("""
             INSERT INTO review_pilot
-                (company_id, tender_id, guruh, rejim, tartib)
-            VALUES (%(c)s, %(t)s, %(g)s, %(r)s, %(n)s)
-            ON CONFLICT (company_id, tender_id) DO NOTHING
+                (company_id, avlod, tender_id, guruh, rejim, tartib)
+            VALUES (%(c)s, %(a)s, %(t)s, %(g)s, %(r)s, %(n)s)
+            ON CONFLICT (company_id, avlod, tender_id) DO NOTHING
             RETURNING tender_id""",
-            {"c": company_id, "t": x["id"], "g": x["guruh"],
+            {"c": company_id, "a": yangi_avlod, "t": x["id"],
+             "g": x["guruh"],
              "r": "blind" if tartib <= blind_n else "anchored",
              "n": tartib})
         if r:
             yozildi += 1
 
     return {"qoshildi": yozildi, "jami": len(aralash), "mavjud": False,
+            "avlod": yangi_avlod, "holat": "faol",
             "blind": min(blind_n, len(aralash))}
+
+
+def pilot_arxivla(company_id: int, avlod: int, kim: str) -> dict:
+    """Avlodni ARXIVLAYDI — qatorlar O'CHIRILMAYDI.
+
+    NEGA KERAK: `eskirdi` va `tugallandi` dalildan HOSIL bo'ladi,
+    lekin ba'zan operator hali ochiq pilotni ATAYLAB yopmoqchi
+    bo'ladi (namuna noto'g'ri tanlangan, ustuvorlik o'zgardi).
+    Ungacha yagona yo'l qatorlarni o'chirish edi — ya'ni tarixiy
+    dalilni yo'qotish.
+
+    `kim` MAJBURIY: atributsiz arxivlash keyinchalik tiklab
+    bo'lmaydigan bo'shliq qoldirardi (baza CHECK i ham talab qiladi).
+    """
+    if not (kim or "").strip():
+        raise xatolar.Xato("FIELD_REQUIRED", {"maydon": "kim"})
+    r = db.execute_returning("""
+        UPDATE review_pilot_avlod
+           SET arxivlandi_at = now(), arxivlagan = %(k)s
+         WHERE company_id = %(c)s AND avlod = %(a)s
+           AND arxivlandi_at IS NULL
+        RETURNING avlod, arxivlandi_at""",
+        {"c": company_id, "a": avlod, "k": kim.strip()})
+    if not r:
+        raise xatolar.Xato("NOT_FOUND",
+                           {"nima": f"pilot avlodi {avlod} (yoki allaqachon arxivlangan)"})
+    return {"avlod": int(r["avlod"]), "holat": "arxivlandi"}
 
 
 def pilot_royxat(company_id: int) -> List[dict]:
@@ -916,13 +1176,24 @@ def pilot_royxat(company_id: int) -> List[dict]:
         LEFT JOIN requirement_review_open o
                ON o.tender_id = p.tender_id AND o.company_id = p.company_id
         WHERE p.company_id = %(c)s
+          -- OXIRGI ARXIVLANMAGAN AVLOD. Busiz ro'yxat barcha
+          -- avlodlarni ARALASHTIRIB berardi va ko'ruvchi qaysi
+          -- to'plam ustida ishlayotganini bilmasdi.
+          AND p.avlod = COALESCE((
+                SELECT max(avlod) FROM review_pilot_avlod a
+                 WHERE a.company_id = p.company_id
+                   AND a.arxivlandi_at IS NULL), p.avlod)
         ORDER BY p.tartib""", {"c": company_id})
 
 
 def pilot_rejim(tender_id: int, company_id: int) -> str:
     """Bu tender qaysi rejimda ko'riladi. Pilotda bo'lmasa 'anchored'."""
     r = db.scalar("""SELECT rejim FROM review_pilot
-        WHERE company_id = %(c)s AND tender_id = %(t)s""",
+        WHERE company_id = %(c)s AND tender_id = %(t)s
+        -- Bir tender ikki avlodda bo'lishi mumkin; ENG YANGISI amal
+        -- qiladi, aks holda `blind`/`anchored` rejimi eski
+        -- avloddan kelib qolardi.
+        ORDER BY avlod DESC LIMIT 1""",
         {"c": company_id, "t": tender_id})
     return r or "anchored"
 

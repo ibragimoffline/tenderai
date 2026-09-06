@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react'
 import { api, getToken, setUnauthorizedHandler } from '@/api'
 import type { CompanyAccount } from '@/api'
+import type { ChatManba } from '@/hooks/useChatStream'
 import Icon from './components/Icon'
 import Sidebar from './components/Sidebar'
 import Filters from './components/Filters'
@@ -42,7 +43,7 @@ const TenderDrawer = lazy(() => import('./components/TenderDrawer'))
 const ChatPanel = lazy(() => import('./components/ChatPanel'))
 import type {
   Category, CompanyProfileData, CatalogMatchInfo, Freshness as FreshnessData,
-  Product, Region, SavedSearch, Stats, Status, TenderRow,
+  HududXulosa, Product, Region, SavedSearch, Stats, Status, TenderRow,
 } from '@/types'
 
 const PAGE_SIZE = 25
@@ -105,6 +106,9 @@ export default function App() {
   // Ichki tasniflagich kodi interfeysga olib chiqilmaydi.
   const [catalogProduct, setCatalogProduct] = useState<Product | null>(null)
   const [catalogNew, setCatalogNew] = useState({ new: 0, total: 0 })
+  // "Sizga mos" natijasidagi hudud xulosasi. `null` — hali
+  // o'lchanmagan yoki bu ko'rinish katalog rejimida emas.
+  const [hudud, setHudud] = useState<HududXulosa | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [catalogError, setCatalogError] = useState<string | null>(null)
 
@@ -117,6 +121,13 @@ export default function App() {
   // AI-Chat paneli. `null` — yopiq; son — o'sha tender konteksti;
   // `0` — umumiy suhbat (kontekstsiz).
   const [chatFor, setChatFor] = useState<number | null>(null)
+  /**
+   * Chat QAYERDAN ochilgani. `chatFor` bilan birga yuradi, lekin
+   * ALOHIDA holat: `chatFor` faqat "qaysi tender" ni biladi,
+   * "nima uchun" ni emas. Server ikkinchisiga qarab tizim blokini
+   * quradi (`manba='gonogo'` -> saqlangan tahlil sharhi).
+   */
+  const [chatManba, setChatManba] = useState<ChatManba | null>(null)
 
   // KIRISH (auth-2). `undefined` — hali tekshirilmadi (token bor, so'rov
   // ketyapti); `null` — kirilmagan. Ikkisini ajratmasak, sahifa har
@@ -222,7 +233,19 @@ export default function App() {
     loadSearches()
   }
 
+  // MANBA FILTRI UCH HOLATLI, ikki emas. O'LCHANGAN NUQSON
+  // (2026-09-02): shart `sources.length === 1 ? sources[0] : ''` edi va
+  // u NOL tanlovni HAMMASI bilan bir xil ko'rardi — ikkala manba ham
+  // o'chirilganda foydalanuvchi HAMMA tenderni ko'rardi.
+  //
+  //   2 tanlangan -> filtr YO'Q      (hammasi)
+  //   1 tanlangan -> shu manba
+  //   0 tanlangan -> HECH NARSA      <- avval "hammasi" edi
+  //
+  // Nol tanlov "filtr qo'yilmagan" DEGANI EMAS: u "hech qaysi manba
+  // kerak emas" degani va javob BO'SH bo'lishi kerak.
   const source = sources.length === 1 ? sources[0] : ''
+  const manbaYoq = sources.length === 0
 
   // Asosiy yuklovchi — view'ga qarab /tenders yoki /match
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
@@ -234,12 +257,20 @@ export default function App() {
     // Ro'yxatsiz ko'rinishlar tender so'ramaydi
     if (['stats', 'profile', 'catalog', 'account', 'documents',
          'requirements', 'broker'].includes(view)) return
+    if (manbaYoq) {
+      // So'rov YUBORILMAYDI: bo'sh natija SO'ROVDAN emas, TANLOVDAN
+      // kelib chiqadi va buni foydalanuvchi ko'rishi kerak.
+      setData({ items: [], total: 0 })
+      if (!opts.silent) setLoading(false)
+      return
+    }
     if (!opts.silent) setLoading(true)
     setError(null)
     try {
       let rows: { items: TenderRow[]; total: number }
       if (view === 'match' && activeSearchId) {
         // Saqlangan qidiruv faol — kalit so'z bo'yicha ballaydi
+        setHudud(null)
         rows = await api.match({
           profile: profile || { keywords: [], regions: [], currency: null, min_cost: null, max_cost: null },
           status: filters.status, region: filters.region, currency: filters.currency,
@@ -249,9 +280,14 @@ export default function App() {
         })
       } else if (view === 'match') {
         // Standart "Sizga mos" — katalogning aniq lot kodlari bo'yicha.
+        // `q` UZATILADI. O'LCHANGAN NUQSON (2026-09-02): u bu
+        // chaqiruvda YO'Q edi, ya'ni "Sizga mos" sahifasida qidiruv
+        // maydoni ishlardi, natijaga esa TA'SIR QILMASDI — foydalanuvchi
+        // yozgan so'z JIMGINA tashlab yuborilardi.
         const r = await api.catalogMatch({
           product_id: catalogProduct?.id ?? null,
           region: filters.region, currency: filters.currency,
+          q: filters.q,
           products: filters.products, services: filters.services,
           limit: PAGE_SIZE, offset,
         })
@@ -268,8 +304,10 @@ export default function App() {
             },
           })),
         }
+        setHudud(r.hudud ?? null)
         api.catalogSeen().then(() => setCatalogNew((n) => ({ ...n, new: 0 }))).catch(() => {})
       } else {
+        setHudud(null)
         rows = await api.tenders({
           status: filters.status, region: filters.region,
           currency: filters.currency, q: filters.q, category: filters.category,
@@ -286,7 +324,8 @@ export default function App() {
     } finally {
       if (!opts.silent) setLoading(false)
     }
-  }, [view, filters, offset, source, profile, activeSearchId, catalogProduct, t])
+  }, [view, filters, offset, source, manbaYoq, profile, activeSearchId,
+      catalogProduct, t])
 
   useEffect(() => { load() }, [load])
 
@@ -430,6 +469,21 @@ export default function App() {
               </Info>
             )}
 
+            {/* HUDUD XULOSASI — "nechtasini yo'qotyapman" savoliga javob.
+                O'LCHANGAN NOMUVOFIQLIK (2026-09-03): bu ro'yxat profildagi
+                hudud cheklovini hisobga olmasdi, broker navbati esa uni
+                QATTIQ to'siq sifatida qo'llardi. Natijada katalogga mos 28
+                tenderdan 11 tasi navbatda yo'q edi va SABABI hech qayerda
+                ko'rinmasdi. Qatorlar YASHIRILMAYDI: hududni kengaytirish
+                sotuv qarori va uni kompaniya o'zi qabul qiladi. */}
+            {view === 'match' && !!hudud?.tashqari && (
+              <Info>
+                {t('match.outOfRegionNote', { n: hudud.tashqari })}
+                <button className="ml-1.5 font-semibold underline-offset-2 hover:underline"
+                  onClick={() => goto('profile')}>{t('match.toProfile')}</button>
+              </Info>
+            )}
+
             <StatsStrip stats={stats} total={data.total} lastUpdated={lastUpdated} />
 
             {/* `role="alert"` — ekran o'quvchi xatoni DARHOL o'qiydi. U
@@ -485,6 +539,7 @@ export default function App() {
             {/* Manbaga sakrash: hujjat matni tender panelida ochiladi,
                 ya'ni tasdiqlovchi AYNAN o'sha bo'lakni ko'radi. */}
             <RequirementReview
+              regions={regions}
               onOpenSource={(_ref, _pos) => { /* keyingi qadam: DocumentText ga chuqur havola */ }}
             />
           </Suspense>
@@ -493,7 +548,8 @@ export default function App() {
           <Suspense fallback={<Skeleton className="h-[420px] w-full rounded-xl" />}>
             {/* Tenderni ochish: broker qaror berishdan OLDIN manbani
                 ko'rishi kerak — qaror faqat `ai_sabab` ga tayanmasin. */}
-            <BrokerQueue onOpenTender={(id) => setSelected({ id })} />
+            <BrokerQueue regions={regions}
+              onOpenTender={(id) => setSelected({ id })} />
           </Suspense>
         )}
         {view === 'stats' && (
@@ -513,11 +569,21 @@ export default function App() {
 
       {chatFor !== null && (
         <Suspense fallback={null}>
-          <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[440px]
+          {/* QATLAM TARTIBI (o'lchangan nuqson, 2026-09-02).
+              Chat `z-40` edi, `Sheet`/`Dialog` esa `z-50` — ya'ni
+              tender oynasi ochiq turib "AI dan so'rash" bosilganda
+              chat oyna ORTIDA ochilardi va foydalanuvchi HECH NARSA
+              ko'rmasdi. Chat oxirgi ochilgan qatlam, shuning uchun
+              u eng ustida turishi kerak.
+
+              Tartib:  30 fon paneli < 40 yon menyu < 50 Sheet/Dialog
+                       < 60 chat */}
+          <div className="fixed inset-y-0 right-0 z-[60] flex w-full max-w-[440px]
                           flex-col border-l shadow-xl">
             <ChatPanel
               tenderId={chatFor || null}
-              onClose={() => setChatFor(null)}
+              manba={chatManba ?? undefined}
+              onClose={() => { setChatFor(null); setChatManba(null) }}
               onOpenCitation={(c) => setSelected({ id: c.tender_id })} />
           </div>
         </Suspense>
@@ -527,7 +593,7 @@ export default function App() {
       {chatFor === null && (
         <button
           type="button"
-          onClick={() => setChatFor(0)}
+          onClick={() => { setChatFor(0); setChatManba('global') }}
           title={t('chat.title')}
           className="fixed bottom-5 right-5 z-30 flex h-12 w-12 items-center
                      justify-center rounded-full bg-primary text-primary-foreground
@@ -542,7 +608,8 @@ export default function App() {
           <TenderDrawer
             id={selected.id} match={selected.match}
             onOpenDocuments={openDocuments}
-            onAskAi={(tid) => setChatFor(tid)}
+            onAskAi={(tid, m) => { setChatFor(tid)
+                                 setChatManba(m ?? 'panel') }}
             onClose={() => {
               setSelected(null)
               // Bildirishnomadan kelgan ?tender= parametrini olib tashlaymiz

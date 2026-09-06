@@ -238,6 +238,182 @@ def erp_moslikni_tekshir(company_id: int) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# ERP dan aktor TAYYORLASH (provisioning)
+# ---------------------------------------------------------------------------
+#
+# NEGA BU BOR. `erp_moslikni_tekshir()` BIR TOMONLAMA edi: "xaritadagi
+# aktor ERP da hali bormi". Teskari savol — "ERP da odam bor, xaritada
+# yo'q" — hech qayerda so'ralmasdi va javobi qo'lda `POST /aktor` edi.
+# Natijasi o'lchandi (2026-09-03): `erp.v_tai_actor` da UCH FAOL odam,
+# `public.actor` da ijarachi 2 uchun NOL qator, va shu sababli
+# `_erp_sessiyadan()` hech qachon muvaffaqiyatli tugamasdi — har qaror
+# `kompaniya_sessiyasi` darajasida yozilardi va sifat darvozasi
+# (`v_sifat_darvoza`, 290 ta atributlangan qaror) nolda turardi.
+#
+# NEGA AVTOMATIK EMAS — LOGIN PAYTIDA SINXRONLAMAYMIZ. ERP odami
+# o'zini istalgan ijarachiga yoza olsa ko'p-ijarachilik buzilardi:
+# `_erp_sessiyadan()` ning ikkinchi sharti aynan shuning uchun bor.
+# Xaritalash — `sozlama` huquqiga ega operatorning ANIQ amali, va
+# ijarachi SESSIYADAN olinadi, so'rov tanasidan emas.
+
+#: ERP roli -> TenderAI roli. TenderAI roli VAKOLAT beradi, shuning
+#: uchun xarita ANIQ yoziladi: noma'lum ERP roli JIMGINA eng past
+#: vakolatga tushirilmaydi, u umuman xaritalanmaydi va sabab bilan
+#: qaytariladi (operator qaror qilsin).
+#:
+#: O'lchangan ERP rollari (2026-09-03): admin, broker, menejer.
+ROL_XARITASI: Dict[str, str] = {
+    "admin":   "admin",
+    "broker":  "tasdiqlovchi",
+    "menejer": "koruvchi",
+}
+
+
+def erp_nomzodlar(company_id: int) -> Dict[str, Any]:
+    """ERP odamlari va ularning xaritadagi holati. FAQAT O'QISH.
+
+    `erp.v_tai_actor` SESSIYA bo'yicha qator ko'paytiradi (u
+    `app_session` ga LEFT JOIN qilingan), shuning uchun `DISTINCT`
+    SHART: ikki faol sessiyali odam ikki qator berardi va
+    sinxronizatsiya uni ikki marta urinib ko'rardi.
+
+    `token_hash` va `expires_at` BU YERDA O'QILMAYDI. Ular sir va
+    ularning API javobiga tushishi uchun hech qanday sabab yo'q.
+    """
+    if not erp_kontekst_ready():
+        return {"tekshirildi": False, "sabab": "erp.v_tai_actor yo'q",
+                "nomzodlar": []}
+
+    erp_odamlar = db.query(
+        "SELECT DISTINCT erp_user_id, login, ism, rol, faol "
+        "  FROM erp.v_tai_actor ORDER BY erp_user_id")
+    mavjud = {a["erp_user_id"]: a for a in royxat(company_id)
+              if a["erp_user_id"] is not None}
+
+    nomzodlar = []
+    for u in erp_odamlar:
+        a = mavjud.get(u["erp_user_id"])
+        tai_rol = ROL_XARITASI.get(u["rol"])
+        nomzodlar.append({
+            "erp_user_id": u["erp_user_id"],
+            "login": u["login"], "ism": u["ism"],
+            "erp_rol": u["rol"], "erp_faol": u["faol"],
+            "tai_rol": tai_rol,
+            "actor_id": a["id"] if a else None,
+            "tai_active": a["active"] if a else None,
+            "holat": ("xaritalanmagan_rol" if tai_rol is None
+                      else "xaritalangan" if a else "yangi"),
+        })
+    return {"tekshirildi": True, "nomzodlar": nomzodlar}
+
+
+def erp_sinxron(company_id: int, *, quruq: bool = False) -> Dict[str, Any]:
+    """ERP odamlarini `public.actor` ga IDEMPOTENT xaritalaydi.
+
+    QOIDALAR — har biri ataylab:
+
+      * `company_id` CHAQIRUVCHIDAN keladi va u SESSIYADAN olinadi.
+        So'rov tanasida kompaniya YO'Q, shuning uchun kompaniyalararo
+        xaritalash imkonsiz.
+
+      * ERP da `faol=false` bo'lgan odam YANGI aktor sifatida
+        YARATILMAYDI, va allaqachon xaritalangan bo'lsa
+        `active=false` ga o'tkaziladi. Yo'nalish BIR TOMONLAMA:
+        NOFAOLLASHTIRISH avtomatik (xavfsizlik tomonga yopiladi),
+        FAOLLASHTIRISH esa hech qachon avtomatik emas — u vakolat
+        berish demak va `PATCH /aktor/{id}` orqali aniq qilinadi.
+
+      * Noma'lum ERP roli (`ROL_XARITASI` da yo'q) — o'tkazib
+        yuboriladi va sababi qaytariladi. Eng past vakolatga
+        JIMGINA tushirilmaydi: "bilmayman" ni "kuzatuvchi" ga
+        aylantirish qaror qabul qilish bo'lardi.
+
+      * ROL mavjud aktorda O'ZGARTIRILMAYDI. Rol — TenderAI
+        vakolati; ERP da rol o'zgargani bu yerda avtomatik
+        vakolat bermaydi. Nomuvofiqlik `rol_farqi` da qaytariladi.
+
+      * Takror xaritalash bazada to'silgan
+        (`actor_erp_bir_marta`: UNIQUE (company_id, erp_user_id)).
+        Kod ham tekshiradi, lekin oxirgi so'z bazaniki.
+
+    `quruq=True` — hech narsa yozilmaydi, faqat reja qaytadi.
+
+    Qaytadi: har bir ERP odami uchun `amal` va `sabab`.
+    """
+    holat = erp_nomzodlar(company_id)
+    if not holat["tekshirildi"]:
+        return {"bajarildi": False, "sabab": holat["sabab"],
+                "quruq": quruq, "natija": []}
+
+    mavjud = {a["erp_user_id"]: a for a in royxat(company_id)
+              if a["erp_user_id"] is not None}
+    natija: List[Dict[str, Any]] = []
+
+    for n in holat["nomzodlar"]:
+        euid, tai_rol = n["erp_user_id"], n["tai_rol"]
+        a = mavjud.get(euid)
+
+        if tai_rol is None:
+            natija.append({**_qisqa(n), "amal": "otkazildi",
+                           "sabab": f"ERP roli xaritalanmagan: {n['erp_rol']!r}"})
+            continue
+
+        if a is None:
+            if not n["erp_faol"]:
+                natija.append({**_qisqa(n), "amal": "otkazildi",
+                               "sabab": "ERP da nofaol — aktor yaratilmaydi"})
+                continue
+            if quruq:
+                natija.append({**_qisqa(n), "amal": "yaratiladi",
+                               "sabab": f"rol={tai_rol}"})
+                continue
+            row = qosh(company_id, login=n["login"], ism=n["ism"],
+                       rol=tai_rol, manba="erp", erp_user_id=euid,
+                       izoh="ERP sinxronizatsiyasi")
+            natija.append({**_qisqa(n), "actor_id": int(row["id"]),
+                           "amal": "yaratildi", "sabab": f"rol={tai_rol}"})
+            continue
+
+        # Allaqachon xaritalangan — faqat NOFAOLLASHTIRISH avtomatik.
+        rol_farqi = (a["rol"] != tai_rol)
+        if not n["erp_faol"] and a["active"]:
+            if quruq:
+                natija.append({**_qisqa(n), "actor_id": a["id"],
+                               "amal": "nofaollashtiriladi",
+                               "sabab": "ERP da nofaol"})
+            else:
+                yangila(company_id, a["id"], active=False)
+                natija.append({**_qisqa(n), "actor_id": a["id"],
+                               "amal": "nofaollashtirildi",
+                               "sabab": "ERP da nofaol"})
+        elif n["erp_faol"] and not a["active"]:
+            # FAOLLASHTIRISH AVTOMATIK EMAS — bu vakolat qaytarish.
+            natija.append({**_qisqa(n), "actor_id": a["id"],
+                           "amal": "otkazildi",
+                           "sabab": "TenderAI da nofaol — faollashtirish "
+                                    "ANIQ qaror (PATCH /aktor/{id})"})
+        else:
+            natija.append({**_qisqa(n), "actor_id": a["id"],
+                           "amal": "ozgarmadi",
+                           "sabab": (f"rol farqi: TenderAI={a['rol']} "
+                                     f"ERP={n['erp_rol']}->{tai_rol}")
+                                    if rol_farqi else None})
+
+    xulosa: Dict[str, int] = {}
+    for r in natija:
+        xulosa[r["amal"]] = xulosa.get(r["amal"], 0) + 1
+    return {"bajarildi": True, "quruq": quruq,
+            "xulosa": xulosa, "natija": natija}
+
+
+def _qisqa(n: Dict[str, Any]) -> Dict[str, Any]:
+    """Javobga tushadigan maydonlar — SIR EMASLARI."""
+    return {"erp_user_id": n["erp_user_id"], "login": n["login"],
+            "ism": n["ism"], "erp_rol": n["erp_rol"],
+            "erp_faol": n["erp_faol"], "tai_rol": n["tai_rol"]}
+
+
+# ---------------------------------------------------------------------------
 # Aktorni SO'ROVDAN aniqlash
 # ---------------------------------------------------------------------------
 class Kimlik:

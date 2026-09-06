@@ -383,13 +383,23 @@ def test_huquq(db):
     # emas: rol tayyor, lekin DSN hali almashtirilmagan. Ochiq aytiladi.
     kim = db.query_one("SELECT current_user AS u, "
                        "(SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS s")
-    if kim["s"]:
-        print(f"  [!] OGOHLANTIRISH: ilova hozir `{kim['u']}` "
-              f"(SUPERUSER) sifatida ulanmoqda. `tai_app` roli tayyor, "
-              f"lekin `XT_DB_DSN` hali almashtirilmagan — "
-              f"`docs/xavfsizlik.md` §4.")
-    else:
-        check(f"ulanish superuser EMAS ({kim['u']})", True)
+    # OGOHLANTIRISH -> YIQILISH (2026-09-04).
+    #
+    # Ilgari bu FAQAT `print` edi va `check()` chaqirilmasdi — ya'ni
+    # superuser bilan yurgan sinov HECH QANDAY yiqilgan tekshiruvsiz
+    # yashil qaytardi. Ayni paytda `production_gate` "ILOVA
+    # SUPERUSER BILAN ISHLAMASLIGI KERAK" deb turardi: ikki qatlam
+    # bir-birini eshitmagan (13-sinf).
+    #
+    # Endi bu TEKSHIRUV. Chiqish yo'li: `DB_SET_ROLE=tai_app`.
+    # TAFSILOT FAQAT YIQILGANDA. `check()` uni shartsiz chop etadi,
+    # ya'ni "PASS ... Tuzatish: DB_SET_ROLE=tai_app" degan chalkash
+    # qator chiqardi: o'tgan tekshiruv yonida tuzatish ko'rsatmasi.
+    check(f"ulanish superuser EMAS ({kim['u']})", not kim["s"],
+          "" if not kim["s"] else
+          "superuser huquq tekshiruvlarini chetlab o'tadi — "
+          "grant asosidagi himoyalar sinalmaydi. "
+          "Tuzatish: DB_SET_ROLE=tai_app")
 
 
 # =====================================================================

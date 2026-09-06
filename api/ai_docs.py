@@ -285,12 +285,41 @@ def prompt_block(text: str, meta: Dict[str, Any]) -> str:
         return ""
 
     warn = [f"Quyida {len(meta['used'])} ta hujjatdan ajratilgan bo'laklar."]
-    if meta.get("truncated"):
-        warn.append("DIQQAT: hujjatlar TO'LIQ emas — talab o'zaklari atrofidagi "
-                    "bo'laklar olingan. Bo'lakda yo'q narsani \"yo'q\" deb "
-                    "xulosa qilma, \"ko'rsatilmagan\" deb yoz.")
+
+    # IKKI XIL TO'LIQSIZLIK — IKKI XIL JUMLA.
+    #
+    # O'LCHANGAN NUQSON (2026-09-04). Ikkalasi bitta `truncated`
+    # bayrog'iga yig'ilgan va bitta jumla bilan tasvirlangan edi:
+    # "hujjatlar TO'LIQ emas — talab o'zaklari atrofidagi bo'laklar
+    # olingan". Bu FAQAT birinchisini aytadi.
+    #
+    #   1. HUJJAT ICHIDA kesilgan (`partial`) — matnning bir qismi;
+    #   2. HUJJATNING O'ZI tushib qolgan (`skipped_for_budget`) —
+    #      `MAX_DOCS = 8` chegarasidan oshgani.
+    #
+    # Ikkinchisi aytilmaganda model 8 ta faylni HAMMASI deb o'qiydi.
+    # O'lchandi: 96 ta tenderda 8 dan ko'p hujjat bor, eng kattasida
+    # 30 ta — ya'ni 22 tasi jimgina tushib qolardi.
+    #
+    # Umumiy ogohlantirish tuynukni YASHIRARDI: o'qiganda "qamrov
+    # haqida aytilgan" degan taassurot beradi, holbuki u boshqa
+    # savolga javob beradi (12-sinf).
+    if any(u["partial"] for u in meta["used"]):
+        warn.append("DIQQAT: olingan hujjatlarning MATNI to'liq emas — "
+                    "talab o'zaklari atrofidagi bo'laklar olingan. "
+                    "Bo'lakda yo'q narsani \"yo'q\" deb xulosa qilma, "
+                    "\"ko'rsatilmagan\" deb yoz.")
+    tashlangan = meta.get("skipped_for_budget") or []
+    if tashlangan:
+        nomlar = ", ".join(str(x) for x in tashlangan[:5])
+        warn.append(
+            f"DIQQAT: yana {len(tashlangan)} ta hujjat hajm chegarasi "
+            f"({MAX_DOCS} fayl) tufayli UMUMAN olinmadi: {nomlar}"
+            + (" va boshqalar" if len(tashlangan) > 5 else "")
+            + ". Ular o'qilmagan — ularda shart bo'lishi mumkin.")
     if meta.get("unreadable"):
-        warn.append(f"Yana {len(meta['unreadable'])} ta fayl umuman o'qilmadi.")
+        warn.append(f"Yana {len(meta['unreadable'])} ta fayl umuman o'qilmadi "
+                    f"(matn ajratib bo'lmadi).")
 
     return ("=== BIRIKTIRILGAN HUJJATLAR MATNI ===\n"
             + " ".join(warn) + "\n\n" + text)

@@ -28,7 +28,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import Any, Dict, List, Literal, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 from dotenv import load_dotenv
@@ -137,6 +137,12 @@ class CatalogMatchIn(BaseModel):
     # Mahsulot/xizmat filtri — foydalanuvchi katalogiga qo'shimcha toraytirish
     products: List[str] = []
     services: List[str] = []
+    # MATNLI QIDIRUV. O'LCHANGAN NUQSON (2026-09-02): bu maydon YO'Q edi
+    # va interfeys uni yubormasdi ham -> "Sizga mos" sahifasida qidiruv
+    # maydoni bor edi, lekin natijaga TA'SIR QILMASDI. Foydalanuvchi
+    # yozgan so'z JIMGINA yo'qolardi va u buni "moslik yo'q" deb
+    # o'qirdi — salbiy shartdan olingan yolg'on xulosa.
+    q: Optional[str] = None
     # Standart ro'yxat aniq kod mosligi. Eski matn qidiruvi faqat maxsus
     # taxminiy ko'rinish so'ralsa ishlaydi.
     include_probable: bool = False
@@ -343,6 +349,62 @@ class MatchIn(BaseModel):
     offset: int = 0
 
 
+class JoylashuvXato(RuntimeError):
+    """Joylashtirish sozlamalari BIR-BIRIGA ZID."""
+
+
+def joylashuv_tekshir(ommaviy: str) -> None:
+    """Proksi ortidagi sozlamalar IZCHILMI — ISHGA TUSHISHDA.
+
+    NEGA KERAK. Uchta sozlama bir-biriga bog'liq, lekin uch xil
+    joyda turadi: `APP_PUBLIC_URL` (muhit fayli), `TRUST_PROXY`,
+    `AUTH_COOKIE_SECURE`. Namunalar (`deploy/env/*.example`) to'g'ri,
+    lekin haqiqiy fayl `/etc/tenderai/<muhit>.env` da QO'LDA
+    tahrirlanadi (`docs/deploy.md` §3) — ya'ni ziddiyat qonuniy
+    yo'l bilan paydo bo'ladi.
+
+    IKKI ZIDDIYAT, IKKI XIL OG'IRLIK:
+
+    1. `http://` + `AUTH_COOKIE_SECURE=1` -> **O'LIMGA OLIB KELADI**.
+       Brauzer `Secure` cookie ni shifrlanmagan ulanish orqali
+       YUBORMAYDI (`localhost` dan tashqari). Xizmat ko'tariladi,
+       `/health` va `/ready` YASHIL bo'ladi, va HECH KIM KIRA
+       OLMAYDI. Aynan shu sinf — "yashil, lekin o'lik" — bu
+       loyihada bir necha marta chiqqan, shuning uchun bu
+       TO'XTATADI, ogohlantirmaydi.
+
+    2. `https://` + `TRUST_PROXY=0` -> **JIMGINA NOTO'G'RI**.
+       Caddy ortida har so'rov `127.0.0.1` dan kelgandek ko'rinadi:
+       kirish urinishlari chegarasi BUTUN DUNYO uchun bitta
+       hisoblagichga aylanadi va audit IP si ma'nosiz bo'ladi.
+       Xizmat ishlaydi, shuning uchun bu OGOHLANTIRISH — lekin
+       jurnalda KO'RINADI.
+
+    `dev` da ikkalasi ham tekshirilmaydi: u yerda `http://localhost`
+    normal va `Secure` cookie `localhost` uchun brauzerda ishlaydi.
+    """
+    muhit = ommaviy_url.muhit()
+    if muhit == "dev":
+        return
+    sxema = urlsplit(ommaviy).scheme.lower()
+
+    if sxema == "http" and COOKIE_SECURE:
+        raise JoylashuvXato(
+            f"APP_PUBLIC_URL={ommaviy} (http) va AUTH_COOKIE_SECURE=1 — "
+            "ZID.\n"
+            "  Brauzer `Secure` cookie ni http orqali YUBORMAYDI: "
+            "xizmat yashil ko'rinadi, kirish esa IMKONSIZ.\n"
+            "  Tuzatish: HTTPS qo'ying (tavsiya) yoki "
+            "`AUTH_COOKIE_SECURE=0` (faqat ichki tarmoqda).")
+
+    if sxema == "https" and not TRUST_PROXY:
+        logging.getLogger("api").warning(
+            "APP_PUBLIC_URL https, lekin TRUST_PROXY=0 — proksi ortida "
+            "har so'rov 127.0.0.1 dan kelgandek ko'rinadi: kirish "
+            "chegarasi va audit IP si NOTO'G'RI bo'ladi. "
+            "Tuzatish: muhit faylida TRUST_PROXY=1.")
+
+
 # ---------------------------------------------------------------------------
 # Lifespan — pool init/close
 # ---------------------------------------------------------------------------
@@ -362,7 +424,8 @@ async def lifespan(app: FastAPI):
     # yuborish paytida edi: `APP_ENV=production` da manzil
     # berilmagan bo'lsa ham xizmat yashil ko'rinardi va nosozlik
     # soatlar keyin, ETL jurnalida chiqardi.
-    ommaviy_url.ishga_tushishda_tekshir()
+    _ommaviy = ommaviy_url.ishga_tushishda_tekshir()
+    joylashuv_tekshir(_ommaviy)
     db.init_pool()
     # Embedding modelini FON IPIDA isitamiz: yuklanish ~17 s, keyingi
     # so'rovlar 19-54 ms. Isitmasak birinchi chat savoli 17 soniya
@@ -1803,6 +1866,16 @@ def ai_match_tender(
         raise xatolar.Xato("TENDER_NOT_FOUND", {"id": tender_id})
     _tirik_yoki_409(row, tender_id)
 
+    # IJARACHI ENG BOSHIDA aniqlanadi. O'LCHANGAN NUQSON (2026-09-02):
+    # `company_id` shu yerda ISHLATILARDI, lekin 12 qator KEYIN
+    # aniqlanardi -> `UnboundLocalError` -> HTTP 500. Ya'ni bu
+    # endpoint HECH QACHON ishlamagan.
+    #
+    # `company_id_of()` ishlatiladi, `current_account()["id"]` emas:
+    # birinchisi SERVICE kaliti (ERP) yo'lini ham to'g'ri hal qiladi
+    # va qolgan hamma endpoint bilan bir xil.
+    company_id = company_id_of(request)
+
     products = db.query(queries.CATALOG_LIST_SQL, {"company_id": company_id})
     profile = _shape_profile(db.query_one(queries.PROFILE_GET_SQL,
                                           {"company_id": company_id}))
@@ -1816,7 +1889,6 @@ def ai_match_tender(
     text = ai_match.build_input(row, products, profile, docs)
     h = ai_match.content_hash(text)
 
-    company_id = current_account(request)["id"]
     cached = db.query_one(queries.AI_CACHED_SQL,
                           {"id": tender_id, "kind": ai_match.KIND,
                            "company_id": company_id})
@@ -2126,7 +2198,7 @@ def get_tender_pricing(tender_id: int, request: Request):
 
 
 @app.post("/tenders/{tender_id}/pricing")
-def post_tender_pricing(tender_id: int, body: PricingIn):
+def post_tender_pricing(tender_id: int, body: PricingIn, request: Request):
     """Smetani qayta hisoblaydi va saqlaydi.
 
     Frontend ham brauzerda hisoblaydi (bir xil formula — `pricing.ts`), lekin
@@ -2335,16 +2407,41 @@ def tender_compliance_for(tender_id: int, body: ComplianceDocsIn):
 # ---------------------------------------------------------------------------
 
 @app.get("/requirements/queue")
-def requirements_queue(request: Request, limit: int = 100):
+def requirements_queue(request: Request, limit: int = 100,
+                       q: Optional[str] = Query(None),
+                       region: Optional[str] = Query(None),
+                       past: bool = Query(False),
+                       manba: Optional[str] = Query(None),
+                       otgan: bool = Query(False),
+                       katalog: bool = Query(False)):
     """Ko'rib chiqish navbati — kutayotgan talabi bor tenderlar.
 
     Muddati YAQIN tenderlar birinchi: ular bo'yicha qaror tezroq
     kerak. Tenderning hamma talablari ko'rib chiqilgach u navbatdan
     CHIQIB KETADI.
+
+    FILTR SERVERDA (2026-09-03) — navbat 484, sahifa 100. Mijoz
+    tomonida filtrlash olingan sahifadan tashqarisini KO'RMASDI.
+    `jami` mos kelganlarning to'liq sonini beradi.
     """
     from api import requirement
     cid = company_id_of(request)
-    return {"queue": requirement.review_queue(cid, min(max(limit, 1), 500))}
+    queue, jami = requirement.review_queue(
+        cid, min(max(limit, 1), 500), q=q, region=region,
+        faqat_past=past, manba=manba, otgan=otgan, katalog=katalog)
+    # MANBA SONLARI — interfeys "Modeldan (0)" deb YOZADI va variantni
+    # o'chiradi. Busiz filtr hech narsa qilmayotgandek ko'rinardi:
+    # bugun HAMMA kutayotgan talab `naqsh` dan (LLM qatlami pullik va
+    # qulflangan), ya'ni "Naqshdan" jamini o'zgartirmaydi, "Modeldan"
+    # esa ro'yxatni bo'shatadi. Ikkalasi ham BUZUQ deb o'qilardi.
+    #
+    # `manba` ning O'ZI hisobga OLINMAYDI: savol "shu manbani
+    # tanlasam nechta qoladi", "umuman nechta bor" emas.
+    manbalar = requirement.review_queue_manbalar(
+        cid, q=q, region=region, faqat_past=past, otgan=otgan,
+        katalog=katalog)
+    return {"queue": queue, "jami": jami, "korsatildi": len(queue),
+            "manbalar": manbalar}
 
 
 @app.get("/tenders/{tender_id}/requirements")
@@ -2403,7 +2500,7 @@ class ReviewIn(BaseModel):
     `Literal` bilan qulflangan — noto'g'ri qiymat FastAPI darajasida
     422 beradi va `requirement.review_set()` gacha yetib bormaydi.
     """
-    status: Literal["approved", "rejected", "corrected"]
+    status: Literal["approved", "rejected", "corrected", "uncertain"]
     corrected_value: Optional[str] = None
     note: Optional[str] = None
     #: `compliance.DOC_TYPES` kodi yoki 'yoq' / 'boshqa'.
@@ -2412,6 +2509,37 @@ class ReviewIn(BaseModel):
     #: YOPIQ rejimda inson model javobini KO'RMASDAN yozgan qiymat.
     #: Bir marta yozilgach o'zgarmaydi (server tomonda `COALESCE`).
     blind_value: Optional[str] = None
+
+
+# KO'RIK TUGAGACH NAVBAT YANGILANADI.
+#
+# Ilgari zanjir shu yerda UZILARDI: tasdiq `tender_requirement` ga
+# yozilardi, `tender_routing` esa keyingi ETL yurishigacha (yoki
+# brokerning "Yangilash" tugmasigacha) ESKI ballni ko'rsatib turardi.
+# Ya'ni tasdiqning butun ma'nosi -- dalilni yaxshilash -- navbatga
+# soatlab yetib bormasdi.
+#
+# QOIDA IKKI JOYDA TAKRORLANMAYDI: "kimni baholash mumkin" ta'rifi
+# `api/routing.py` da (`korik_tugadi`), bu yerda faqat CHAQIRUV.
+def _navbatni_yangila(tender_id: int, cid: int) -> Dict[str, Any]:
+    """Ko'rik tugagach navbatni qayta hisoblaydi.
+
+    YIQILSA KO'RIKNI BUZMAYDI. Talab allaqachon YOZILGAN va u
+    asosiy ish; navbat -- ikkilamchi. Xato 500 ga aylansa
+    foydalanuvchi "tasdiq o'tmadi" deb o'ylab QAYTA bosardi.
+
+    Lekin JIMGINA ham yutilmaydi: sabab javobda qaytadi va
+    interfeys uni ko'rsatadi (`api/topshiriq.py` dagi naqsh).
+    """
+    from api import routing
+    try:
+        return routing.korik_tugadi(tender_id, cid)
+    except Exception as e:                              # noqa: BLE001
+        _log.warning("navbatni yangilash yiqildi tender=%s: %s",
+                    tender_id, e)
+        return {"holat": "xato", "xato": f"{type(e).__name__}: {e}"[:200],
+                "ozgardi": False, "inson_qarori_eskirdi": False,
+                "ai_qaror": None, "routing_id": None}
 
 
 @app.post("/requirements/{req_id}/review")
@@ -2427,6 +2555,8 @@ def requirement_review(req_id: int, body: ReviewIn, request: Request):
     # `approved` va `rejected` — TASDIQLASH huquqi; `corrected` esa
     # ko'rib chiqish. Ular ATAYLAB har xil: qiymatni tuzatish va uni
     # rasman tasdiqlash bir xil vaznda emas.
+    # `uncertain` — ko'rib chiqish huquqi yetarli: u hech narsani
+    # tasdiqlamaydi, aksincha "hal qilinmadi" deb belgilaydi.
     ruxsat(k, "tasdiq" if body.status == "approved"
            else "rad" if body.status == "rejected" else "korib_chiq")
     oldin = requirement.bitta(req_id, cid)
@@ -2456,6 +2586,7 @@ def requirement_review(req_id: int, body: ReviewIn, request: Request):
         "WHERE company_id=%(c)s AND tender_id=%(t)s "
         "AND review_status='pending_review'",
         {"c": cid, "t": row["tender_id"]})
+    yonaltirish: Optional[Dict[str, Any]] = None
     if not qolgan:
         # OXIRGI talab belgilandi — vaqtni yopamiz.
         #
@@ -2479,7 +2610,15 @@ def requirement_review(req_id: int, body: ReviewIn, request: Request):
             "AND reviewed_by IS NOT NULL",
             {"c": cid, "t": row["tender_id"]}) or 0
         requirement.review_tugadi(row["tender_id"], cid, int(korilgan))
-    return {**row, "qolgan_kutayotgan": int(qolgan or 0)}
+        # KO'RIK TUGADI -> NAVBAT SHU ZAHOTI QAYTA HISOBLANADI.
+        # Oraliq tasdiqlarda emas: har talabda qayta baholash
+        # `qualification.check` ni ko'rik tezligiga bog'lardi va
+        # oxirgi natijadan boshqa hech narsa bermasdi.
+        yonaltirish = _navbatni_yangila(row["tender_id"], cid)
+    return {**row, "qolgan_kutayotgan": int(qolgan or 0),
+            # NAVBATGA NIMA BO'LGANI JIM QOLMAYDI. Ko'rik hali
+            # tugamagan bo'lsa `None` -- "hali baholanmadi".
+            "yonaltirish": yonaltirish}
 
 
 # ---------------------------------------------------------------------------
@@ -2607,22 +2746,38 @@ def routing_agreement(request: Request):
 @app.get("/routing/queue")
 def routing_queue(request: Request,
                   holat: Optional[str] = Query(None),
+                  q: Optional[str] = Query(None),
+                  qaror: Optional[str] = Query(None),
+                  region: Optional[str] = Query(None),
+                  eskirgan: bool = Query(False),
+                  katalog: bool = Query(False),
                   limit: int = Query(100, ge=1, le=500)):
-    """Brokerga ko'rsatiladigan navbat — FAQAT ochiq tenderlar."""
+    """Brokerga ko'rsatiladigan navbat — FAQAT ochiq tenderlar.
+
+    FILTR SERVERDA (2026-09-03). Mijoz tomonida filtrlash faqat
+    olingan sahifaga tegardi: navbat 188, sahifa 100 — ya'ni
+    qidirilgan tender ikkinchi yuzlikda bo'lsa "topilmadi" bo'lib
+    ko'rinardi. Bu JIMGINA noto'g'ri javob.
+
+    `jami` — mos kelganlarning TO'LIQ soni, qaytarilganlar emas.
+    Interfeys kesilganini shundan biladi.
+    """
     from api import routing
     cid = company_id_of(request)
     try:
-        items = routing.navbat(cid, holat=holat, limit=limit)
+        items, jami = routing.navbat(cid, holat=holat, limit=limit,
+                                     q=q, qaror=qaror, region=region,
+                                     eskirgan=eskirgan, katalog=katalog)
     except ValueError as e:
         raise xatolar.kodli(e, "FIELD_INVALID")
-    return {"items": items, "jami": len(items),
+    return {"items": items, "jami": jami, "korsatildi": len(items),
             "moslik": routing.moslik(cid)}
 
 
 @app.post("/routing/refresh")
 def routing_refresh(request: Request,
                     barchasi: bool = Query(False),
-                    limit: int = Query(500, ge=1, le=2000)):
+                    limit: int = Query(2000, ge=1, le=2000)):
     """Navbatni qayta baholaydi. MODEL CHAQIRILMAYDI.
 
     MUSBAT TASDIQ: nechta baholandi VA nechtasi navbatga tushdi —
@@ -2654,6 +2809,20 @@ class RoutingDecisionIn(BaseModel):
     # SERVERDA aniqlanadi (`X-Actor` sarlavhasi yoki ERP sessiyasi)
     # va `api/aktor.py` uni ro'yxatdan tekshiradi.
 
+    # --- ERP GA TOPSHIRIQ (`api/topshiriq.py`) --------------------------
+    # `olindi` qarori ERP da ISH KARTASIGA aylanadi. Quyidagilar —
+    # o'sha kartaning boshlang'ich holati. Ular MIJOZDAN keladi va
+    # bu to'g'ri: bular QAROR emas, ish taqsimoti (kimga, qachon,
+    # qanchalik shoshilinch). Qarorning KIMLIGI esa avvalgidek
+    # serverda aniqlanadi.
+    #
+    # `hodim_actor_id` — SHU IJARACHINING aktori bo'lishi shart
+    # (tekshiriladi); ERP hodimiga xaritalanmagan bo'lsa ERP kartani
+    # "Taqsimlanmagan" ga qo'yadi va menejerga xabar beradi.
+    hodim_actor_id: Optional[int] = None
+    ustuvorlik: str = "medium"
+    muddat: Optional[date] = None
+
 
 @app.post("/routing/{routing_id}/decision")
 def routing_decision(routing_id: int, body: RoutingDecisionIn,
@@ -2676,13 +2845,64 @@ def routing_decision(routing_id: int, body: RoutingDecisionIn,
         raise xatolar.kodli(e, "FIELD_INVALID")
     if not row:
         raise xatolar.Xato("RECORD_NOT_FOUND")
+    # --- ERP GA TOPSHIRIQ ---------------------------------------------
+    # `olindi` -> ERP da karta ochiladi; `rad`/`kutilsin` -> avval
+    # berilgan topshiriq BEKOR qilinadi (ERP kartasi o'chmaydi,
+    # `rejected` ga o'tadi). Ikkalasi ham `erp_rollar.md` §5 qoidasi.
+    #
+    # XATO YUTILMAYDI, LEKIN QARORNI HAM YIQITMAYDI: qaror allaqachon
+    # yozilgan va uni orqaga qaytarish yomonroq bo'lardi. Shuning
+    # uchun natija javobda ochiq qaytadi (`topshiriq` maydoni).
+    topshiriq_natija: Optional[Dict[str, Any]] = None
+    try:
+        from api import topshiriq as _topshiriq
+        if not _topshiriq.ready():
+            topshiriq_natija = {"holat": "migratsiya_yoq",
+                                "patch": "schema_patch_topshiriq.sql"}
+        elif body.qaror == "olindi":
+            if body.hodim_actor_id is not None:
+                from api import aktor as _aktor
+                if not _aktor.bitta(cid, body.hodim_actor_id):
+                    raise xatolar.Xato("RECORD_NOT_FOUND",
+                                       {"maydon": "hodim_actor_id"})
+            t = _topshiriq.yarat(
+                routing_id, cid, int(row["tender_id"]),
+                hodim_actor_id=body.hodim_actor_id,
+                yonaltirgan_actor_id=k.actor_id,
+                ishonch=k.ishonch, ustuvorlik=body.ustuvorlik,
+                izoh=body.izoh, muddat=body.muddat)
+            topshiriq_natija = {"holat": "yaratildi", "id": t["id"],
+                                "hodim_actor_id": t["hodim_actor_id"]}
+        else:
+            b = _topshiriq.bekor(routing_id, cid)
+            topshiriq_natija = {"holat": "bekor_qilindi", "id": b["id"]} if b                 else {"holat": "topshiriq_yoq"}
+    except xatolar.Xato:
+        raise
+    except Exception as e:                      # noqa: BLE001
+        topshiriq_natija = {"holat": "xato", "xato": f"{type(e).__name__}: {e}"[:300]}
+
     audit_yoz(k, request, amal=f"yonaltirish_{body.qaror}",
               entity="tender_routing", entity_id=routing_id,
               keyin={"inson_qaror": row.get("inson_qaror"),
                      "ai_qaror": row.get("ai_qaror"),
-                     "tender_id": row.get("tender_id")},
+                     "tender_id": row.get("tender_id"),
+                     "topshiriq": topshiriq_natija},
               izoh=body.izoh)
-    return row
+    return {**row, "topshiriq": topshiriq_natija}
+
+
+@app.get("/routing/{routing_id}/topshiriq")
+def routing_topshiriq(routing_id: int, request: Request):
+    """Shu qaror bo'yicha ERP ga berilgan topshiriq (bo'lsa).
+
+    Navbat ekrani "berildimi va kimga" degan savolga javob berishi
+    kerak: qaror yozilgani bilan ish boshlangani bir xil emas."""
+    from api import topshiriq as _topshiriq
+    cid = company_id_of(request)
+    if not _topshiriq.ready():
+        return {"bor": False, "sabab": "schema_patch_topshiriq.sql qo'llanmagan"}
+    t = _topshiriq.bitta(routing_id, cid)
+    return {"bor": bool(t), "topshiriq": t}
 
 
 class ReviewBulkIn(BaseModel):
@@ -2714,9 +2934,14 @@ def requirements_review_all(tender_id: int, body: ReviewBulkIn,
                   izoh=f"{n} ta talab bir amalda")
     except ValueError as e:
         raise xatolar.kodli(e, "FIELD_INVALID")
+    yonaltirish: Optional[Dict[str, Any]] = None
     if n:
         requirement.review_tugadi(tender_id, cid, n)
-    return {"tender_id": tender_id, "ozgardi": n, "status": body.status}
+        # OMMAVIY AMAL BUTUN TENDERNI YOPADI (`pending_review`
+        # qolmaydi), ya'ni bu ham KO'RIK TUGAGAN nuqta.
+        yonaltirish = _navbatni_yangila(tender_id, cid)
+    return {"tender_id": tender_id, "ozgardi": n, "status": body.status,
+            "yonaltirish": yonaltirish}
 
 
 @app.post("/requirements/pilot")
@@ -2732,7 +2957,40 @@ def requirements_pilot_create(request: Request):
     kelishmovchilik darajasini o'lchash imkonini beradi.
     """
     from api import requirement
-    return requirement.pilot_yarat(company_id_of(request))
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    # Pilot QURISH — namunani belgilaydi, ya'ni keyingi barcha
+    # o'lchovlarning maxrajini belgilaydi. Shuning uchun `sozlama`.
+    ruxsat(k, "sozlama")
+    natija = requirement.pilot_yarat(
+        cid, yaratgan=(k.login or k.ishonch))
+    if not natija.get("mavjud"):
+        audit_yoz(k, request, amal="pilot_yaratildi", entity="review_pilot",
+                  entity_id=int(natija.get("avlod") or 0), keyin=natija)
+    return natija
+
+
+@app.post("/requirements/pilot/{avlod}/arxiv")
+def requirements_pilot_arxiv(avlod: int, request: Request):
+    """Pilot avlodini ARXIVLAYDI — qatorlar O'CHIRILMAYDI.
+
+    Ungacha eskirgan pilotni yopishning yagona yo'li `review_pilot`
+    dan qatorlarni SQL bilan o'chirish edi — ya'ni namunani va
+    tarixiy dalilni yo'qotish. Endi arxivlash FAKT sifatida
+    yoziladi, qatorlar joyida qoladi va yangi avlod ochiladi.
+    """
+    from api import requirement
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    ruxsat(k, "sozlama")
+    try:
+        natija = requirement.pilot_arxivla(cid, avlod,
+                                           kim=(k.login or k.ishonch))
+    except Exception as e:                                    # noqa: BLE001
+        raise xatolar.kodli(e, "NOT_FOUND")
+    audit_yoz(k, request, amal="pilot_arxivlandi", entity="review_pilot",
+              entity_id=avlod, keyin=natija)
+    return natija
 
 
 @app.get("/requirements/pilot")
@@ -3334,8 +3592,21 @@ def catalog_match(body: CatalogMatchIn, request: Request):
     if not prods:
         return {"total": 0, "limit": body.limit, "offset": body.offset,
                 "items": [], "holat": kodlash.holat(cid),
-                "atama_kesildi": 0}
+                "atama_kesildi": 0,
+                # SHAKL BIR XIL BO'LSIN: interfeys `hudud` kalitini
+                # HAR javobda kutadi. Yo'q bo'lsa u "belgilanmagan"
+                # bilan "tashqarida yo'q" ni ajrata olmasdi.
+                "hudud": {"regions": [], "tashqari": 0, "jami": 0}}
     product_ids = [p["id"] for p in prods]
+
+    # PROFIL HUDUDLARI — bir marta o'qiladi, har tender uchun emas.
+    # Bo'sh bo'lsa cheklov yo'q va hech narsa belgilanmaydi
+    # (`sf.regionsHint`: "Bo'sh — butun respublika").
+    #
+    # Import MAHALLIY — `tender_qualification` dagi bilan ayni uslub.
+    from api import qualification
+    profil_regions = (db.query_one(qualification.SQL_PROFIL, {"c": cid})
+                      or {}).get("regions") or []
 
     # ------------------------------------------------------------------
     # SOLISHTIRISH SQL DA BAJARILADI, Python siklida EMAS.
@@ -3348,7 +3619,11 @@ def catalog_match(body: CatalogMatchIn, request: Request):
     # ------------------------------------------------------------------
 
     # --- 1. KOD yo'li (tasdiqlangan tasniflagich) ---
-    kod_rows = kodlash.moslik(cid, only_open=True, limit=1000,
+    # CHEGARA `kodlash.MOSLIK_LIMIT` DAN. Navbat filtrlari ham shuni
+    # ishlatadi (`kodlash.mos_tender_idlari`) — ikki joyda ikki xil
+    # raqam bo'lsa "Sizga mos" da ko'ringan tender filtrda chiqmasdi.
+    kod_rows = kodlash.moslik(cid, only_open=True,
+                              limit=kodlash.MOSLIK_LIMIT,
                               product_ids=product_ids)
     poz = kodlash.pozitsiya_moslik(
         cid, [r["tender_id"] for r in kod_rows], product_ids=product_ids)
@@ -3372,13 +3647,15 @@ def catalog_match(body: CatalogMatchIn, request: Request):
         # boshqa.
         return {"total": 0, "limit": body.limit, "offset": body.offset,
                 "items": [], "holat": kodlash.holat(cid),
-                "atama_kesildi": kesilgan}
+                "atama_kesildi": kesilgan,
+                "hudud": {"regions": profil_regions, "tashqari": 0,
+                          "jami": 0}}
 
     # Filtrlar (hudud/valyuta/mahsulot) SHU YERDA qo'llanadi — nomzodlar
     # allaqachon id bo'yicha qisqargan, ya'ni so'rov arzon.
     where, params = queries.build_tender_filters(
         status="open", region=body.region, currency=body.currency,
-        products=body.products + body.services)
+        q=body.q, products=body.products + body.services)
     where = (where + " AND t.id = ANY(%(ids)s)") if where else "WHERE t.id = ANY(%(ids)s)"
     params["ids"] = ids
     cand = db.query(queries.match_candidates_sql(where, cap=MATCH_CAP), params)
@@ -3430,6 +3707,25 @@ def catalog_match(body: CatalogMatchIn, request: Request):
             n_poz = len(nomlar)
 
         item = _shape_tender(c)
+        # HUDUD BELGISI — "Sizga mos" bilan navbat BIR XIL qoidani
+        # ko'rsatsin.
+        #
+        # O'LCHANGAN NOMUVOFIQLIK (2026-09-03). Bu bo'lim profildagi
+        # hudud cheklovini UMUMAN hisobga olmasdi, malaka tekshiruvi
+        # esa uni QATTIQ `fail` sifatida qo'llardi. Natijada katalogga
+        # mos 28 ta ochiq tenderdan 11 tasi broker navbatida yo'q edi
+        # va sababi hech qayerda ko'rinmasdi — hammasi kompaniyaning
+        # O'Z profili "biz u yerda ishlamaymiz" degan viloyatlarda
+        # (Jizzax, Andijon, Farg'ona, Qoraqalpog'iston, ...).
+        #
+        # RO'YXATDAN OLIB TASHLANMAYDI, BELGILANADI. Yashirish
+        # kompaniyaga "hududni kengaytirsam nima yutaman" degan
+        # savolga javob berish imkonini yo'q qilardi — va bu qaror
+        # SOTUV qarori, filtr emas.
+        # O'LCHAB BO'LMAGANI (`None`) "tashqarida" DEGANI EMAS —
+        # cheklov qo'yilmagan yoki tenderning hududi noma'lum.
+        mos = qualification.hudud_mos(c.get("area_path"), profil_regions)
+        item["hudud_tashqari"] = (mos is False)
         item["catalog"] = {
             # kod — rasmiy tasniflagich, inson tasdiqlagan   -> 100
             # nom — matn mosligi, morfologik jihatdan mo'rt  ->  60
@@ -3445,7 +3741,18 @@ def catalog_match(body: CatalogMatchIn, request: Request):
             # ko'rishi mumkin va u holda mahsulot nomi taxmin bo'ladi.
             "positions": positions,
             "position_count": n_poz,
-            "products": [x["mahsulot"] for x in positions if x["mahsulot"]][:5],
+            # TAKRORSIZ, TARTIB SAQLANGAN. O'LCHANGAN NUQSON
+            # (2026-09-02): bir mahsulot bir tenderning bir necha
+            # pozitsiyasiga mos kelsa, nomi ro'yxatga BIR NECHA
+            # marta tushardi (37 elementdan 3 tasida). Ikki oqibati
+            # bor edi:
+            #   * interfeys sababni IKKI MARTA ko'rsatardi;
+            #   * React `key` dublikati ogohlantirishi chiqardi
+            #     (`TenderTable` sabablarni nom bo'yicha kalitlaydi).
+            # `dict.fromkeys` tartibni saqlaydi -- eng kuchli moslik
+            # birinchi bo'lib qolsin.
+            "products": list(dict.fromkeys(
+                x["mahsulot"] for x in positions if x["mahsulot"]))[:5],
         }
         matched.append(item)
 
@@ -3457,7 +3764,15 @@ def catalog_match(body: CatalogMatchIn, request: Request):
             "items": page, "holat": kodlash.holat(cid),
             # Atama chegarasi ishga tushgan bo'lsa JIMGINA kesmaymiz —
             # foydalanuvchi qamrov to'liq emasligini bilishi kerak.
-            "atama_kesildi": kesilgan}
+            "atama_kesildi": kesilgan,
+            # HUDUD XULOSASI — SAHIFADAN emas, BUTUN natijadan.
+            # Sahifadagi sonni ko'rsatish "2 tasi tashqarida" derdi,
+            # holbuki jami 11 ta bo'lishi mumkin. Bu bo'lim aynan
+            # "nechtasini yo'qotyapman" savoliga javob beradi.
+            "hudud": {"regions": profil_regions,
+                      "tashqari": sum(1 for it in matched
+                                      if it["hudud_tashqari"]),
+                      "jami": total}}
 
 
 @app.get("/catalog/new-count")
@@ -3558,22 +3873,52 @@ class KodQarorIn(BaseModel):
 
 @app.post("/catalog/{product_id}/kod-tasdiq", status_code=204)
 def kod_tasdiq(product_id: int, body: KodQarorIn, request: Request):
-    """Inson kodni TASDIQLAYDI. Kim tasdiqlagani yozib boriladi."""
+    """Inson kodni TASDIQLAYDI. Aktor, manba va audit yoziladi.
+
+    O'LCHANGAN NUQSON (2026-09-02): bu yo'l `catalog_product_code`
+    ga TO'G'RIDAN-TO'G'RI yozardi — aktorsiz, manbasiz, auditsiz.
+    Natijada bazada 1 048 ta "inson tasdig'i" paydo bo'lgan va
+    ularning hammasi mashina yozgan (16 ta sekundda). Endi bu yo'l
+    `/kod/qaror` bilan AYNI qoidaga bo'ysunadi.
+    """
     acc = current_account(request)
     kim = (acc.get("username") or "").strip()
     if not kim:
         # SERVICE kaliti (ERP) odam emas — tasdiq qo'ya olmaydi.
         raise xatolar.Xato("AUTH_LOGIN_REQUIRED")
-    if not kodlash.tasdiqla(company_id_of(request), product_id, body.code, kim):
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    ruxsat(k, "tasdiq")
+    if not kodlash.tasdiqla(cid, product_id, body.code, kim,
+                            ishonch=k.ishonch, actor_id=k.actor_id):
         raise xatolar.Xato("LINK_NOT_FOUND")
+    audit_yoz(k, request, amal="kod_tasdiq",
+              entity="catalog_product_code", entity_id=product_id,
+              keyin={"code": body.code})
     return None
 
 
 @app.post("/catalog/{product_id}/kod-rad", status_code=204)
 def kod_rad(product_id: int, body: KodQarorIn, request: Request):
-    """Inson taklifni RAD etadi (qator qoladi — takror taklif chiqmasin)."""
-    if not kodlash.rad_et(company_id_of(request), product_id, body.code):
+    """Inson taklifni RAD etadi (qator qoladi — takror taklif chiqmasin).
+
+    RAD ETISH HAM QAROR va u avval umuman kimliksiz edi: bu
+    endpoint sessiyani ham tekshirmasdi, ya'ni SERVICE kaliti bilan
+    ham rad etib bo'lardi va "kim rad etdi" javobsiz qolardi.
+    """
+    acc = current_account(request)
+    kim = (acc.get("username") or "").strip()
+    if not kim:
+        raise xatolar.Xato("AUTH_LOGIN_REQUIRED")
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    ruxsat(k, "korib_chiq")
+    if not kodlash.rad_et(cid, product_id, body.code,
+                          ishonch=k.ishonch, actor_id=k.actor_id):
         raise xatolar.Xato("LINK_NOT_FOUND")
+    audit_yoz(k, request, amal="kod_rad",
+              entity="catalog_product_code", entity_id=product_id,
+              keyin={"code": body.code})
     return None
 
 
@@ -3753,7 +4098,7 @@ def kod_qaror(body: AtamaQarorIn, request: Request):
     if body.qaror == "kod" and body.code:
         n_mahsulot = kodlash.atamaga_kod_biriktir(
             cid, body.kalit, (body.code or "").strip(), kim,
-            qaror_id=row.get("id"))
+            qaror_id=row.get("id"), ishonch=k.ishonch, actor_id=k.actor_id)
     audit_yoz(k, request, amal=f"kod_{body.qaror}",
               entity="kod_qaror", entity_id=int(row.get("id") or 0),
               keyin={"atama": body.atama, "qaror": body.qaror,
@@ -3891,6 +4236,54 @@ def aktor_qosh(body: AktorIn, request: Request):
     return row
 
 
+@app.get("/aktor/erp")
+def aktor_erp_nomzodlar(request: Request):
+    """ERP odamlari va ularning xaritadagi holati. FAQAT O'QISH.
+
+    `sozlama` talab qilinadi: bu ro'yxat "kim qaror qo'ya oladigan
+    bo'lishi mumkin" degan ma'lumot, ya'ni tashkilot tarkibi.
+
+    `token_hash` QAYTMAYDI — u `erp.v_tai_actor` da bor, lekin sir.
+    """
+    from api import aktor
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    ruxsat(k, "sozlama")
+    return aktor.erp_nomzodlar(cid)
+
+
+@app.post("/aktor/erp/sinxron")
+def aktor_erp_sinxron(request: Request, quruq: bool = False):
+    """ERP odamlarini aktor xaritasiga IDEMPOTENT qo'shadi.
+
+    Ijarachi SESSIYADAN olinadi (`company_id_of`), so'rov tanasidan
+    EMAS — kompaniyalararo xaritalash shu bilan imkonsiz.
+
+    `?quruq=true` — reja ko'rsatiladi, hech narsa yozilmaydi.
+    """
+    from api import aktor
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    ruxsat(k, "sozlama")
+    natija = aktor.erp_sinxron(cid, quruq=quruq)
+    # AUDIT HAR AKTOR UCHUN ALOHIDA. Yig'ma qator `entity_id` ni hech
+    # narsaga ishora qilmaydigan qilib qo'yardi; bu yerda esa har
+    # yozuv AYNAN qaysi aktorga tegishli ekani ko'rinadi.
+    # QURUQ yurish audit yozmaydi: hech narsa o'zgarmagan.
+    if not quruq and natija.get("bajarildi"):
+        for r in natija.get("natija", []):
+            if r.get("amal") not in ("yaratildi", "nofaollashtirildi"):
+                continue
+            audit_yoz(k, request,
+                      amal=f"aktor_sinxron_{r['amal']}", entity="actor",
+                      entity_id=int(r["actor_id"]),
+                      keyin={"login": r["login"], "rol": r["tai_rol"],
+                             "erp_user_id": r["erp_user_id"],
+                             "erp_faol": r["erp_faol"]},
+                      izoh=r.get("sabab"))
+    return natija
+
+
 @app.patch("/aktor/{actor_id}")
 def aktor_yangila(actor_id: int, body: AktorYangilashIn, request: Request):
     """Aktor rolini/holatini o'zgartiradi. FAQAT `sozlama`."""
@@ -3914,6 +4307,52 @@ def aktor_yangila(actor_id: int, body: AktorYangilashIn, request: Request):
               keyin={"rol": row["rol"], "ism": row["ism"],
                      "active": row["active"]})
     return row
+
+
+@app.get("/validatsiya/holat")
+def validatsiya_holat(request: Request):
+    """INSON TASDIG'I holati — qatlam bo'yicha, DALIL darajasi bilan.
+
+    UCH DARAJA ATAYLAB AJRATILGAN va ular qo'shilmaydi:
+
+        aktorli  — qaysi ODAM qilgani ma'lum   (darvoza SHUNI sanaydi)
+        anonim   — odam, lekin shaxsan noma'lum (kompaniya sessiyasi)
+        mashina  — INSON EMAS
+
+    Ilgari uchalasi bitta raqamga qo'shilardi va natijada mashina
+    yozgan 1 048 ta qator "inson tasdig'i 73.4%" bo'lib ko'rinardi.
+
+    `ulush_foiz` chegaradan O'TMAGUNCHA `null` qaytadi: kichik
+    namunadan foiz chiqarish yolg'on aniqlik bo'lardi.
+
+    `tosiq` — pilot nima uchun yurmayotgani. `null` bo'lsa shu
+    qatlamda aktorli qaror yozish mumkin.
+    """
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    ruxsat(k, "korish")
+    darvoza = db.query(
+        "SELECT qatlam, eng_kam, aktorli, qolgan, anonim, mashina, "
+        "       navbatda, holat, ulush_foiz "
+        "  FROM v_sifat_darvoza WHERE company_id = %(c)s ORDER BY qatlam",
+        {"c": cid})
+    tayyorlik = db.query(
+        "SELECT qatlam, aktor_jami, aktor_faol, aktor_koruvchi, tosiq "
+        "  FROM v_pilot_tayyorlik WHERE company_id = %(c)s ORDER BY qatlam",
+        {"c": cid})
+    t_map = {r["qatlam"]: r for r in tayyorlik}
+    return {
+        "qatlamlar": [{**d, **{kk: vv for kk, vv in
+                               (t_map.get(d["qatlam"]) or {}).items()
+                               if kk != "qatlam"}}
+                      for d in darvoza],
+        # HOLAT ATAMALARI — hisobotda aralashmasin.
+        "izoh": {
+            "INSON_TASDIQLADI": "yetarli sondagi AKTORLI qaror bor",
+            "YETARLI_EMAS": "aktorli qaror bor, lekin chegaradan kam",
+            "TASDIQLANMAGAN": "aktorli qaror YO'Q",
+        },
+    }
 
 
 @app.get("/aktor/holat")
@@ -4119,6 +4558,14 @@ class ChatIn(BaseModel):
     session_id: Optional[str] = None
     tender_id: Optional[int] = None
     lang: Optional[str] = None
+    #: Suhbat QAYERDAN boshlangani: `panel` | `global` | `gonogo` |
+    #: `match`. `eval` bu yerdan KELMAYDI -- uni faqat
+    #: `run_eval.py` o'zi yozadi (`ai_chat.create_session`).
+    #:
+    #: Berilmasa `None` qoladi va o'lchovda "noma'lum" deb sanaladi.
+    #: Taxmin qilinmaydi: `tender_id` bor degani "tender panelidan"
+    #: degani EMAS -- global suhbatda ham tender ko'rsatilishi mumkin.
+    manba: Optional[str] = None
 
     @field_validator("message")
     @classmethod
@@ -4158,17 +4605,47 @@ async def chat(body: ChatIn, request: Request):
         except LookupError as e:
             raise xatolar.kodli(e, "CHAT_SESSION_NOT_FOUND")
     else:
+        # `eval` MIJOZDAN QABUL QILINMAYDI. Aks holda interfeys
+        # (yoki so'rovni qo'lda yasagan kim bo'lsa) o'z sessiyasini
+        # "avto-yaratilgan" deb belgilab, uni o'lchovdan yashira
+        # olardi -- yoki teskarisi, eval hovuzini ifloslantirardi.
+        manba = body.manba if body.manba in ("panel", "global",
+                                             "gonogo", "match") else None
+        # TAHLIL SURATI — SESSIYA OCHILGANDA.
+        #
+        # `ai_analysis.content_hash` ni yozib qo'yamiz va keyingi
+        # har xabarda joriysi bilan solishtiramiz. Farq bo'lsa —
+        # tahlil suhbat o'rtasida QAYTA HISOBLANGAN va model buni
+        # foydalanuvchiga aytishi kerak (`tender_routing.ai_ozgardi`
+        # bilan bir tamoyil).
+        #
+        # Tahlil YO'Q bo'lsa `None` qoladi: "yo'q" bilan "o'zgardi"
+        # aralashmasin.
+        t_hash = None
+        if body.tender_id:
+            try:
+                from api import tahlil as _tahlil
+                t_hash = _tahlil.joriy_hash(body.tender_id, company_id)
+            except Exception as e:                      # noqa: BLE001
+                _log.warning("tahlil_hash olinmadi: %s", e)
         sid = ai_chat.create_session(company_id, body.tender_id,
                                      body.message[:120],
-                                     i18n.norm_lang(body.lang))
+                                     i18n.norm_lang(body.lang),
+                                     manba=manba, tahlil_hash=t_hash)
         s = {"id": sid, "tender_id": body.tender_id,
-             "lang": i18n.norm_lang(body.lang)}
+             "lang": i18n.norm_lang(body.lang),
+             "manba": manba, "tahlil_hash": t_hash}
 
     ctx = ai_chat.ChatContext(
         company_id=company_id,          # <-- SESSIYADAN, modeldan EMAS
         session_id=str(s["id"]),
         lang=s.get("lang") or i18n.DEFAULT_LANG,
         tender_id=s.get("tender_id"),
+        # SESSIYADAN, MIJOZDAN EMAS. Davom etayotgan suhbatda ular
+        # `load_session` dan keladi — ya'ni mijoz keyingi xabarda
+        # `manba` ni o'zgartirib kontekstni almashtira olmaydi.
+        manba=s.get("manba"),
+        tahlil_hash=s.get("tahlil_hash"),
     )
     profile = _shape_profile(db.query_one(queries.PROFILE_GET_SQL,
                                           {"company_id": company_id}))
@@ -4191,6 +4668,36 @@ def chat_sessions(request: Request,
     """Suhbatlar ro'yxati (arxivlanmaganlar, oxirgi faollik bo'yicha)."""
     _chat_tayyor()
     return ai_chat.list_sessions(company_id_of(request), limit=limit)
+
+
+class ChatTiklashIn(BaseModel):
+    """`tiklandi` — panelga tiklandi; `rad` — "Yangi suhbat" bosildi."""
+    holat: Literal["tiklandi", "rad"]
+
+
+@app.post("/chat/sessions/{session_id}/tiklash")
+def chat_tiklash(session_id: str, body: ChatTiklashIn, request: Request):
+    """Suhbat tiklanishini QAYD ETADI — `DAVOM_SOAT` chegarasi uchun.
+
+    `ChatPanel` ochilganda oxirgi suhbatni davom ettiradi
+    (`DAVOM_SOAT = 24`). Bu raqam O'LCHANMAGAN TAXMIN: u hech
+    qanday ma'lumotdan chiqmagan.
+
+    "Yangi suhbat" tugmasi — tiklanishdan chiqish yo'li, ya'ni
+    UNING BOSILISHI chegara noto'g'ri ekanining signali. Global
+    suhbat uchun 24 soat ko'p bo'lishi mumkin (mavzu o'zgaradi),
+    tender uchun esa oz — shuning uchun `v_chat_tiklash` ikki
+    kesimni ALOHIDA sanaydi.
+
+    `company_id` SESSIYADAN va SQL SHARTIDA — boshqa kompaniyaning
+    suhbatiga belgi qo'yib bo'lmaydi (IDOR himoyasi).
+    """
+    _chat_tayyor()
+    cid = company_id_of(request)
+    ok = ai_chat.tiklash_qayd(session_id, cid, body.holat)
+    if not ok:
+        raise xatolar.Xato("CHAT_SESSION_NOT_FOUND")
+    return {"session_id": session_id, "holat": body.holat}
 
 
 @app.get("/chat/sessions/{session_id}")

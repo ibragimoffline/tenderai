@@ -259,13 +259,27 @@ def test_ommaviy_nusxa(conn) -> None:
     if jami:
         print(f"      OCHIQ: {bor:,}/{jami:,} = {100.0 * bor / jami:.1f}% "
               f"(umumiy korpus {umumiy:,})")
-    # IKKI FOIZ BOSHQA raqam bo'lishi kerak — aks holda ajratishning
-    # ma'nosi yo'q.
+    # IKKI FOIZ ALOHIDA HISOBLANADI.
+    #
+    # ILGARI bu yerda "ikki foiz BOSHQA raqam bo'lsin" deb
+    # tekshirilardi va u 2026-09-02 da yiqildi: vektorlash tugagach
+    # ikkalasi ham 100% bo'ldi.
+    #
+    # ESKI TEKSHIRUV NOTO'G'RI EDI — u MA'LUMOT TASODIFINI
+    # ("raqamlar teng emas") qulflagan edi, AJRATISHNI emas. Ikki
+    # foizning teng bo'lishi mutlaqo qonuniy va aslida ENG YAXSHI
+    # holat. Tekshirilishi kerak bo'lgan narsa — ular BOSHQA
+    # MAXRAJDAN hisoblanishi, ya'ni operatsion qamrov ochiq
+    # tenderlar bilan CHEKLANGAN bo'lishi.
     with conn.cursor() as cur:
         cur.execute("SELECT qamrov_foiz FROM v_embedding_coverage")
         umumiy_foiz = float(cur.fetchone()[0] or 0)
-    check("operatsion va umumiy qamrov BOSHQA raqam",
-          jami == 0 or abs(100.0 * bor / jami - umumiy_foiz) > 0.01,
+    check("operatsion qamrov ALOHIDA maxrajdan (ochiq tenderlar)",
+          jami == 0 or jami < umumiy,
+          f"ochiq maxraj={jami:,} umumiy maxraj={umumiy:,}")
+    check("ikkala foiz ham hisoblanadi",
+          jami == 0 or (0.0 <= 100.0 * bor / jami <= 100.0
+                        and 0.0 <= umumiy_foiz <= 100.0),
           f"ochiq={100.0 * bor / max(jami, 1):.2f}% umumiy={umumiy_foiz}%")
 
     # MODEL ARALASHMAGAN: bitta korpusda bitta model.

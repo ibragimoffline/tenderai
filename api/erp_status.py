@@ -30,9 +30,12 @@ ko'rsatmaydi. Tender paneli ERP tufayli buzilmasligi kerak.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import logging
+from typing import Any, Dict, List, Optional
 
 from api import db
+
+log = logging.getLogger(__name__)
 
 VIEW_SQL = """
 SELECT opportunity_id, tender_id, status, status_label, priority,
@@ -64,10 +67,81 @@ def _iso(v):
     return v.isoformat() if v is not None else None
 
 
-def for_tender(tender_id: int) -> List[Dict[str, Any]]:
-    """Shu tender bo'yicha ERP kartalari. ERP yo'q bo'lsa — bo'sh ro'yxat."""
+#: Shartnoma-view IJARACHINI ko'rsatadimi.
+#:
+#: `erp.v_tender_status` da `tai_company_id` YO'Q (2026-09-03 da
+#: o'lchandi). Ya'ni bu yerdan ijarachi bo'yicha FILTRLAB BO'LMAYDI —
+#: view qaysi ijarachiga tegishli ekanini umuman aytmaydi.
+_IJARACHILI: bool = False
+_IJARACHILI_TEKSHIRILDI: bool = False
+
+
+def ijarachili() -> bool:
+    """Shartnoma-view `tai_company_id` ni chop etadimi."""
+    global _IJARACHILI, _IJARACHILI_TEKSHIRILDI
+    if _IJARACHILI_TEKSHIRILDI:
+        return _IJARACHILI
+    _IJARACHILI = bool(db.query_one(
+        "SELECT 1 AS x FROM information_schema.columns "
+        " WHERE table_schema = 'erp' AND table_name = 'v_tender_status' "
+        "   AND column_name = 'tai_company_id'"))
+    _IJARACHILI_TEKSHIRILDI = True
+    return _IJARACHILI
+
+
+def for_tender(tender_id: int,
+               company_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Shu tender bo'yicha ERP kartalari. ERP yo'q bo'lsa — bo'sh ro'yxat.
+
+    IJARACHI AJRATILISHI — OCHIQ CHEGARA (2026-09-03 da o'lchandi).
+    `erp.v_tender_status` `tai_company_id` ni chop ETMAYDI, shuning
+    uchun bu yerdan ijarachi bo'yicha filtrlab bo'lmaydi. Bitta
+    tender bir necha ijarachida ishga olinishi mumkin va o'shanda
+    A ijarachisi B ning kartasini (broker, mijoz, holat) KO'RARDI.
+    Bu FK bilan to'silmaydi: FK yozishni to'sadi, o'qishni emas.
+
+    Bugun zarar yo'q — faol ijarachi BITTA. Lekin "bugun bitta" —
+    kafolat emas, holat. Shuning uchun qoida qat'iy:
+
+        faol ijarachi > 1  VA  view da `tai_company_id` yo'q
+        -> BO'SH RO'YXAT + jurnalga ogohlantirish
+
+    Ya'ni jimgina sizish o'rniga BLOK ko'rinmay qoladi. "Ma'lumot
+    yo'q" — halol; "boshqa kompaniyaning ma'lumoti" — emas.
+
+    To'liq yechim ERP TOMONIDA: `v_tender_status` ga `tai_company_id`
+    qo'shilsin (`docs/erp_integratsiya_2.md` shartnomasi).
+    """
     if not ready():
         return []
+
+    if not ijarachili():
+        # TO'QNASHUV SHARTI ANIQ BO'LSIN, "ijarachi ko'p" EMAS.
+        #
+        # Birinchi urinishda shart "faol ijarachi > 1" edi va u JUDA
+        # QO'POL chiqdi: `auth_test` o'z sinov hisobini yaratadi,
+        # ya'ni har sinov yurishida ijarachi 2 ta bo'lardi va karta
+        # bloklanardi. O'lchandi — to'plam 132 emas, 74 tekshiruvda
+        # uzildi.
+        #
+        # HAQIQIY to'qnashuv sharti boshqa: shu TENDERNI BOSHQA
+        # ijarachi ham ERP ga topshirganmi. Buni O'Z ma'lumotimizdan
+        # bilamiz — `tender_topshiriq` aynan shuni yozadi. Boshqa
+        # ijarachi topshirmagan bo'lsa, ERP dagi karta boshqasiniki
+        # bo'lishi mumkin emas.
+        begona = db.scalar(
+            "SELECT count(*) FROM tender_topshiriq "
+            " WHERE tender_id = %(t)s "
+            "   AND bekor_at IS NULL "
+            "   AND (%(c)s IS NULL OR company_id <> %(c)s)",
+            {"t": tender_id, "c": company_id}) or 0
+        if begona:
+            log.warning(
+                "tender %s: `erp.v_tender_status` da `tai_company_id` "
+                "yo'q, lekin bu tenderni %s ta BOSHQA ijarachi ham "
+                "topshirgan — ERP kartalari KO'RSATILMAYDI "
+                "(ijarachilararo sizish xavfi).", tender_id, begona)
+            return []
     return [{
         "opportunity_id": r["opportunity_id"],
         "status": r["status"],

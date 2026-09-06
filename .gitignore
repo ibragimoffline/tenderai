@@ -64,3 +64,7 @@ _pgvector/
 # qurish artefakti. Sinov ularsiz ham to'liq yuradi (tekshirilgan).
 _tests/fixtures/*.xlsx
 _tests/fixtures/*.csv
+
+# Sinov yurgizuvchisi saqlaydigan to'liq chiqishlar va JSON xulosa.
+# Bular ARTEFAKT, manba emas: har yurishda qayta yoziladi.
+_test_natija/

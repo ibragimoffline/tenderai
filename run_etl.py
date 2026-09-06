@@ -47,7 +47,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 try:
     import psycopg2
@@ -142,8 +142,26 @@ def close_stale_runs(stale_hours: float = 2.0) -> int:
                 "          || COALESCE(' (bola oxirgi holati: '"
                 "                      || terminal_reason || ')', ''), "
                 "  terminal_reason = 'uzildi' "
+                # TIRIKLIK `heartbeat_at` BO'YICHA, `started_at` bo'yicha EMAS.
+                #
+                # NEGA O'ZGARTIRILDI (2026-09-03). Bu shart ilgari
+                # `started_at < now() - N soat` edi, ya'ni "qachon
+                # BOSHLANGAN". `v_etl_osilgan` va `v_ops_holat` esa
+                # "qachondan beri JIM" (`now() - COALESCE(heartbeat_at,
+                # started_at)`) deb hisoblaydi. Bitta tizimda "osilgan"
+                # ning IKKI TA'RIFI bor edi va ular bir-biriga zid:
+                # byudjeti kattaroq (`ETL_MAX_SECONDS=2400` va undan
+                # yuqori) TIRIK va yurak urib turgan yurish shu yerda
+                # `error` deb yopilardi, ko'rinishda esa sog'lom
+                # ko'rinardi. Yozuv yolg'on bo'lardi, jarayon esa
+                # yurishda davom etardi.
+                #
+                # Endi ta'rif BITTA va u ko'rinish bilan bir xil.
+                # `heartbeat_at IS NULL` (darhol o'lgan yurish) —
+                # `started_at` ga tushadi, ya'ni eski xulq saqlanadi.
                 "WHERE status='running' "
-                "  AND started_at < now() - (%s * interval '1 hour')",
+                "  AND COALESCE(heartbeat_at, started_at) "
+                "      < now() - (%s * interval '1 hour')",
                 ("yurish tugamasdan uzildi (jarayon majburan to'xtatilgan yoki "
                  "kompyuter uxlagan); keyingi yurish boshida yopildi",
                  stale_hours))
@@ -436,6 +454,50 @@ def siljish_tekshir(nom: str, oldin: Optional[int], keyin: Optional[int],
     print(f"  [OK] {nom}: {oldin} -> {keyin} ({oldin - keyin} ta bajarildi)")
 
 
+def hujjatsiz_ochiq(platform: str,
+                    kesim: Optional[Any] = None) -> Tuple[Any, Optional[int]]:
+    """OCHIQ, lekin `tender_document` da BIRORTA qatori yo'q tenderlar soni.
+
+    NEGA BU O'LCHOV BOR. `v_document_processing_coverage` mavjud hujjat
+    QATORLARI ustidan foiz hisoblaydi — qator umuman yaratilmasa tender
+    maxrajga tushmaydi va bo'shliq KO'RINMAYDI. Aynan shu sababli
+    xt-xarid hujjat kashfi 2026-07-26 dan beri ishlamagani 39 kun
+    payqalmadi (148 ochiq tender, 0 hujjat, ko'rsatkich esa `68.6%`).
+
+    `kesim` — vaqt chegarasi. IKKINCHI o'lchashda BIRINCHISINING vaqti
+    beriladi, aks holda yurish davomida kelgan YANGI tenderlar hisobni
+    ko'taradi va "kamaymadi" degan SOXTA xato chiqadi.
+
+    Qaytadi: `(kesim_vaqti, son)`. Son `None` — O'LCHAB BO'LMADI
+    (bazaga yetib bo'lmadi). Bu `siljish_tekshir()` da xato sanaladi:
+    o'lchovsiz "muvaffaqiyat" da'vosi asossiz.
+    """
+    try:
+        conn = db()
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  [!] hujjatsiz ochiq tender o'lchanmadi: {str(e)[:90]}")
+        return kesim, None
+    try:
+        with conn.cursor() as cur:
+            if kesim is None:
+                cur.execute("SELECT now()")
+                kesim = cur.fetchone()[0]
+            cur.execute(
+                "SELECT count(*) FROM tender t "
+                " WHERE t.status = 'open' "
+                "   AND t.source_platform = %s "
+                "   AND t.first_seen_at <= %s "
+                "   AND NOT EXISTS (SELECT 1 FROM tender_document d "
+                "                    WHERE d.tender_id = t.id)",
+                (platform, kesim))
+            return kesim, int(cur.fetchone()[0])
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  [!] hujjatsiz ochiq tender o'lchanmadi: {str(e)[:90]}")
+        return kesim, None
+    finally:
+        conn.close()
+
+
 #: Bola skriptlarining KELISHILGAN chiqish kodlari. 0/1 dan boshqa
 #: kodlar ATAYLAB: "tugallanmagan" va "band" — bu XATO ham, MUVAFFAQIYAT
 #: ham emas, va ularni bir-biriga qo'shib yuborish quvur sog'ligini
@@ -664,7 +726,17 @@ def build_groups(args) -> List[Tuple[str, List[Tuple[str, List[str]]]]]:
     ]
     if args.with_docs:
         # Hujjatlar ham xt-xarid hostiga uriladi -> shu guruh ichida, ketma-ket
-        xt_steps.append(("etl_details.py", []))
+        #
+        # `--only-open`: SOATLIK yurishda faqat OCHIQ tenderlar kerak.
+        # O'lchandi (2026-09-03): 148 ochiq vs 948 jami — olti barobar
+        # kamroq so'rov, va yopiq tenderning hujjati baribir hech kimga
+        # ko'rsatilmaydi (`v_document_state` uni `rejalashtirilmagan`
+        # deb belgilaydi).
+        #
+        # `--all-statuses` berilgan bo'lsa — bu ATAYLAB tarixiy sidirg'a
+        # (qo'lda yurgiziladi), o'shanda cheklamaymiz.
+        xt_steps.append(("etl_details.py",
+                         [] if args.all_statuses else ["--only-open"]))
 
     uzex_steps: List[Tuple[str, List[str]]] = [
         ("etl_uzex.py", ["--type-id", "2", *limit_args]),
@@ -893,6 +965,13 @@ def main() -> None:
                 post_xatolar.append(f"etl_dims: {_err}")
 
         groups = build_groups(args)
+
+        # MUSBAT TASDIQ uchun BOSHLANG'ICH o'lchov (`--with-docs` bo'lsa).
+        # `etl_details.py` yurgani "istisno bermadi" bilan emas, hujjatsiz
+        # ochiq tenderlar KAMAYGANI bilan isbotlanadi.
+        doc_kesim, doc_oldin = (hujjatsiz_ochiq("xt-xarid")
+                                if args.with_docs else (None, None))
+
         mode = "ketma-ket" if args.sequential else "parallel"
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ETL orkestratori boshlandi "
               f"({len(groups)} platforma, {mode})")
@@ -903,6 +982,19 @@ def main() -> None:
         else:
             with ThreadPoolExecutor(max_workers=len(groups)) as pool:
                 results = list(pool.map(lambda g: run_group(g[0], g[1]), groups))
+
+        # HUJJAT KASHFI ISH QILDIMI — supurishdan OLDIN o'lchanadi.
+        #
+        # TARTIB MUHIM: `expire_stale_tenders()` `open` ni `expired` ga
+        # o'tkazadi, ya'ni hujjatsiz ochiq tender BIRORTA HUJJAT
+        # OLINMASDAN ham hisobdan chiqib ketardi va tekshiruv SOXTA
+        # "kamaydi" deb yashil bo'lardi. Shuning uchun bu blok supurishdan
+        # OLDIN turadi va joyini o'zgartirmang.
+        if args.with_docs:
+            emit(["\n===== post: hujjat kashfi (musbat tasdiq) ====="])
+            _k, doc_keyin = hujjatsiz_ochiq("xt-xarid", doc_kesim)
+            siljish_tekshir("xt-xarid hujjat kashfi", doc_oldin, doc_keyin,
+                            post_xatolar)
 
         # Muddati o'tganlarni supurish — kategoriyalashdan OLDIN, chunki
         # etl_categorize.py va bildirishnoma faqat ochiq tenderlar bilan

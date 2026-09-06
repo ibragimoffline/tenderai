@@ -145,13 +145,65 @@ def test_baza(db):
 
     bolim("6. Pullik AI standart holatda O'CHIQ")
     from api import ai
-    check("`paid_allowed()` = False", ai.paid_allowed() is False)
+
+    # JONLI QIYMAT ISHLATILMAYDI — MAJBURAN O'CHIRILADI.
+    #
+    # Bu bo'lim STANDART qiymatni ("o'rnatilmagan") tekshiradi, ya'ni
+    # "hech kim hech narsa yozmasa, qulf YOPIQ" degan qoidani.
+    # Ilgari u jonli muhitni O'QIRDI va shu sababli IKKI nuqsoni bor
+    # edi:
+    #
+    #   1. YOLG'ON YIQILISH. 2026-09-02 da loyiha egasi pullik
+    #      so'rovlarga ochiq ruxsat berdi (`.env` da
+    #      `AI_PAID_ENABLED=1`). O'shandan keyin sinov yiqila
+    #      boshladi — lekin qulf BUZILGANI uchun emas, aksincha u
+    #      muhitni TO'G'RI hurmat qilgani uchun. Ya'ni sinov
+    #      standartni emas, ishlab chiquvchining mashinasidagi
+    #      sozlamani o'lchardi.
+    #
+    #   2. PUL. Qulf ochiq bo'lganda `ai.get_client()` haqiqiy
+    #      mijozni QURADI. "O'zi pul sarflamaydigan" sinov shu yo'l
+    #      bilan tashqi xizmatga chiqib qolardi.
+    #
+    # Naqsh `_tests/paid_guard_test.py` dan olingan (o'sha yerda
+    # to'liq izoh): jonli qiymat chop etiladi, jarayon ichida
+    # o'chiriladi, oxirida QAYTARILADI.
+    jonli = os.environ.get(ai.PAID_ENV)
+    print(f"     .env dagi {ai.PAID_ENV} = "
+          f"{jonli if jonli is not None else '(o`rnatilmagan)'!r}"
+          " — sinov ichida majburan o'chiriladi")
+    os.environ.pop(ai.PAID_ENV, None)
     try:
-        ai.get_client()
-        check("`get_client()` BLOKLANADI", False, "o'tib ketdi")
-    except Exception as e:                                    # noqa: BLE001
-        check("`get_client()` BLOKLANADI", "BLOKLANGAN" in str(e),
-              str(e).splitlines()[0][:60])
+        check("qiymat berilmaganda `paid_allowed()` = False",
+              ai.paid_allowed() is False)
+        try:
+            ai.get_client()
+            check("`get_client()` BLOKLANADI", False, "o'tib ketdi")
+        except Exception as e:                                # noqa: BLE001
+            check("`get_client()` BLOKLANADI", "BLOKLANGAN" in str(e),
+                  str(e).splitlines()[0][:60])
+
+        # CHEGARA HOLATI: qulf IKKI TOMONGA ham ishlashi kerak.
+        # Busiz yuqoridagi tekshiruv `paid_allowed()` doim `False`
+        # qaytarsa ham "o'tdi" bo'lib ko'rinardi — ya'ni buzuq
+        # qo'rovulni ushlamasdi.
+        # `get_client()` bu yerda CHAQIRILMAYDI: u haqiqiy mijoz
+        # quradi va sinov pul sarflardi.
+        os.environ[ai.PAID_ENV] = "1"
+        check("`AI_PAID_ENABLED=1` da qulf OCHILADI",
+              ai.paid_allowed() is True,
+              "qo'rovul qiymatni o'qimayapti — u doim yopiq")
+        os.environ[ai.PAID_ENV] = "0"
+        check("`AI_PAID_ENABLED=0` da qulf YOPIQ",
+              ai.paid_allowed() is False)
+    finally:
+        # Muhit SINOVDAN OLDINGI holatiga qaytariladi: bu funksiya
+        # yagona jarayonda boshqa tekshiruvlar bilan birga yuradi.
+        if jonli is None:
+            os.environ.pop(ai.PAID_ENV, None)
+        else:
+            os.environ[ai.PAID_ENV] = jonli
+
     check("embedding provayderi LOKAL",
           os.environ.get("EMBED_PROVIDER", "local") == "local",
           os.environ.get("EMBED_PROVIDER", "local"))

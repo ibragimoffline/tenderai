@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, errMatn } from '@/api'
 import Icon from './Icon'
+import { DarvozaProgress } from './DarvozaProgress'
 import { useT } from '@/i18n'
 import { useFormat } from '@/format'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import type { HujjatTuri, InsonQarori, ReviewRejim, ReviewTezlik, Talab,
-  TalabNavbat, TalabUsul, TalabXulosa } from '@/types'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import NavbatFilters, { Kesildi, TRIGGER, filtrga, tanlovga, HAMMASI }
+  from './NavbatFilters'
+import type { HujjatTuri, InsonQarori, ManbaSonlari, Region, ReviewRejim,
+  ReviewTezlik, Talab, TalabFiltr, TalabNavbat, TalabUsul,
+  TalabXulosa, Yonaltirish } from '@/types'
 
 // TALABLARNI TASDIQLASH (J3)
 // ══════════════════════════
@@ -47,12 +54,27 @@ interface Props {
   tenderId?: number | null
   /** Manbaga sakrash — hujjat matnini ochadi. */
   onOpenSource?: (fileRef: string, charStart: number) => void
+  /** Hudud filtri uchun — `App` dan keladi. */
+  regions?: Region[]
 }
 
-export default function RequirementReview({ tenderId, onOpenSource }: Props) {
+const BOSH_FILTR: TalabFiltr = {
+  q: '', region: '', past: false, manba: '', otgan: false, katalog: false,
+}
+
+export default function RequirementReview({
+  tenderId, onOpenSource, regions = [],
+}: Props) {
   const t = useT()
   const f = useFormat()
   const [navbat, setNavbat] = useState<TalabNavbat[]>([])
+  /** Ko'rik tugagach navbatga nima bo'lgani. */
+  const [navbatXabar, setNavbatXabar] = useState<string | null>(null)
+  const [filtr, setFiltr] = useState<TalabFiltr>(BOSH_FILTR)
+  // Filtrga MOS KELGANLARNING to'liq soni (sahifa 100 ta).
+  const [jami, setJami] = useState(0)
+  // Har manba qancha natija berishi — variant yonida ko'rsatiladi.
+  const [manbalar, setManbalar] = useState<ManbaSonlari>({ naqsh: 0, llm: 0 })
   const [tanlangan, setTanlangan] = useState<number | null>(tenderId ?? null)
   const [items, setItems] = useState<Talab[]>([])
   const [xulosa, setXulosa] = useState<TalabXulosa | null>(null)
@@ -71,17 +93,27 @@ export default function RequirementReview({ tenderId, onOpenSource }: Props) {
   useEffect(() => { api.hujjatTurlari().then((r) => setTurlar(r.doc_types))
     .catch(() => {}) }, [])
 
+  const filtrBor = !!(filtr.q || filtr.region || filtr.past
+                      || filtr.manba || filtr.otgan || filtr.katalog)
+
   const navbatniYukla = useCallback(async () => {
     if (tenderId) return                       // tender paneli — navbat kerak emas
     try {
-      const r = await api.talabNavbat(100)
+      const r = await api.talabNavbat(100, filtr)
       setNavbat(r.queue)
+      setJami(r.jami)
+      // `?? {0,0}` — ESKI SERVER qo'riqchisi. Bu maydon 2026-09-03
+      // da qo'shildi; qayta yuklanmagan backend uni YUBORMAYDI va
+      // `manbalar.naqsh` o'qilishi butun panelni yiqitardi. Aynan
+      // shu holat bir marta yuz bergan (server `--reload`siz turgan
+      // edi va yangi filtrlarni umuman ko'rmagan).
+      setManbalar(r.manbalar ?? { naqsh: 0, llm: 0 })
       api.talabTezlik().then(setTezlik).catch(() => {})
       setTanlangan((oldingi) => oldingi ?? r.queue[0]?.tender_id ?? null)
     } catch (e) {
       setXato(errMatn(e))
     }
-  }, [tenderId])
+  }, [tenderId, filtr])
 
   const talablarniYukla = useCallback(async (id: number) => {
     setLoading(true)
@@ -134,6 +166,8 @@ export default function RequirementReview({ tenderId, onOpenSource }: Props) {
       setTahrir(null)
       // Tender navbatdan CHIQDIMI — foydalanuvchi ish qilinganini
       // ko'rishi kerak (aks holda raqam o'zgarmaydi).
+      // NAVBAT SERVERDA QAYTA HISOBLANDI — natija ko'rsatiladi.
+      setNavbatXabar(yonaltirishMatni(r.yonaltirish))
       if (r.qolgan_kutayotgan === 0 && !tenderId) {
         setNavbat((q) => q.filter((x) => x.tender_id !== r.tender_id))
         setTanlangan(null)
@@ -157,7 +191,8 @@ export default function RequirementReview({ tenderId, onOpenSource }: Props) {
     if (!tanlangan) return
     setSaqlanmoqda(-1)
     try {
-      await api.talabReviewAll(tanlangan, status)
+      const r = await api.talabReviewAll(tanlangan, status)
+      setNavbatXabar(yonaltirishMatni(r.yonaltirish))
       await talablarniYukla(tanlangan)
       if (!tenderId) {
         setNavbat((q) => q.filter((x) => x.tender_id !== tanlangan))
@@ -168,6 +203,33 @@ export default function RequirementReview({ tenderId, onOpenSource }: Props) {
     } finally {
       setSaqlanmoqda(null)
     }
+  }
+
+  /**
+   * KO'RIK TUGAGACH NAVBATGA NIMA BO'LGANI -> matn.
+   *
+   * JIM QOLMASLIK QOIDASI (`BrokerQueue` dagi `erpXabar` naqshi):
+   * tasdiq muvaffaqiyatli bo'lib, navbat esa yangilanmagan bo'lishi
+   * MUMKIN (muddat o'tgan, malaka o'tmadi, xato). Buni jimgina
+   * o'tkazib yuborish "hammasi joyida" degan yolg'on qoldirardi.
+   *
+   * ENG SHOSHILINCH HOLAT BIRINCHI: broker allaqachon qaror bergan
+   * va tahlil o'zgargan bo'lsa, qolgan hamma narsa ikkinchi darajali.
+   */
+  function yonaltirishMatni(y: Yonaltirish | null): string | null {
+    if (!y) return null                        // ko'rik hali tugamagan
+    if (y.holat === 'xato') return `${t('req.route.failed')}: ${y.xato ?? ''}`
+    if (y.inson_qarori_eskirdi) return t('req.route.stale')
+    if (y.holat === 'yopiq') return t('req.route.closed')
+    if (y.holat === 'tender_yoq') return t('req.route.missing')
+    if (y.holat === 'no_go') {
+      // IKKI XIL "no_go": navbatda YO'Q EDI va navbatdan CHIQDI.
+      // Ikkinchisi brokerga ta'sir qiladi, birinchisi yo'q.
+      return y.ozgardi ? t('req.route.left') : t('req.route.nogo')
+    }
+    const q = y.ai_qaror ?? '—'
+    return y.ozgardi ? t('req.route.queued', { q })
+                     : t('req.route.same', { q })
   }
 
   /** Bu qator hozir YOPIQmi (model javobi yashirinmi). */
@@ -188,10 +250,26 @@ export default function RequirementReview({ tenderId, onOpenSource }: Props) {
     (x) => x.review_status === 'extracted')
 
   return (
-    <div className="space-y-4">
+    <>
+      <DarvozaProgress qatlam="talab_korigi" />
+      <div className="space-y-4">
       {xato && (
         <div className="rounded-lg border border-urgent/40 bg-urgent-soft px-3
                         py-2 text-body text-urgent">{xato}</div>
+      )}
+
+      {/* KO'RIK TUGAGACH NAVBATGA NIMA BO'LGANI. Tasdiq YOZILGAN
+          bo'lib navbat yangilanmagan bo'lishi mumkin — sabab shu
+          yerda ochiq aytiladi (`BrokerQueue` dagi ERP xabari
+          bilan bir xil naqsh). */}
+      {navbatXabar && (
+        <div className="flex items-start gap-2 rounded-lg border
+                        border-soon/40 bg-soon-soft px-3 py-2
+                        text-caption text-soon-strong">
+          <span className="flex-1">{navbatXabar}</span>
+          <button type="button" className="underline"
+                  onClick={() => setNavbatXabar(null)}>×</button>
+        </div>
       )}
 
       {/* --- NAVBAT ------------------------------------------------- */}
@@ -201,7 +279,7 @@ export default function RequirementReview({ tenderId, onOpenSource }: Props) {
             <Icon name="clip" size={16} className="text-accent" />
             <div className="text-body font-medium">{t('req.queue.title')}</div>
             <span className="ml-auto text-xs text-muted-foreground">
-              {t('req.queue.count', { n: navbat.length })}
+              {t('req.queue.count', { n: jami })}
             </span>
           </div>
           {/* PILOT O'LCHOVI — ish davomida ko'rinib tursin.
@@ -267,9 +345,63 @@ export default function RequirementReview({ tenderId, onOpenSource }: Props) {
               )}
             </div>
           )}
+          <div className="px-4 pt-3">
+            {/* FILTR SERVERDA — navbat 455, sahifa 100. Mijoz
+                tomonida filtrlash ikkinchi yuzlikni KO'RMASDI. */}
+            <NavbatFilters
+              q={filtr.q} region={filtr.region} regions={regions}
+              katalog={filtr.katalog}
+              onChange={(patch) => setFiltr((f) => ({ ...f, ...patch }))}
+              onReset={() => setFiltr(BOSH_FILTR)}
+            >
+              <Select value={tanlovga(filtr.manba)}
+                onValueChange={(v) => setFiltr((f) => ({
+                  ...f, manba: filtrga(v) as TalabFiltr['manba'] }))}>
+                <SelectTrigger className={TRIGGER}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {/* SON YONIDA, NOLI O'CHIRILGAN.
+                      Bugun kutayotgan talablarning HAMMASI naqshdan
+                      (LLM qatlami pullik va qulflangan), ya'ni
+                      "Naqshdan" jamini o'zgartirmaydi, "Modeldan" esa
+                      ro'yxatni bo'shatadi. Sonsiz ikkalasi ham BUZUQ
+                      tugma bo'lib ko'rinardi — foydalanuvchi aynan
+                      shuni xabar qildi. */}
+                  <SelectItem value={HAMMASI}>{t('talab.f.allSources')}</SelectItem>
+                  <SelectItem value="naqsh" disabled={!manbalar.naqsh}>
+                    {t('talab.f.pattern')} ({manbalar.naqsh})
+                  </SelectItem>
+                  <SelectItem value="llm" disabled={!manbalar.llm}>
+                    {t('talab.f.model')} ({manbalar.llm})
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant={filtr.past ? 'default' : 'outline'} size="sm"
+                onClick={() => setFiltr((f) => ({ ...f, past: !f.past }))}>
+                {t('talab.f.lowOnly')}
+              </Button>
+
+              {/* MUDDATI O'TGANLAR standart holda CHIQARILGAN, lekin
+                  YASHIRILMAGAN: bu tugma ularni qaytaradi. Ko'rik
+                  natijasi J6 oltin to'plamiga ham ketadi va yopilgan
+                  tenderning yorlig'i ham qimmatli. */}
+              <Button
+                variant={filtr.otgan ? 'default' : 'outline'} size="sm"
+                onClick={() => setFiltr((f) => ({ ...f, otgan: !f.otgan }))}>
+                {t('talab.f.expired')}
+              </Button>
+            </NavbatFilters>
+            <Kesildi jami={jami} korsatildi={navbat.length} />
+          </div>
+
           {navbat.length === 0 ? (
             <div className="px-4 py-6 text-center text-body text-muted-foreground">
-              {t('req.queue.empty')}
+              {/* BO'SH NATIJANING SABABI: filtr qo'yilgan bo'lsa
+                  "navbat bo'sh" YOLG'ON bo'lardi. */}
+              {filtr.katalog
+                ? t('navbat.noCatalogMatch')
+                : filtrBor ? t('navbat.noMatch') : t('req.queue.empty')}
             </div>
           ) : (
             <ul className="max-h-64 divide-y overflow-y-auto">
@@ -583,5 +715,6 @@ export default function RequirementReview({ tenderId, onOpenSource }: Props) {
         </Card>
       )}
     </div>
+    </>
   )
 }

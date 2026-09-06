@@ -29,6 +29,17 @@
     " />
     <title>Tenderlar — O'zbekiston davlat xaridlari</title>
     <meta name="description" content="Ochiq tenderlarni bitta joyda: filtrlanadigan, deadline bo'yicha tartiblangan dashboard." />
+    <!-- BRAUZER CHROME RANGI — mobil manzil paneli sahifa foni bilan
+         qo'shilib ketsin (`index.css` dagi `--background`).
+
+         `media` ATRIBUTI ISHLATILMAYDI. U faqat TIZIM sozlamasiga
+         qaraydi, ilovada esa mavzu tanlovi UCHTA holatli: tizim
+         qorong'i bo'lsa-yu foydalanuvchi ATAYIN yorug'ni tanlagan
+         bo'lsa, `media` varianti qora panel ko'rsatib turardi.
+         Shuning uchun qiymatni `theme-init.js` (birinchi bo'yashdan
+         oldin) va `theme.tsx` `applyTheme()` (keyingi almashtirishlar)
+         yozadi — mavzu hal qilinadigan YAGONA joydan. -->
+    <meta name="theme-color" content="#f6f8fc" />
     <!--
       MAVZUNI REACT DAN OLDIN QO'YAMIZ (oq chaqnashga qarshi).
 
