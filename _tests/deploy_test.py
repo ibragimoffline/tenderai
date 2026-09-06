@@ -305,10 +305,61 @@ def test_proksi():
     check("API faqat 127.0.0.1 ga proksi", "reverse_proxy 127.0.0.1:" in c)
     check("staging YOPIQ (basic_auth)", "basic_auth" in c)
 
+    # TANA CHEGARASI IKKALA MUHITDA VA ILOVA CHEGARASI BILAN MOS.
+    #
+    # NEGA SINOV KERAK: `MAX_UPLOAD_MB` va Caddy `max_size` — ikki
+    # AYRIM joyda va Caddy ilova muhitini o'qimaydi. Ular ajralib
+    # ketsa nuqson JIM bo'ladi:
+    #   proksi kichik  -> foydalanuvchi ilovaning tushunarli xatosi
+    #                     o'rniga proksining yalang'och 413 sahifasini
+    #                     ko'radi;
+    #   proksi katta   -> 500 MB li so'rov ilovagacha yetib boradi.
+    import re as _re
+    olcham = _re.findall(r"max_size\s+(\d+)MB", c)
+    check("proksi tana chegarasi IKKALA muhitda bor",
+          len(olcham) >= 2, str(olcham))
+    if olcham:
+        from api import saqlash as _s
+        # Proksi ILOVADAN KATTA bo'lishi shart: multipart o'ramasi
+        # (chegara satrlari, sarlavhalar) bir necha KB qo'shadi.
+        check("proksi chegarasi ilova chegarasidan KATTA",
+              all(int(x) > _s.MAX_UPLOAD_MB for x in olcham),
+              f"caddy={olcham} ilova={_s.MAX_UPLOAD_MB}MB")
+        # Lekin CHEKSIZ ham emas: 2 barobardan oshsa proksi amalda
+        # himoya qilmay qo'yadi.
+        check("proksi chegarasi ilova chegarasiga YAQIN",
+              all(int(x) <= _s.MAX_UPLOAD_MB * 2 for x in olcham),
+              f"caddy={olcham} ilova={_s.MAX_UPLOAD_MB}MB")
+
     api = oqi("systemd", "tenderai-api@.service")
     check("uvicorn faqat 127.0.0.1 ga bog'lanadi",
           "--host 127.0.0.1" in api and "0.0.0.0" not in api)
     check("proksi sarlavhalari yoqilgan", "--proxy-headers" in api)
+
+
+def test_zaxira_tashqi():
+    bolim("8b. Zaxira — tashqi nusxa va fayl arxivi")
+    b = oqi("bin", "backup.sh")
+    # ISHLAB CHIQARISHDA TASHQI NUSXA MAJBURIY.
+    #
+    # NEGA SINOV: ilgari sozlanmagani faqat OGOHLANTIRISH edi va
+    # skript 0 bilan tugardi — `systemd` timer uni "muvaffaqiyatli"
+    # deb yozardi. Bitta diskdagi zaxira YASHIL ko'rinardi.
+    check("production da `BACKUP_REMOTE_CMD` MAJBURIY",
+          'elif [ "$MUHIT" = "production" ]' in b and "exit 1" in b)
+    check("staging da OGOHLANTIRISH bo'lib qoladi",
+          "staging uchun ruxsat" in b)
+    # FAYL ARXIVI — `pg_dump` yuklangan hujjatlarni OLMAYDI.
+    check("yuklangan fayllar ARXIVLANADI", "FAYL_ARXIV" in b and "tar -czf" in b)
+    check("fayl arxivi ham UZOQQA ketadi",
+          "FAYL_ARXIV:+" in b)
+    check("bo'sh arxiv JIM O'TMAYDI (baza soni bilan solishtiriladi)",
+          "FROM yuklama WHERE arxiv_at IS NULL" in b)
+    check("`UPLOAD_ROOT` reliz ichida bo'lsa OGOHLANTIRADI",
+          "RELIZ ICHIDA" in b)
+    r = oqi("bin", "restore-test.sh")
+    check("tiklash mashqi fayl arxivini ham tekshiradi",
+          "FAYL_ARXIV" in r and "fayl arxivi BO'SH" in r)
 
 
 def test_sogliq():
@@ -1369,6 +1420,7 @@ def main():
     test_zaxira()
     test_staging_birinchi()
     test_proksi()
+    test_zaxira_tashqi()
     test_sogliq()
     test_jurnal()
     test_url_qorovuli()

@@ -2452,8 +2452,13 @@ def _fayl_javobi(y: dict, inline: bool):
     uni xotiraga to'liq o'qish server xotirasini bir necha parallel
     yuklab olishda tugatardi.
     """
-    f = yuklama.ochib_ber(y)
-    return StreamingResponse(f, headers=yuklama.javob_sarlavhasi(y, inline))
+    # `yuklama.oqim()` — GENERATOR, xom deskriptor EMAS. Starlette
+    # `StreamingResponse` ga berilgan fayl obyektini o'qiydi, lekin
+    # `.close()` CHAQIRMAYDI: har yuklab olish bitta deskriptorni
+    # ochiq qoldirardi (Linuxda sekin sizish, Windowsda esa faylni
+    # QULFLAB qo'yish — sinov tozalashi shu bilan yiqildi).
+    return StreamingResponse(yuklama.oqim(y),
+                             headers=yuklama.javob_sarlavhasi(y, inline))
 
 
 @app.get("/company/documents/{doc_id}/download")

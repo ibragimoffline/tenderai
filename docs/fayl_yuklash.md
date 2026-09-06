@@ -192,6 +192,76 @@ UPLOAD_ROOT=/var/lib/tenderai/uploads
 
 `backup.sh` yo'l reliz ichida ekanini sezsa **ogohlantiradi**.
 
+### Off-host nusxa — ishlab chiqarishda **majburiy**
+
+Bitta diskdagi zaxira — zaxira emas. `BACKUP_REMOTE_CMD` sozlanmagan
+bo'lsa `backup.sh` **production da xato bilan to'xtaydi** (staging da
+ogohlantirish bo'lib qoladi). Ilgari u faqat ogohlantirib 0 bilan
+tugardi — ya'ni `systemd` timer uni "muvaffaqiyatli" deb belgilardi.
+
+Baza dump'i **va** fayl arxivi ikkalasi ham uzoqqa ketadi.
+
+> **Hali sinalmagan:** tashqi nusxadan TIKLASH. `restore-test.sh`
+> mahalliy fayldan tiklaydi.
+
+---
+
+## 7b. Eski `file_ref` qatorlari — ko'chirildi
+
+13 ta qator `file:///D:/…` mahalliy yo'l bilan turardi.
+`legacy_fayl_kochir.py` ularni haqiqiy saqlashga ko'chirdi:
+
+```
+python legacy_fayl_kochir.py            # FAQAT ko'rsatadi
+python legacy_fayl_kochir.py --kochir   # haqiqatan ko'chiradi
+```
+
+O'lchandi (2026-09-06): **13/13 ko'chirildi**, hammasi `tayyor`,
+584 bo'lak va 584 vektor, **sha256 13/13 mos** — saqlangan fayl
+diskdan qayta o'qilib mustaqil solishtirildi.
+
+**`file_ref` o'chirilmadi.** U tarixiy dalil: qator qayerdan
+kelganini ko'rsatadi. UI uni faqat `yuklama_id` bo'sh bo'lganda
+chizadi.
+
+**Fayl topilmasa hech narsa yozilmaydi.** "Ko'chirildi" deb
+belgilash soxta migratsiya bo'lardi — hisobotda yashil, amalda
+bo'sh. Ko'chmagan qator mavjud ustunlardan **chiqadi** va shuning
+uchun hech qachon haqiqatdan ajralmaydi:
+
+```sql
+SELECT id, file_ref FROM company_document
+ WHERE yuklama_id IS NULL AND file_ref IS NOT NULL;   -- ko'chmagan
+```
+
+Alohida `holat` ustuni **qo'shilmadi**: u qo'lda yangilanishi kerak
+bo'lardi va bir kun haqiqatdan ajralib qolardi.
+
+`http(s)://` havolalar **qabul qilinmaydi** — ularni yuklab olish
+tarmoqqa chiqish va ishonch qarorini talab qiladi.
+
+---
+
+## 7c. Teskari proksi chegarasi
+
+`MAX_UPLOAD_MB=25` **faqat ilova qatlamida** ishlaydi. Proksi
+cheklamasa, 500 MB li so'rov ilovagacha yetib boradi va uni
+`_yuklangani()` rad etadi — lekin tarmoq va vaqt allaqachon
+sarflangan.
+
+```
+deploy/caddy/Caddyfile:  request_body { max_size 26MB }   (ikkala muhitda)
+```
+
+**26, 25 emas:** multipart o'ramasi (chegara satrlari, sarlavhalar,
+fayl nomi) bir necha KB qo'shadi. Aynan 25 MB qilsak, 25 MB li fayl
+proksida 413 olardi va foydalanuvchi ilovaning tushunarli xatosini
+**ko'rmasdi**.
+
+Ikki qiymat ajralib ketmasligini `_tests/deploy_test.py` §8
+qo'riqlaydi: proksi chegarasi ilovanikidan **katta**, lekin ikki
+barobardan **kichik** bo'lishi shart.
+
 ---
 
 ## 8. Sozlamalar

@@ -174,8 +174,30 @@ if [ -n "${BACKUP_REMOTE_CMD:-}" ]; then
         fi
     done
     log "tashqi nusxa OK"
+elif [ "$MUHIT" = "production" ]; then
+    # ISHLAB CHIQARISHDA TASHQI NUSXA MAJBURIY.
+    #
+    # Ilgari bu yerda faqat OGOHLANTIRISH bor edi va skript 0 bilan
+    # tugardi — ya'ni `systemd` timer "muvaffaqiyatli" deb yozardi va
+    # hech kim ko'rmasdi. "Zaxira bor" degan xulosa "zaxira XAVFSIZ"
+    # degani emas: bitta diskdagi zaxira o'sha disk yo'qolganda
+    # (yoki shifrlovchi dastur tekkanda) zaxira ham u bilan ketadi.
+    #
+    # Endi ishlab chiqarishda bu XATO. Zaxira fayli DISKDA QOLADI —
+    # u yaroqli va tekshirilgan; to'xtagani faqat "himoya to'liq
+    # emas" degani. Sozlash bir qatorlik ish:
+    #
+    #   BACKUP_REMOTE_CMD='rclone copy {fayl} uzoq:tenderai/'
+    #
+    # STAGING dan bu TALAB QILINMAYDI: u sinov maydoni va uning
+    # ma'lumoti yo'qolsa qayta yasaladi.
+    log "XATO: ishlab chiqarishda BACKUP_REMOTE_CMD sozlanishi SHART."
+    log "  Zaxira olindi va tekshirildi ($FAYL), lekin u BITTA DISKDA."
+    log "  Sozlang:  BACKUP_REMOTE_CMD='rclone copy {fayl} uzoq:tenderai/'"
+    exit 1
 else
     log "OGOH: BACKUP_REMOTE_CMD sozlanmagan — zaxira FAQAT mahalliy diskda"
+    log "  (staging uchun ruxsat; ishlab chiqarishda XATO bo'ladi)"
 fi
 
 # --- ESKILARINI TOZALASH ----------------------------------------------------

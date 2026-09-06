@@ -457,6 +457,66 @@ def test_kompaniya_hujjati(db):
                   (vw.headers.get("content-disposition") or "").startswith("inline"),
                   (vw.headers.get("content-disposition") or "")[:40])
 
+            # --- 2b. DESKRIPTOR SIZMAYDI ---
+            #
+            # O'LCHANGAN NUQSON (2026-09-06): `StreamingResponse` ga
+            # OCHIQ FAYL OBYEKTI berilardi. Starlette uni o'qiydi,
+            # lekin `.close()` CHAQIRMAYDI -- har yuklab olish bitta
+            # deskriptorni ochiq qoldirardi. Linuxda bu SEKIN sizish
+            # (`ulimit -n` gacha), Windowsda esa fayl QULFLANADI.
+            #
+            # Nuqson sinov tozalashida `PermissionError` bilan
+            # chiqdi, lekin u `except: pass` bilan YUTILGAN edi va
+            # shart faqat "fayl qoldi" derdi -- sababini emas.
+            #
+            # TEKSHIRUV YO'LNI EMAS, NATIJANI o'lchaydi: bir necha
+            # marta yuklab olingandan keyin fayl KO'CHIRILA olishi
+            # kerak. Ochiq deskriptor buni Windowsda IMKONSIZ qiladi.
+            # PORTATIV O'LCHOV — DESKRIPTOR SONI.
+            #
+            # Quyidagi "ko'chirib ko'rish" sinovi WINDOWSDA kuchli
+            # (ochiq fayl ko'chirilmaydi), lekin LINUXDA ochiq
+            # deskriptor bilan ham ko'chirish ISHLAYDI — ya'ni u
+            # yerda shart JIMGINA o'tib ketardi. Joylashtirish esa
+            # aynan Linuxda. Shuning uchun `/proc/self/fd` bo'lsa
+            # deskriptor SONI ham o'lchanadi.
+            def _fd_soni():
+                try:
+                    return len(os.listdir("/proc/self/fd"))
+                except OSError:
+                    return None
+
+            oldin_fd = _fd_soni()
+            for _ in range(5):
+                c.get(f"/company/documents/{did}/download", headers=HA)
+            keyin_fd = _fd_soni()
+            if oldin_fd is not None and keyin_fd is not None:
+                # 5 ta yuklab olish 5 ta deskriptor qoldirmasin.
+                # Kichik tebranish (jurnal, ulanish) bo'lishi mumkin,
+                # shuning uchun chegara 2.
+                check("5 ta yuklab olish deskriptor QOLDIRMAYDI",
+                      keyin_fd - oldin_fd <= 2,
+                      f"{oldin_fd} -> {keyin_fd}")
+            else:
+                print("        [i] `/proc/self/fd` yo'q — deskriptor "
+                      "SONI o'lchanmadi (quyidagi ko'chirish sinovi qoladi)")
+            from api import saqlash as _sq
+            _s = _sq.saqlagich()
+            yuk = db.query_one("SELECT kalit FROM yuklama WHERE id=%(i)s",
+                               {"i": h["id"]})
+            try:
+                yangi_kalit = _s.archive(yuk["kalit"])
+                # Darhol JOYIGA qaytaramiz: keyingi shartlar shu
+                # faylni yuklab oladi.
+                import shutil as _sh
+                _sh.move(_s._yol(yangi_kalit), _s._yol(yuk["kalit"]))
+                check("yuklab olishdan keyin fayl QULFLANMAGAN "
+                      "(deskriptor sizmaydi)", True)
+            except Exception as e:                            # noqa: BLE001
+                check("yuklab olishdan keyin fayl QULFLANMAGAN "
+                      "(deskriptor sizmaydi)", False,
+                      f"{type(e).__name__}: {str(e)[:60]}")
+
             # --- 3. IJARACHI ---
             check("BEGONA kompaniya yuklab ololmaydi",
                   c.get(f"/company/documents/{did}/download",
@@ -734,12 +794,17 @@ def test_tozala(db):
         {"i": idlar})
 
     s = saqlash.saqlagich()
+    # XATO YUTILMAYDI. Ilgari bu yerda `except: pass` turardi va
+    # arxivlash NEGA yiqilgani hech qayerda ko'rinmasdi — quyidagi
+    # shart faqat "fayl qoldi" derdi, sababini emas.
+    kochmadi = []
     for k in kalitlar:
         try:
             if s.exists(k):
                 s.archive(k)
-        except Exception:                                     # noqa: BLE001
-            pass
+        except Exception as e:                                # noqa: BLE001
+            kochmadi.append(f"{k}: {type(e).__name__}")
+    check("arxivlashda xato bo'lmadi", not kochmadi, "; ".join(kochmadi[:3]))
 
     # SHART "NECHTASI KO'CHDI" EMAS, "TIRIK QOLDIMI".
     #

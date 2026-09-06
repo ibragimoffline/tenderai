@@ -146,17 +146,35 @@ def qabul_qil(company_id: int, manba_turi: str, nom: str, data: bytes,
         # `ichki` faqat jurnalga ketadi (§25).
         raise xatolar.Xato("STORAGE_WRITE_FAILED", ichki=str(e)) from e
 
-    row = db.execute_returning("""
-        INSERT INTO yuklama (id, company_id, manba_turi, original_nom,
-                             kalit, backend, mime, ext, size_bytes,
-                             sha256, holat, uploaded_by)
-        VALUES (%(id)s, %(c)s, %(mt)s, %(nom)s, %(k)s, %(b)s, %(mime)s,
-                %(ext)s, %(sz)s, %(sha)s, 'yuklandi', %(by)s)
-        RETURNING *""",
-        {"id": str(uuid.uuid4()), "c": company_id, "mt": manba_turi,
-         "nom": toza_nom, "k": m.kalit, "b": m.backend,
-         "mime": MIME.get(ext, "application/octet-stream"),
-         "ext": ext, "sz": m.size_bytes, "sha": xesh, "by": aktor_id})
+    # QATOR YOZILMASA FAYL DISKDA QOLMASIN.
+    #
+    # O'LCHANGAN NUQSON (2026-09-06): fayl diskka YOZILGACH qator
+    # qo'shilardi va oradagi har qanday xato YETIM FAYL qoldirardi —
+    # diskda bor, bazada yo'q, hech kim biladigan joyi yo'q. Sinov
+    # tozalashi aynan shunday bitta faylni topdi.
+    #
+    # Tartibni teskari qilib bo'lmaydi: `kalit` saqlashdan keladi.
+    # Shuning uchun KOMPENSATSIYA: yozuv yiqilsa fayl ARXIVGA
+    # ko'chiriladi (o'chirilmaydi — sabab noma'lum bo'lsa dalilni
+    # yo'q qilish noto'g'ri).
+    try:
+        row = db.execute_returning("""
+            INSERT INTO yuklama (id, company_id, manba_turi, original_nom,
+                                 kalit, backend, mime, ext, size_bytes,
+                                 sha256, holat, uploaded_by)
+            VALUES (%(id)s, %(c)s, %(mt)s, %(nom)s, %(k)s, %(b)s, %(mime)s,
+                    %(ext)s, %(sz)s, %(sha)s, 'yuklandi', %(by)s)
+            RETURNING *""",
+            {"id": str(uuid.uuid4()), "c": company_id, "mt": manba_turi,
+             "nom": toza_nom, "k": m.kalit, "b": m.backend,
+             "mime": MIME.get(ext, "application/octet-stream"),
+             "ext": ext, "sz": m.size_bytes, "sha": xesh, "by": aktor_id})
+    except Exception:                                         # noqa: BLE001
+        try:
+            s.archive(m.kalit)
+        except Exception:                                     # noqa: BLE001
+            log.warning("yetim fayl qoldi: %s", m.kalit)
+        raise
     return dict(row)
 
 
@@ -349,8 +367,40 @@ def _uuid(x: str) -> str:
 
 
 def ochib_ber(y: Dict[str, Any]):
-    """Fayl oqimini qaytaradi. `y` — `ol()` dan kelgan qator."""
+    """Fayl oqimini qaytaradi. `y` — `ol()` dan kelgan qator.
+
+    DIQQAT: bu XOM deskriptor va uni CHAQIRUVCHI yopishi shart.
+    HTTP javobi uchun `oqim()` ni ishlating.
+    """
     return saqlash.saqlagich().open(y["kalit"])
+
+
+def oqim(y: Dict[str, Any], bolak: int = 256 * 1024):
+    """Faylni BO'LAKLAB o'qiydigan generator; oxirida DESKRIPTORNI YOPADI.
+
+    O'LCHANGAN NUQSON (2026-09-06). Ilgari `StreamingResponse` ga
+    ochiq fayl obyekti BERILARDI. Starlette uni o'qiydi, lekin
+    `.close()` CHAQIRMAYDI — ya'ni har yuklab olish bitta
+    deskriptorni ochiq qoldirardi.
+
+    Linuxda bu SEKIN sizish (`ulimit -n` gacha), Windowsda esa
+    DARHOL ko'rinadi: ochiq fayl ko'chirilmaydi. Sinov tozalashi
+    aynan shu yerda `PermissionError` bilan yiqildi va nuqsonni
+    ochdi — ilgari u `except: pass` bilan yutilgan edi.
+
+    `finally` SHART: mijoz ulanishni yarmida uzsa generator
+    `GeneratorExit` bilan to'xtaydi va usiz deskriptor baribir
+    ochiq qolardi.
+    """
+    f = saqlash.saqlagich().open(y["kalit"])
+    try:
+        while True:
+            b = f.read(bolak)
+            if not b:
+                break
+            yield b
+    finally:
+        f.close()
 
 
 def javob_sarlavhasi(y: Dict[str, Any], inline: bool) -> Dict[str, str]:
