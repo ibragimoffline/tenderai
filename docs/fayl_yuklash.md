@@ -297,6 +297,44 @@ GET    /chat/fayl/{yid}/download           attachment
 
 ---
 
+## 9b. Uchidan-uchiga sinov (haqiqiy HTTP)
+
+```bash
+deploy/bin/e2e-fayl.sh <url> <login> <parol> \
+    --begona <login2> <parol2> [--ai]
+```
+
+`_tests/yuklama_test.py` `TestClient` bilan yuradi — u ASGI ilovasini
+**to'g'ridan-to'g'ri** chaqiradi va tarmoqqa chiqmaydi. Ya'ni u
+quyidagilarni **o'lchamaydi**: Caddy tana chegarasi, sarlavhalarning
+proksidan o'tishi, cookie/CSRF haqiqiy qoidalar bilan,
+`StreamingResponse` tarmoq ustida.
+
+O'lchandi (2026-09-06, mahalliy `uvicorn`): **26/26**, shu jumladan
+model javobi va `chat_upload` iqtibosi.
+
+**Ikki shart ataylab yiqiladi, agar berilmasa:**
+
+| bayroq | busiz nima bo'ladi |
+|---|---|
+| `--begona` | ijarachi chegarasi **o'lchanmaydi** → XATO |
+| `--ai` | AI javobi va iqtibos **o'lchanmaydi** → XATO (pullik chaqiruv) |
+
+Jimgina o'tkazib yuborish yo'q: o'lchanmagan narsa "o'tdi" deb
+sanalmaydi.
+
+**Javob va iqtibos AJRATILADI.** Xom SSE oqimidan `grep 41` yetarli
+emas edi: `citation` hodisasi fayl **parchasini** ham olib keladi va
+unda o'sha raqam bor — ya'ni shart modelning javobini emas, o'zi
+yuborgan matnni topib yashil bo'lardi. Endi `token` va `citation`
+hodisalari turiga ko'ra ajratiladi.
+
+> **Bu brauzer sinovi EMAS.** Tugma bosish, fayl tanlash dialogi va
+> UI holati (Processing → Ready) sinalmaydi. Ular odam yoki brauzer
+> avtomatizatsiyasi bilan tekshiriladi.
+
+---
+
 ## 10. Sinovlar
 
 ```
