@@ -45,9 +45,11 @@ from __future__ import annotations
 import argparse
 import os
 
-#: ILOVA ROLI — `run_tests.py:ILOVA_ROL` bilan AYNI bo'lishi shart.
-#: Ikki joyda turgani ataylab emas, lekin `_tests/` paketi ildizdagi
-#: modulni import qilmaydi; `nom_butunlik_test` ikkalasini solishtiradi.
+#: ILOVA ROLI — BU YAGONA E'LON. `run_tests.py` shu yerdan
+#: import qiladi, ya'ni ikkinchi nusxa YO'Q.
+#:
+#: Nom `deploy/bin/bootstrap.sh` va `docs/deploy.md` §6 dagi rol
+#: bilan bir xil bo'lishi shart.
 ILOVA_ROL = os.environ.get("TEST_ILOVA_ROL", "tai_app")
 
 

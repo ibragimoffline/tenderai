@@ -130,14 +130,29 @@ def test_manifest_yasa_barqaror():
     """
     bolim("Manifest — `--manifest-yasa` id ni SILJITMAYDI")
 
+    # DIQQAT — QUYIDAGI IKKI SHART NIMANI O'LCHAMAYDI.
+    #
+    # "Haqiqiy manifest uchun regeneratsiya id larni o'zgartirmadi"
+    # degan shart YOZILGAN edi va u YIQILA OLMASDI: `manifest_yasa()`
+    # id ni aynan `manifest_oqi()` dan oladi, ya'ni shart
+    # `manifest_oqi()` ni O'ZI bilan solishtirardi (1-sinf: asbob
+    # o'zini o'lchaydi). Yashil chiqishi kafolatlangan va shuning
+    # uchun u YOLG'ON ISHONCH berardi.
+    #
+    # Olib tashlandi. O'rniga YIQILA OLADIGAN shart: regeneratsiya
+    # birorta id ni YANGIDAN yasamasin. Diskda manifestda yo'q patch
+    # paydo bo'lsa u yangi id oladi -- va bu jimgina qo'llanmaydigan
+    # migratsiya belgisi.
+    #
+    # ASOSIY QO'RIQCHI QUYIDA, sun'iy holatda: faqat o'sha yerda
+    # manifest va regeneratsiya MUSTAQIL ravishda qurilib
+    # solishtiriladi.
     hozir = {z.fayl: z.mid for z in M.manifest_oqi()}
     qayta = {z.fayl: z.mid for z in M.manifest_yasa()}
-    ozgargan = {f: (hozir[f], qayta[f])
-                for f in hozir if f in qayta and hozir[f] != qayta[f]}
-    check("regeneratsiya mavjud id larni O'ZGARTIRMAYDI",
-          not ozgargan,
-          "; ".join(f"{f}: {a}->{b}" for f, (a, b) in
-                    list(ozgargan.items())[:3]))
+    yangi_id = {f: qayta[f] for f in qayta if f not in hozir}
+    check("regeneratsiya YANGI id yasamaydi (hammasi manifestdan)",
+          not yangi_id,
+          "; ".join(f"{f}={i}" for f, i in list(yangi_id.items())[:3]))
     check("regeneratsiya fayl YO'QOTMAYDI",
           not (set(hozir) - set(qayta)),
           str(sorted(set(hozir) - set(qayta))[:3]))

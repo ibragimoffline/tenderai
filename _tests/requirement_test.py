@@ -702,6 +702,18 @@ def test_isteemolchilar():
                   for q in blok2.splitlines()
                   if "INSON TASDIQLAGAN]" in q),
               "tasdiqlangan talab model ishonchi bilan bir xil ko'rinmasin")
+    else:
+        # JIM O'TMAYDI. Yuqoridagi `nomzod` uchun baland yiqilish
+        # qo'yilgan edi, bu yerda esa `if` shartsiz qolgan edi --
+        # ya'ni aynan SHU tarmoq (u sinovni yiqitgan tarmoq) nomzod
+        # yo'qolganda jimgina yo'q bo'lardi va darvoza yashil
+        # qolardi (2-sinf: muvaffaqiyat salbiy shartdan).
+        #
+        # O'LCHANDI (2026-09-06): butun bazada `reviewed_by IS NOT
+        # NULL` bo'lgan 8 ta talab bor va shartga MOS keladigan
+        # tender bor-yo'g'i 2 ta. Toza bazada bu NOL bo'ladi.
+        check("inson tasdiqlagan talabli tender topildi", False,
+              "nomzod yo'q -- INSON TASDIG'I tarmog'i o'lchanmadi")
 
     # --- 5. BO'SH holat — "yo'q" va "ajratilmagan" AJRALADI ---
     yoq = db.scalar("""SELECT t.id FROM tender t WHERE NOT EXISTS

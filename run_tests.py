@@ -57,12 +57,16 @@ TIMEOUT = int(os.environ.get("TEST_TIMEOUT", "900"))
 
 #: ILOVA ROLI — sinov MANA SHU rol bilan yurishi kerak.
 #:
-#: `postgres` (superuser) HAMMA grant tekshiruvini chetlab
-#: o'tadi, ya'ni ERP chegarasi va IDOR himoyalari sinalmay
-#: qoladi. Nom `deploy/bin/bootstrap.sh` dagi rol bilan bir xil
-#: bo'lishi SHART; o'zgarsa `_tests/rejim.py` dagi xabar ham
-#: yangilanadi.
-ILOVA_ROL = os.environ.get("TEST_ILOVA_ROL", "tai_app")
+#: `postgres` (superuser) HAMMA grant tekshiruvini chetlab o'tadi,
+#: ya'ni ERP chegarasi va IDOR himoyalari sinalmay qoladi.
+#:
+#: MANBA BITTA: `_tests/rejim.py`. Ilgari bu yerda AYNI qiymat
+#: ikkinchi marta e'lon qilingan edi va izohda "`nom_butunlik_test`
+#: ikkalasini solishtiradi" deb YOZILGAN edi -- bunday tekshiruv
+#: YO'Q edi (5-sinf: izoh himoya deb hisoblangan). Ikki manba
+#: o'rniga import: endi ajralib ketishning IMKONI yo'q.
+sys.path.insert(0, TESTS)
+from rejim import ILOVA_ROL                              # noqa: E402
 
 
 def toplamlar(filtr: str = "") -> List[str]:

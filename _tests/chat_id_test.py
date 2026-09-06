@@ -425,14 +425,45 @@ def test_tiklash_olchovi(db):
                   f"ko'rinish={r['mediana_sek']} mustaqil={kutilgan:.0f} "
                   f"namuna={len(xom)}")
         finally:
-            for i in sinov:
-                db.execute_returning(
-                    "UPDATE chat_session SET tiklandi_at=NULL, "
-                    "tiklash_rad_at=NULL WHERE id=%(i)s RETURNING id",
-                    {"i": i})
-            print("        (namuna sinovi tozalandi)")
+            # TIKLASH O'ZI TEKSHIRILADI.
+            #
+            # Bu sinov HAQIQIY `chat_session` qatorlarini o'zgartiradi
+            # (fikstura emas) va ular HAQIQIY o'lchovga -- ishlab
+            # chiqarishdagi `v_chat_tiklash` ko'rsatkichiga -- kiradi.
+            # `UPDATE ... RETURNING id` natijasi ilgari O'QILMASDI:
+            # tiklash yiqilsa yoki qatorni topmasa, sinov soxta
+            # "tiklanish" ma'lumotini bazada QOLDIRIB, jimgina
+            # tugardi (11-sinf: tiklash mexanizmi qoldiqni
+            # abadiylashtiradi -- keyingi yurish uni "asl holat"
+            # deb oladi).
+            #
+            # O'LCHANDI (2026-09-06): hozirgi yagona tiklanish qatori
+            # 11 s oraliqli va u HAQIQIY (sinov 600/2400/4200 s
+            # beradi), ya'ni ayni paytda qoldiq YO'Q. Shart aynan
+            # shuni QO'RIQLAYDI.
+            tiklanmadi = [i for i in sinov if not db.execute_returning(
+                "UPDATE chat_session SET tiklandi_at=NULL, "
+                "tiklash_rad_at=NULL WHERE id=%(i)s RETURNING id",
+                {"i": i})]
+            check("sinov qatorlari HAQIQATAN tiklandi",
+                  not tiklanmadi,
+                  f"tiklanmagan: {tiklanmadi}")
+            qoldiq = db.scalar(
+                # `::uuid[]` SHART: `chat_session.id` uuid, psycopg2
+                # esa ro'yxatni MATN massivi qilib uzatadi va
+                # Postgres `uuid = text` da to'xtaydi. Bu shartning
+                # O'ZI shu xatoni ochdi -- ya'ni u ishlayapti.
+                "SELECT count(*) FROM chat_session WHERE id = ANY(%(x)s::uuid[]) "
+                "  AND (tiklandi_at IS NOT NULL OR tiklash_rad_at IS NOT NULL)",
+                {"x": [str(i) for i in sinov]})
+            check("bazada sinov QOLDIG'I yo'q", qoldiq == 0, str(qoldiq))
     else:
-        print("        [i] 3 ta bo'sh sessiya yo'q — namuna sinovi o'tkazilmadi")
+        # JIM O'TMAYDI: butun blok -- hissa, chegara va mediana
+        # shartlari -- nomzod yetmasa yo'qolardi va darvoza yashil
+        # qolardi. O'LCHANDI (2026-09-06): 9 ta nomzod bor, ya'ni
+        # zaxira bor, lekin u KAFOLAT emas.
+        check("namuna sinovi uchun 3 ta bo'sh sessiya topildi", False,
+              f"topilgani: {len(sinov)} ta -- namuna sinovi o'lchanmadi")
 
     # IDOR JUFTLIGI + takroriy chaqiruv.
     sid = db.scalar("SELECT id::text FROM chat_session "
