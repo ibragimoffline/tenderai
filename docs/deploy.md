@@ -222,6 +222,45 @@ qulflangan.
 
 ---
 
+## 5c. Staging E2E darvozasi — **majburiy**
+
+`deploy.sh` staging da `.verified` **yozishdan oldin**
+`deploy/bin/e2e-fayl.sh` ni yurgizadi. Yiqilsa — orqaga qaytarish,
+tasdiq **yozilmaydi**.
+
+**Nega `health-check.sh` yetarli emas:** u "xizmat javob
+beryaptimi" degan savolga javob beradi. Fayl yuklash oqimini —
+proksi tana chegarasi, `Content-Disposition`, cookie/CSRF,
+`StreamingResponse`, ijarachi chegarasi — u **umuman** tekshirmaydi.
+`_tests/yuklama_test.py` ham tekshirmaydi: u `TestClient` bilan
+yuradi va tarmoqqa **chiqmaydi**, ya'ni Caddy yo'lda **turmaydi**.
+
+```
+E2E_URL=https://staging.example.uz/api
+E2E_LOGIN=          E2E_PAROL=
+E2E_BEGONA_LOGIN=   E2E_BEGONA_PAROL=
+```
+
+**Ikki hisob shart:** ijarachi chegarasi bitta hisob bilan
+o'lchanmaydi. **Sozlanmagani "o'tdi" emas** — `deploy.sh` `:?`
+bilan to'xtaydi.
+
+> **Narxi:** `--ai` doim beriladi, ya'ni har staging joylashtiruvida
+> **bitta pullik model chaqiruvi** bo'ladi. Ataylab: iqtibos zanjiri
+> (fayl → bo'lak → javob) eng qimmat invariant va uni o'lchamasdan
+> "reliz tayyor" deb bo'lmaydi.
+
+Qo'lda ham yurgizsa bo'ladi:
+
+```bash
+deploy/bin/e2e-fayl.sh https://staging.example.uz/api \
+    broker 'parol' --begona broker2 'parol2' --ai
+```
+
+Batafsil: [`docs/fayl_yuklash.md`](fayl_yuklash.md) §9b.
+
+---
+
 ## 6. Sog'liq, tayyorlik, ETL yangiligi
 
 To'rt tekshiruv **ataylab ajratilgan** — ular boshqa-boshqa narsani

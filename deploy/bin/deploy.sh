@@ -250,8 +250,51 @@ if ! "${YANGI}/deploy/bin/health-check.sh" "$MUHIT"; then
     xato "qaytariladigan eski reliz yoq"
 fi
 
-# --- 10) STAGING muvaffaqiyatli -> TASDIQ yoziladi ---------------------------
+# --- 10) STAGING: UCHIDAN-UCHIGA SINOV -> keyin TASDIQ -----------------------
+#
+# NEGA MAJBURIY VA NEGA AYNAN SHU YERDA.
+#
+# `health-check.sh` "xizmat javob beryaptimi" degan savolga javob
+# beradi. U fayl yuklash OQIMINI umuman tekshirmaydi: proksi tana
+# chegarasi, `Content-Disposition`, cookie/CSRF, `StreamingResponse`
+# va ijarachi chegarasi -- hammasi HTTP darajasida va hammasi
+# joylashtiruvdan KEYIN buzilishi mumkin.
+#
+# `_tests/yuklama_test.py` ham buni o'lchamaydi: u `TestClient`
+# bilan yuradi va tarmoqqa CHIQMAYDI, ya'ni Caddy yo'lda TURMAYDI.
+#
+# TASDIQDAN OLDIN: `.verified` yozilishi "bu ref production ga
+# chiqishi mumkin" degani. Sinov undan KEYIN yurgizilsa, yiqilgan
+# oqim bilan ham tasdiq yozilib qolardi.
+#
+# SOZLANMAGANI "O'TDI" EMAS. Ilgari loyihada shunga o'xshash
+# joylarda "sozlanmagan -> ogohlantirish -> davom" naqshi bor edi
+# va u darvozani yolg'on qilardi. Bu yerda sozlanmagani XATO.
 if [ "$MUHIT" = "staging" ]; then
+    log "uchidan-uchiga sinov (haqiqiy HTTP)"
+    : "${E2E_URL:?staging darvozasi uchun E2E_URL kerak (masalan https://staging.example.uz/api)}"
+    : "${E2E_LOGIN:?E2E_LOGIN kerak — sinov hisobi}"
+    : "${E2E_PAROL:?E2E_PAROL kerak}"
+    : "${E2E_BEGONA_LOGIN:?E2E_BEGONA_LOGIN kerak: ijarachi chegarasi shusiz OLCHANMAYDI}"
+    : "${E2E_BEGONA_PAROL:?E2E_BEGONA_PAROL kerak}"
+
+    # `--ai` DOIM beriladi: iqtibos zanjiri (fayl -> bo'lak -> javob)
+    # eng qimmat invariant va uni o'lchamasdan "reliz tayyor" deb
+    # bo'lmaydi. Narxi bitta savol -- joylashtiruv chastotasida bu
+    # sezilarli emas, buzilgan iqtibos esa sezilarli.
+    if ! "${YANGI}/deploy/bin/e2e-fayl.sh" "$E2E_URL" \
+            "$E2E_LOGIN" "$E2E_PAROL" \
+            --begona "$E2E_BEGONA_LOGIN" "$E2E_BEGONA_PAROL" --ai; then
+        log "E2E YIQILDI — orqaga qaytarilmoqda"
+        if [ -n "$ESKI" ] && [ -d "$ESKI" ] && [ "$ESKI" != "$JORIY" ]; then
+            ln -sfn "$ESKI" "$JORIY"
+            sudo systemctl restart "tenderai-api@${MUHIT}"
+            xato "qaytarildi -> $ESKI"
+        fi
+        xato "E2E yiqildi, qaytariladigan eski reliz yo'q"
+    fi
+    log "E2E o'tdi"
+
     printf '%s' "$REF" > "${ILDIZ}/.verified"
     log "staging tasdigi yozildi: $REF"
 fi

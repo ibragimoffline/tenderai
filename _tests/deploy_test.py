@@ -362,6 +362,41 @@ def test_zaxira_tashqi():
           "FAYL_ARXIV" in r and "fayl arxivi BO'SH" in r)
 
 
+def test_e2e_darvozasi():
+    bolim("8c. Staging E2E darvozasi — MAJBURIY")
+    d = oqi("bin", "deploy.sh")
+    # `.verified` NI QIDIRISH YETARLI EMAS: u sarlavha IZOHIDA ham,
+    # `TASDIQ=` ta'rifida ham bor va ikkalasi ham fayl BOSHIDA.
+    # Ilgari shu shart aynan shuning uchun yiqilgan edi -- skaner
+    # NASRni o'qidi, KODni emas. Solishtiriladigan narsa YOZUV AMALI.
+    yozuv = '> "${ILDIZ}/.verified"'
+    check("`.verified` yozuvi topildi", yozuv in d)
+    check("E2E `.verified` YOZUVIDAN OLDIN yuradi",
+          "e2e-fayl.sh" in d and yozuv in d
+          and d.index("e2e-fayl.sh") < d.index(yozuv))
+    # SOZLANMAGANI 'O'TDI' EMAS. `:?` bilan bo'sh o'zgaruvchi
+    # skriptni TO'XTATADI.
+    for o in ("E2E_URL", "E2E_LOGIN", "E2E_PAROL",
+              "E2E_BEGONA_LOGIN", "E2E_BEGONA_PAROL"):
+        check(f"`{o}` sozlanmagani XATO (`:?`)", f"{o}:?" in d)
+    # `--begona` va `--ai` DOIM beriladi: ularsiz ijarachi
+    # chegarasi va iqtibos zanjiri O'LCHANMAYDI.
+    check("`--begona` DOIM beriladi", "--begona" in d)
+    check("`--ai` DOIM beriladi (iqtibos zanjiri)", "--ai" in d)
+    check("E2E yiqilsa ORQAGA QAYTARILADI",
+          "E2E YIQILDI" in d and d.count("ln -sfn \"$ESKI\"") >= 2)
+    # Skriptning O'ZI ham ikki shartni majburiy qiladi.
+    e = oqi("bin", "e2e-fayl.sh")
+    check("skript `--begona` siz YIQILADI",
+          "ijarachi chegarasi O'LCHANMADI" in e)
+    check("skript `--ai` siz YIQILADI",
+          "IQTIBOS O'LCHANMADI" in e)
+    check("skript javob va iqtibosni AJRATADI",
+          "citation" in e and "token" in e and "ajratilgan" in e)
+    check("skript BRAUZER sinovi EMASligini aytadi",
+          "BRAUZER sinovi EMAS" in e)
+
+
 def test_sogliq():
     bolim("9. Sog'liq / tayyorlik / ETL yangiligi")
     src = io.open(os.path.join(ROOT, "api", "main.py"), encoding="utf-8").read()
@@ -1421,6 +1456,7 @@ def main():
     test_staging_birinchi()
     test_proksi()
     test_zaxira_tashqi()
+    test_e2e_darvozasi()
     test_sogliq()
     test_jurnal()
     test_url_qorovuli()
