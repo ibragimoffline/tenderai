@@ -584,7 +584,13 @@ export default function App() {
               tenderId={chatFor || null}
               manba={chatManba ?? undefined}
               onClose={() => { setChatFor(null); setChatManba(null) }}
-              onOpenCitation={(c) => setSelected({ id: c.tender_id })} />
+              // YUKLANGAN FAYL IQTIBOSIDA TENDER YO'Q. Ilgari bu
+              // yerda `c.tender_id` shartsiz ishlatilardi; yangi manba
+              // turlarida u `undefined` va tender paneli BO'SH ochilardi
+              // — foydalanuvchi bosardi va tushunarsiz oyna ko'rardi.
+              onOpenCitation={(c) => {
+                if (c.tender_id) setSelected({ id: c.tender_id })
+              }} />
           </div>
         </Suspense>
       )}

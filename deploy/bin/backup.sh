@@ -14,6 +14,14 @@
 #      buzuq faylni haftalab saqlab yurmaslik uchun;
 #   3. SHA-256 yoziladi — keyinchalik fayl ozgarganini bilish uchun.
 #
+# YUKLANGAN FAYLLAR ALOHIDA ARXIVLANADI.
+#
+# NEGA: `pg_dump` faqat BAZANI oladi. Foydalanuvchi yuklagan hujjat
+# esa DISKDA yotadi (`UPLOAD_ROOT`) va bazada faqat KALIT saqlanadi.
+# Ya'ni faqat baza zaxirasi bilan tiklangan tizimda har hujjat
+# "bor" deb ko'rinardi va ochilganda TOPILMASDI — eng yomon shakl,
+# chunki yo'qotish faqat foydalanuvchi bosganda bilinadi.
+#
 # HAQIQIY TIKLASH MASHQI alohida: `restore-test.sh` (haftalik).
 # =============================================================================
 set -euo pipefail
@@ -82,6 +90,56 @@ fi
 sha256sum "$FAYL" > "${FAYL}.sha256"
 log "sha256 yozildi"
 
+# --- YUKLANGAN FAYLLAR ------------------------------------------------------
+# `UPLOAD_ROOT` — `api/saqlash.py` bilan AYNI o'zgaruvchi. Standart
+# qiymat ham o'sha yerdagidek: reliz ichidagi `.runtime/uploads`.
+#
+# ISHLAB CHIQARISHDA U RELIZDAN TASHQARIDA bo'lishi SHART
+# (`/var/lib/tenderai/uploads`): `deploy.sh` har relizda YANGI
+# katalog yasaydi va reliz ichidagi fayllar keyingi joylashtiruvda
+# ko'rinmay qolardi. Buni tekshiramiz va jim qolmaymiz.
+YUKLAMA_ILDIZ="${UPLOAD_ROOT:-${ILDIZ:-/opt/tenderai/$MUHIT}/current/.runtime/uploads}"
+FAYL_ARXIV="${KATALOG}/tenderai-${MUHIT}-${STAMP}-fayllar.tar.gz"
+
+if [ -d "$YUKLAMA_ILDIZ" ]; then
+    case "$YUKLAMA_ILDIZ" in
+        */current/*|*/releases/*)
+            log "OGOHLANTIRISH: yuklama katalogi RELIZ ICHIDA ($YUKLAMA_ILDIZ)."
+            log "  Keyingi joylashtiruv yangi katalog yasaydi va fayllar"
+            log "  ko'rinmay qoladi. \`UPLOAD_ROOT\` ni relizdan TASHQARIGA"
+            log "  qo'ying (masalan /var/lib/tenderai/uploads)."
+            ;;
+    esac
+    # `--warning=no-file-changed`: yuklash arxivlash paytida bo'lsa
+    # `tar` 1 qaytaradi va `set -e` butun zaxirani YIQITARDI —
+    # holbuki baza dump'i allaqachon olingan va u yaroqli.
+    tar -czf "$FAYL_ARXIV" -C "$(dirname "$YUKLAMA_ILDIZ")"         "$(basename "$YUKLAMA_ILDIZ")" 2>/dev/null || {
+        log "OGOHLANTIRISH: fayl arxivi to'liq olinmadi (fayl o'zgargan bo'lishi mumkin)"
+    }
+    if [ -f "$FAYL_ARXIV" ]; then
+        sha256sum "$FAYL_ARXIV" > "${FAYL_ARXIV}.sha256"
+        SONI="$(tar -tzf "$FAYL_ARXIV" | grep -cv '/$' || true)"
+        log "yuklangan fayllar: $SONI ta -> $(du -h "$FAYL_ARXIV" | cut -f1)"
+        # BAZADAGI SON BILAN SOLISHTIRAMIZ. Arxiv "olindi" degani
+        # "to'liq" degani emas: `UPLOAD_ROOT` noto'g'ri bo'lsa tar
+        # BO'SH katalogni muvaffaqiyatli arxivlaydi va zaxira
+        # YASHIL ko'rinardi.
+        BAZADA="$(psql "$XT_DB_DSN" -tAc             "SELECT count(*) FROM yuklama WHERE arxiv_at IS NULL" 2>/dev/null || echo "?")"
+        log "bazada faol yuklama: $BAZADA ta"
+        if [ "$BAZADA" != "?" ] && [ "$BAZADA" -gt 0 ] && [ "$SONI" -eq 0 ]; then
+            log "XATO: bazada $BAZADA ta fayl bor, arxivda 0 ta."
+            log "  \`UPLOAD_ROOT\` noto'g'ri ko'rsatilgan bo'lishi mumkin."
+            exit 1
+        fi
+    fi
+else
+    # JIM QOLMAYDI. Katalog yo'qligi normal bo'lishi mumkin (hali
+    # hech kim fayl yuklamagan), lekin buni AYTISH kerak — aks holda
+    # "zaxira to'liq" degan yolg'on xulosa chiqardi.
+    log "OGOHLANTIRISH: yuklama katalogi topilmadi ($YUKLAMA_ILDIZ) —"
+    log "  fayl zaxirasi OLINMADI. Hali fayl yuklanmagan bo'lsa normal."
+fi
+
 # --- TASHQI NUSXA -----------------------------------------------------------
 # ZAXIRA BITTA DISKDA — ZAXIRA EMAS. Disk yo'qolsa (yoki shifrlovchi
 # dastur tegsa) zaxira ham u bilan ketadi.
@@ -101,7 +159,11 @@ log "sha256 yozildi"
 # SOZLANMAGANI JIM QOLMAYDI: ogohlantirish YOZILADI. "Zaxira bor"
 # degan xulosa "zaxira XAVFSIZ" degani emas.
 if [ -n "${BACKUP_REMOTE_CMD:-}" ]; then
-    for f in "$FAYL" "${FAYL}.sha256"; do
+    # FAYL ARXIVI HAM UZOQQA KETADI. Aks holda baza uzoqda,
+    # fayllar esa faqat mahalliy diskda qolardi — ya'ni disk
+    # yo'qolganda hujjatlar ham yo'qolardi.
+    for f in "$FAYL" "${FAYL}.sha256"              ${FAYL_ARXIV:+"$FAYL_ARXIV" "${FAYL_ARXIV}.sha256"}; do
+        [ -f "$f" ] || continue
         BUYRUQ="${BACKUP_REMOTE_CMD//\{fayl\}/$f}"
         log "tashqi nusxa: $BUYRUQ"
         # XATO YUTILMAYDI. Tashqi nusxa yiqilsa — zaxira HALI HAM

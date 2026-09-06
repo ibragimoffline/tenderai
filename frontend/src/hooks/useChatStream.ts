@@ -13,11 +13,37 @@
 import { useCallback, useRef, useState } from 'react'
 import { apiUrl, authHeaders, setToken } from '@/api'
 
+/** IQTIBOS QAYERDAN kelgani.
+ *
+ *  `tender`           — ommaviy tender hujjati korpusi (`doc_chunk`)
+ *  `chat_upload`      — foydalanuvchi SHU SUHBATGA yuklagan fayl
+ *  `company_document` — kompaniyaning O'Z hujjati
+ *
+ *  Foydalanuvchi buni KO'RISHI kerak: "tender hujjatida shunday
+ *  yozilgan" bilan "sizning litsenziyangizda shunday" bir xil
+ *  vaznda emas va ularni aralashtirish noto'g'ri qarorga olib
+ *  kelardi.
+ *
+ *  ESKI JAVOBLARDA MAYDON YO'Q — `chat_message.citations` jsonb va
+ *  o'tgan qatorlar o'zgarmaydi. Shuning uchun ixtiyoriy va bo'sh
+ *  bo'lsa `tender` deb o'qiladi (o'sha paytda boshqa manba yo'q edi).
+ */
+export type CitationManba = 'tender' | 'chat_upload' | 'company_document'
+
 export interface Citation {
-  /** `doc_chunk.id` — javobdagi [N] shu bo'lakka ishora qiladi. */
+  manba_turi?: CitationManba
+  /** `doc_chunk.id` yoki `yuklama_chunk.id`. */
   chunk_id?: number
-  tender_id: number
-  file_ref: string | null
+  /** Tender korpusida SHART; yuklangan faylda YO'Q. */
+  tender_id?: number
+  /** Yuklangan fayl id si — `chat_upload` va `company_document` da. */
+  yuklama_id?: string
+  /** Bo'lak raqami — sahifa MA'LUM BO'LMAGANDA shu ko'rsatiladi. */
+  chunk_no?: number
+  /** Sahifa. FAQAT PDF da va faqat ishonchli bo'lsa; aks holda
+   *  `null` — soxta sahifa raqami YASALMAYDI (§20). */
+  sahifa?: number | null
+  file_ref?: string | null
   file_name: string | null
   char_start: number
   char_end: number

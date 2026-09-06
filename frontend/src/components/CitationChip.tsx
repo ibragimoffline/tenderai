@@ -32,11 +32,30 @@ export default function CitationChip({ citation, index, onOpen }: CitationChipPr
   const nom = citation.file_name || citation.file_ref || t('chat.citation.file')
   const qisqa = nom.length > 26 ? `${nom.slice(0, 24)}…` : nom
 
+  // MANBA TURI KO'RSATILADI. Eski javoblarda maydon yo'q — o'sha
+  // paytda tender korpusidan boshqa manba bo'lmagan, shuning uchun
+  // bo'sh qiymat `tender` deb o'qiladi.
+  const manba = citation.manba_turi || 'tender'
+  const yuklangan = manba !== 'tender'
+
+  // O'RIN BELGISI. Sahifa FAQAT ma'lum bo'lsa ko'rsatiladi: DOCX va
+  // TXT da parser sahifani BILMAYDI va u yerda bo'lak raqami
+  // beriladi. Soxta sahifa raqami yasash iqtibosni ishonchli
+  // KO'RSATARDI, holbuki u taxmin bo'lardi.
+  const orin = citation.sahifa != null
+    ? t('chat.citation.page', { n: citation.sahifa })
+    : (yuklangan && citation.chunk_no != null
+        ? t('chat.citation.chunk', { n: citation.chunk_no })
+        : t('chat.citation.at', { pos: citation.char_start }))
+
   return (
     <button
       type="button"
       onClick={() => onOpen?.(citation)}
-      disabled={!onOpen}
+      // YUKLANGAN FAYLDA OCHADIGAN JOY YO'Q: `DocumentText` paneli
+      // tender hujjatlari uchun. Tugmani "bosiladigan" ko'rsatib,
+      // bosilganda hech nima qilmaslik — jimgina buzilish.
+      disabled={!onOpen || yuklangan}
       className="inline-flex max-w-full items-center gap-1.5 rounded-md border
                  border-border bg-card px-2 py-1 text-left text-xs
                  text-muted-foreground transition hover:border-accent/50
@@ -48,9 +67,14 @@ export default function CitationChip({ citation, index, onOpen }: CitationChipPr
       <Icon name="clip" size={12} className="shrink-0" />
       <span className="truncate">{qisqa}</span>
       {/* Belgi o'rni — foydalanuvchi hujjatning QAYSI joyi ekanini ko'radi */}
-      <span className="shrink-0 tabular-nums opacity-60">
-        {t('chat.citation.at', { pos: citation.char_start })}
-      </span>
+      {yuklangan && (
+        <span className="shrink-0 rounded bg-accent/10 px-1 text-micro
+                         font-medium text-accent">
+          {manba === 'chat_upload' ? t('chat.citation.upload')
+                                   : t('chat.citation.companyDoc')}
+        </span>
+      )}
+      <span className="shrink-0 tabular-nums opacity-60">{orin}</span>
     </button>
   )
 }

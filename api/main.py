@@ -32,8 +32,8 @@ from urllib.parse import quote, urlsplit
 
 import requests
 from dotenv import load_dotenv
-from fastapi import (Cookie, Depends, FastAPI, File, Header, Query, Request,
-                     Response, UploadFile)
+from fastapi import (BackgroundTasks, Cookie, Depends, FastAPI, File, Header,
+                     Query, Request, Response, UploadFile)
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (JSONResponse, RedirectResponse,
                                Response as FileResponse, StreamingResponse)
@@ -45,7 +45,7 @@ load_dotenv()  # .env ni import paytida yuklaymiz (pool DSN'ni ko'rishi uchun)
 from api import (ai, ai_chat, ai_docs, ai_gonogo, ai_match, auth, jurnal,  # noqa: E402
                  catalog_auto, compliance, db, erp_status, erp_stock, i18n, importer,
                  kodlash, matching, notify, ommaviy_url, pricing, queries,
-                 stock, telegram, translit, xatolar)
+                 saqlash, stock, telegram, translit, xatolar, yuklama)
 
 _log = logging.getLogger(__name__)
 
@@ -2355,6 +2355,142 @@ def delete_company_document(doc_id: int, request: Request):
     if not row:
         raise xatolar.Xato("DOCUMENT_NOT_FOUND")
     return None
+
+
+# =============================================================================
+# HUJJAT FAYLI — yuklash, ko'rish, yuklab olish
+# =============================================================================
+# FAYL YO'LI FOYDALANUVCHIDAN QABUL QILINMAYDI. `file_ref` matn maydoni
+# joyida qoladi (eski 13 qator uchun), lekin YANGI yo'l shu yerdan
+# o'tadi: brauzer BINARNI yuboradi, server kalit yasaydi.
+#
+# CHEGARA `_yuklangani()` da — faylni xotiraga TO'LIQ o'qishdan OLDIN.
+# Chegara alohida (`MAX_UPLOAD_MB=25`), `MAX_IMPORT_MB` (5) esa Excel
+# shabloni uchun qoladi: ular boshqa maqsad va boshqa xavf.
+# =============================================================================
+def _hujjat_yoki_404(doc_id: int, cid: int) -> dict:
+    row = db.query_one("SELECT * FROM company_document "
+                       " WHERE id=%(i)s AND company_id=%(c)s",
+                       {"i": doc_id, "c": cid})
+    if not row:
+        raise xatolar.Xato("DOCUMENT_NOT_FOUND")
+    return dict(row)
+
+
+@app.post("/company/documents/{doc_id}/fayl")
+def company_document_upload(
+    doc_id: int, request: Request, background: BackgroundTasks,
+    file: UploadFile = File(..., description="PDF / DOCX / XLSX / TXT / CSV / ZIP"),
+):
+    """Hujjatga HAQIQIY fayl biriktiradi.
+
+    ALMASHTIRISH TARIXNI O'CHIRMAYDI (§10). Eski `yuklama` qatori
+    arxivlanadi, yangisi unga `almashtirdi` orqali ishora qiladi va
+    eski faylning iqtiboslari ishlayveradi. Auditda kim va qachon
+    almashtirgani qoladi.
+    """
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    hujjat = _hujjat_yoki_404(doc_id, cid)
+
+    data = _yuklangani(file, max_mb=saqlash.MAX_UPLOAD_MB)
+    y = yuklama.qabul_qil(cid, "company_doc", file.filename or "fayl",
+                          data, aktor_id=k.actor_id)
+
+    eski_id = hujjat.get("yuklama_id")
+    if eski_id:
+        # ARXIV, O'CHIRISH EMAS: hujjat muvofiqlik tekshiruvida yoki
+        # o'tgan qarorda ishlatilgan bo'lishi mumkin.
+        db.execute_returning(
+            "UPDATE yuklama SET arxiv_at=now(), arxivladi=%(a)s "
+            " WHERE id=%(i)s AND arxiv_at IS NULL RETURNING id",
+            {"i": eski_id, "a": k.actor_id})
+        db.execute_returning(
+            "UPDATE yuklama SET almashtirdi=%(e)s WHERE id=%(i)s RETURNING id",
+            {"i": y["id"], "e": eski_id})
+
+    row = db.execute_returning("""
+        UPDATE company_document
+           SET yuklama_id=%(y)s, file_name=%(n)s, updated_at=now()
+         WHERE id=%(i)s AND company_id=%(c)s
+        RETURNING *""",
+        {"i": doc_id, "c": cid, "y": y["id"], "n": y["original_nom"]})
+
+    audit_yoz(k, request, amal="hujjat_fayl_yuklandi" if not eski_id
+              else "hujjat_fayl_almashtirildi",
+              entity="company_document", entity_id=doc_id,
+              oldin={"yuklama_id": str(eski_id) if eski_id else None},
+              keyin={"yuklama_id": y["id"], "nom": y["original_nom"],
+                     "sha256": y["sha256"], "size_bytes": y["size_bytes"]})
+
+    # AJRATISH FONDA. Javob darhol qaytadi va UI "Processing" ko'rsatadi;
+    # `def` funksiya FastAPI da threadpool'da yuradi, ya'ni event loop
+    # bloklanmaydi.
+    background.add_task(yuklama.qayta_ishla, y["id"])
+    return {**compliance.shape_document(row), "fayl": _fayl_json(y)}
+
+
+def _fayl_json(y: dict) -> dict:
+    """Fayl haqidagi JAVOB. `kalit` va yo'l HECH QACHON kirmaydi."""
+    return {
+        "id": str(y["id"]),
+        "nom": y["original_nom"],
+        "ext": y["ext"],
+        "mime": y["mime"],
+        "size_bytes": int(y["size_bytes"]),
+        "holat": y["holat"],
+        "xato": y.get("xato"),
+        "matn_belgi": y.get("matn_belgi"),
+        "sahifa_soni": y.get("sahifa_soni"),
+    }
+
+
+def _fayl_javobi(y: dict, inline: bool):
+    """Faylni oqim bilan qaytaradi.
+
+    `StreamingResponse` ATAYLAB: fayl 25 MB gacha bo'lishi mumkin va
+    uni xotiraga to'liq o'qish server xotirasini bir necha parallel
+    yuklab olishda tugatardi.
+    """
+    f = yuklama.ochib_ber(y)
+    return StreamingResponse(f, headers=yuklama.javob_sarlavhasi(y, inline))
+
+
+@app.get("/company/documents/{doc_id}/download")
+def company_document_download(doc_id: int, request: Request):
+    """Autentifikatsiyalangan yuklab olish. Ommaviy URL YO'Q."""
+    cid = company_id_of(request)
+    hujjat = _hujjat_yoki_404(doc_id, cid)
+    if not hujjat.get("yuklama_id"):
+        raise xatolar.Xato("FILE_NOT_FOUND")
+    y = yuklama.ol(str(hujjat["yuklama_id"]), cid)
+    return _fayl_javobi(y, inline=False)
+
+
+@app.get("/company/documents/{doc_id}/view")
+def company_document_view(doc_id: int, request: Request):
+    """Brauzerda ko'rish — FAQAT xavfsiz formatlar `inline`.
+
+    PDF va TXT dan boshqasi baribir `attachment` bo'lib tushadi
+    (`yuklama.javob_sarlavhasi`): `inline` berilgan HTML ayni
+    originda skript yurgizardi.
+    """
+    cid = company_id_of(request)
+    hujjat = _hujjat_yoki_404(doc_id, cid)
+    if not hujjat.get("yuklama_id"):
+        raise xatolar.Xato("FILE_NOT_FOUND")
+    y = yuklama.ol(str(hujjat["yuklama_id"]), cid)
+    return _fayl_javobi(y, inline=True)
+
+
+@app.get("/company/documents/{doc_id}/fayl")
+def company_document_fayl_holat(doc_id: int, request: Request):
+    """Fayl holati — UI shu bilan "Processing" dan "Ready" ga o'tadi."""
+    cid = company_id_of(request)
+    hujjat = _hujjat_yoki_404(doc_id, cid)
+    if not hujjat.get("yuklama_id"):
+        return None
+    return _fayl_json(yuklama.ol(str(hujjat["yuklama_id"]), cid))
 
 
 @app.get("/tenders/{tender_id}/compliance")
@@ -4724,6 +4860,123 @@ def chat_archive(session_id: str, request: Request):
     if not ai_chat.archive_session(session_id, company_id_of(request)):
         raise xatolar.Xato("CHAT_SESSION_NOT_FOUND")
     return None
+
+
+# =============================================================================
+# CHATGA FAYL BIRIKTIRISH
+# =============================================================================
+# FAYL SUHBATGA TEGISHLI, GLOBAL EMAS. `chat_yuklama` uch joyda
+# ijarachini tekshiradi: sessiya, yuklama va bog'lanish qatorining
+# o'zi — oxirgisi trigger bilan, chunki "endpoint tekshiradi" degan
+# va'da bitta unutilgan `WHERE` bilan buziladi.
+#
+# UMR: fayl DOIMIY saqlanadi. Foydalanuvchi biriktirishni uzsa
+# (`uzildi_at`) fayl keyingi savollarda ishlatilmaydi, lekin
+# O'CHIRILMAYDI — aks holda o'sha faylga tayangan eski javobning
+# iqtibosi buziladi va tarixiy javobni qayta ko'rib bo'lmasdi (§15).
+# =============================================================================
+def _sessiya_yoki_404(session_id: str, cid: int) -> dict:
+    try:
+        return ai_chat.load_session(session_id, cid)
+    except LookupError as e:
+        raise xatolar.kodli(e, "CHAT_SESSION_NOT_FOUND")
+
+
+class ChatSessionIn(BaseModel):
+    tender_id: Optional[int] = None
+    lang: str = "uz"
+    manba: Optional[str] = None
+
+
+@app.post("/chat/sessions", status_code=201)
+def chat_session_yarat(body: ChatSessionIn, request: Request):
+    """BO'SH suhbat ochadi.
+
+    NEGA KERAK: fayl biriktirish `session_id` ni talab qiladi, sessiya
+    esa ilgari FAQAT birinchi savol yuborilganda yaratilardi. Ya'ni
+    foydalanuvchi faylni savoldan OLDIN biriktira olmasdi — yoki fayl
+    brauzerda kutib turishi va "Ishlanmoqda" holati birinchi savoldan
+    keyin boshlanishi kerak bo'lardi. Ikkinchisi §17 ni buzadi: holat
+    KO'RINISHI kerak, savol berilishidan qat'i nazar.
+
+    Bo'sh sessiya ARZON: bitta qator. `chat_session.manba` esa
+    o'lchovda ishlatiladi, shuning uchun u shu yerda ham beriladi.
+    """
+    _chat_tayyor()
+    cid = company_id_of(request)
+    try:
+        sid = ai_chat.create_session(cid, body.tender_id, None,
+                                     body.lang, body.manba)
+    except ValueError as e:
+        raise xatolar.kodli(e, "FIELD_INVALID")
+    return {"session_id": sid}
+
+
+@app.post("/chat/sessions/{session_id}/fayl", status_code=201)
+def chat_fayl_yukla(
+    session_id: str, request: Request, background: BackgroundTasks,
+    file: UploadFile = File(..., description="PDF / DOCX / XLSX / TXT / CSV / ZIP"),
+):
+    """Faylni suhbatga yuklaydi va ajratishni FONDA boshlaydi.
+
+    `holat` DARHOL `yuklandi` bo'lib qaytadi — `tayyor` EMAS. UI
+    "Processing" ko'rsatadi va `GET .../fayl` bilan kuzatadi.
+    "Ready" ni AI haqiqatan ishlata olgandagina ko'rsatish §17
+    talabi, va uni baza ham qo'riqlaydi (`yuklama_tayyor_matn_chk`).
+    """
+    _chat_tayyor()
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    _sessiya_yoki_404(session_id, cid)
+
+    data = _yuklangani(file, max_mb=saqlash.MAX_UPLOAD_MB)
+    y = yuklama.qabul_qil(cid, "chat", file.filename or "fayl", data,
+                          aktor_id=k.actor_id)
+    yuklama.chatga_biriktir(session_id, y["id"], cid)
+
+    audit_yoz(k, request, amal="chat_fayl_biriktirildi",
+              entity="chat_session", entity_id=0,
+              keyin={"session_id": session_id, "yuklama_id": y["id"],
+                     "nom": y["original_nom"], "sha256": y["sha256"]})
+
+    background.add_task(yuklama.qayta_ishla, y["id"])
+    return _fayl_json(y)
+
+
+@app.get("/chat/sessions/{session_id}/fayl")
+def chat_fayl_royxat(session_id: str, request: Request):
+    """Suhbatga biriktirilgan FAOL fayllar va ularning holati."""
+    _chat_tayyor()
+    cid = company_id_of(request)
+    _sessiya_yoki_404(session_id, cid)
+    return [{"id": str(r["yuklama_id"]), "nom": r["original_nom"],
+             "ext": r["ext"], "mime": r["mime"],
+             "size_bytes": int(r["size_bytes"]), "holat": r["holat"],
+             "xato": r["xato"], "matn_belgi": r["matn_belgi"],
+             "sahifa_soni": r["sahifa_soni"],
+             "chunk_soni": int(r["chunk_soni"] or 0)}
+            for r in yuklama.chat_fayllari(session_id, cid)]
+
+
+@app.delete("/chat/sessions/{session_id}/fayl/{yuklama_id}", status_code=204)
+def chat_fayl_uz(session_id: str, yuklama_id: str, request: Request):
+    """Biriktirishni UZADI — faylni o'chirmaydi (§22)."""
+    _chat_tayyor()
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    _sessiya_yoki_404(session_id, cid)
+    yuklama.chatdan_uz(session_id, yuklama_id, cid)
+    audit_yoz(k, request, amal="chat_fayl_uzildi",
+              entity="chat_session", entity_id=0,
+              keyin={"session_id": session_id, "yuklama_id": yuklama_id})
+    return None
+
+
+@app.get("/chat/fayl/{yuklama_id}/download")
+def chat_fayl_download(yuklama_id: str, request: Request):
+    """Biriktirilgan faylni yuklab olish — ijarachi bilan."""
+    cid = company_id_of(request)
+    return _fayl_javobi(yuklama.ol(yuklama_id, cid), inline=False)
 
 
 @app.get("/chat/usage")

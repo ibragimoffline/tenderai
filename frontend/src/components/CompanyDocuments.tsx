@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { api } from '@/api'
+import { useEffect, useRef, useState } from 'react'
+import { api, faylniYuklabOl } from '@/api'
 import Icon from './Icon'
 import DocumentTemplate from './DocumentTemplate'
 import { useT } from '@/i18n'
@@ -40,8 +40,20 @@ import type { CompanyDocument, DocumentType } from '@/types'
 // matnidan emas — turning kanonik izohidan (`hint`) olinadi. Bazaviy turlar
 // (`base`) deyarli har tenderda so'raladi, qolganlari tenderga qarab.
 //
-// MVP CHEKLOVI: fayl YUKLASH yo'q. `file_ref` — tashqi havola yoki yo'l.
-// Cheklistning qiymati faylni saqlashda emas, TO'LIQLIKNI kuzatishda.
+// FAYL YUKLASH BOR (2026-09-06 dan). `file_ref` matn maydoni ESKI
+// qatorlar uchun qoldi va formada KO'RSATILMAYDI: unga mahalliy yo'l
+// yozilardi va u brauzerda ochilmasdi.
+//
+// `MAX_UPLOAD_MB` server bilan AYNI bo'lishi shart (`api/saqlash.py`).
+// Ikki joyda turgani yoqimsiz, lekin brauzer chegarani BILISHI kerak:
+// 25 MB ni yuborib keyin rad javobini kutish ma'nosiz. Server baribir
+// o'zi tekshiradi — bu qulaylik, himoya EMAS.
+const MAX_UPLOAD_MB = 25
+
+// `accept` — QULAYLIK. Foydalanuvchi dialogda faqat mos fayllarni
+// ko'radi, lekin uni chetlab o'tish oson va server HAR DOIM o'zi
+// tekshiradi (kengaytma + magic bayt).
+const QABUL_QILINADI = '.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip'
 const STATUS: Record<ItemStatus, { mark: string; text: TKey; cls: string }> = {
   ok: { mark: '✓', text: 'compliance.status.ok', cls: 'bg-ok-soft text-ok-strong' },
   expiring_soon: {
@@ -121,6 +133,9 @@ export default function CompanyDocuments({ focusType }: { focusType?: string | n
   const itemProps = {
     byType, onAdd: (code: string) => setEditing({ doc_type: code }),
     onEdit: setEditing as (d: CompanyDocument) => void, onRemove: confirmDelete.ask,
+    // Yuklab olish xatosi MAVJUD xato maydoniga chiqadi — yangi
+    // ko'rsatish joyi yasalmaydi.
+    onFaylXato: setError,
   }
 
   return (
@@ -254,7 +269,8 @@ export default function CompanyDocuments({ focusType }: { focusType?: string | n
                 {t('docs.otherDocs', { n: otherDocs.length })}
               </p>
               {otherDocs.map((d) => (
-                <DocumentRow key={d.id} doc={d} onEdit={itemProps.onEdit} onRemove={confirmDelete.ask} />
+                <DocumentRow key={d.id} doc={d} onEdit={itemProps.onEdit}
+                  onRemove={confirmDelete.ask} onFaylXato={setError} />
               ))}
             </div>
           )}
@@ -277,12 +293,13 @@ export default function CompanyDocuments({ focusType }: { focusType?: string | n
 // ============================================================================
 // Cheklistning bitta bandi: tur + "bazada bor / yo'q" belgisi + hujjatlar
 // ============================================================================
-function ChecklistItem({ type, byType, onAdd, onEdit, onRemove }: {
+function ChecklistItem({ type, byType, onAdd, onEdit, onRemove, onFaylXato }: {
   type: DocumentType
   byType: Map<string, CompanyDocument[]>
   onAdd: (code: string) => void
   onEdit: (d: CompanyDocument) => void
   onRemove: (d: CompanyDocument) => void
+  onFaylXato?: (matn: string) => void
 }) {
   const t = useT()
   const list = byType.get(type.code) || []
@@ -307,7 +324,10 @@ function ChecklistItem({ type, byType, onAdd, onEdit, onRemove }: {
           hammasi ko'rinadi, band holati esa eng yaroqlisi bo'yicha. */}
       {list.length > 0 && (
         <div className="mt-1 pl-7">
-          {list.map((d) => <DocumentRow key={d.id} doc={d} onEdit={onEdit} onRemove={onRemove} />)}
+          {list.map((d) => (
+            <DocumentRow key={d.id} doc={d} onEdit={onEdit} onRemove={onRemove}
+              onFaylXato={onFaylXato} />
+          ))}
         </div>
       )}
 
@@ -339,10 +359,14 @@ function ChecklistItem({ type, byType, onAdd, onEdit, onRemove }: {
 }
 
 // Bitta hujjat qatori — nomi, raqami, muddati va amallar
-function DocumentRow({ doc, onEdit, onRemove }: {
+function DocumentRow({ doc, onEdit, onRemove, onFaylXato }: {
   doc: CompanyDocument
   onEdit: (d: CompanyDocument) => void
   onRemove: (d: CompanyDocument) => void
+  /** Yuklab olish yiqilsa — xato YUQORIGA chiqadi.
+   *  `catch {}` bilan yutilsa foydalanuvchi tugmani bosardi va
+   *  hech narsa bo'lmasdi (aynan `file://` havolasidagi nuqson). */
+  onFaylXato?: (matn: string) => void
 }) {
   const t = useT()
   return (
@@ -370,9 +394,26 @@ function DocumentRow({ doc, onEdit, onRemove }: {
           {t('compliance.daysAgo', { n: Math.abs(doc.days_left) })}
         </span>
       )}
-      {doc.file_ref && (
+      {/* HAQIQIY FAYL — autentifikatsiyalangan yuklab olish.
+          `<a href>` EMAS: server yo'li brauzerga UMUMAN chiqmaydi va
+          so'rov sessiya bilan ketadi. */}
+      {doc.yuklama_id && (
+        <button type="button" title={t('docs.download')}
+          className="text-primary hover:underline"
+          onClick={() => {
+            faylniYuklabOl(`/company/documents/${doc.id}/download`,
+                           doc.file_name || 'hujjat')
+              .catch((e) => onFaylXato?.((e as Error).message))
+          }}>
+          <Icon name="external" size={11} />
+        </button>
+      )}
+      {/* ESKI QATOR: `file_ref` matn havolasi. Yangi hujjatlarda
+          yaratilmaydi, lekin 13 ta mavjud qator uchun ko'rsatiladi —
+          aks holda ular jimgina yo'qolardi. */}
+      {!doc.yuklama_id && doc.file_ref && (
         <a href={doc.file_ref} target="_blank" rel="noreferrer"
-          className="text-primary hover:underline" title={doc.file_ref}>
+          className="text-muted-foreground hover:underline" title={doc.file_ref}>
           <Icon name="external" size={11} />
         </a>
       )}
@@ -417,7 +458,16 @@ function DocumentForm({ doc, types, onSaved, onCancel }: {
   const [validUntil, setValidUntil] = useState(doc?.valid_until || '')
   const [perpetual, setPerpetual] = useState(!!doc?.id && !doc?.valid_until)
   const [fileName, setFileName] = useState(doc?.file_name || '')
-  const [fileRef, setFileRef] = useState(doc?.file_ref || '')
+  // ESKI QATORLAR UCHUN O'QILADI, LEKIN TAHRIRLANMAYDI: formada
+  // maydon yo'q, qiymat esa saqlashda YO'QOLMASLIGI kerak — aks
+  // holda mavjud 13 ta havola birinchi tahrirda o'chib ketardi.
+  const [fileRef] = useState(doc?.file_ref || '')
+  // TANLANGAN, LEKIN HALI YUBORILMAGAN fayl. Yuklash SAQLASHDAN KEYIN
+  // bo'ladi: `POST /company/documents/{id}/fayl` hujjat id sini talab
+  // qiladi va yangi hujjatda u hali yo'q.
+  const [fayl, setFayl] = useState<File | null>(null)
+  const [faylXato, setFaylXato] = useState<string | null>(null)
+  const faylRef = useRef<HTMLInputElement>(null)
   const [note, setNote] = useState(doc?.note || '')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -454,8 +504,24 @@ function DocumentForm({ doc, types, onSaved, onCancel }: {
       note: note.trim() || null,
     }
     try {
-      if (editing) await api.updateCompanyDocument(doc!.id, body)
-      else await api.createCompanyDocument(body)
+      const saqlangan = editing
+        ? await api.updateCompanyDocument(doc!.id, body)
+        : await api.createCompanyDocument(body)
+      // FAYL METAMA'LUMOTDAN KEYIN. Tartib ataylab: fayl yuklanib,
+      // metama'lumot saqlanmasa, diskda EGASIZ fayl qolardi.
+      if (fayl) {
+        try {
+          await api.uploadCompanyDocumentFile(saqlangan.id, fayl)
+        } catch (e) {
+          // HUJJAT SAQLANDI, FAYL YO'Q. Buni JIM O'TKAZIB
+          // YUBORMAYMIZ: foydalanuvchi "saqlandi" degan xabarni
+          // ko'rib, faylni yuklandi deb o'ylardi.
+          setMsg({ ok: false, text: (e as Error).message })
+          setSaving(false)
+          onSaved()
+          return
+        }
+      }
       onSaved()
     } catch (e) {
       setMsg({ ok: false, text: t('common.errorWith', { msg: (e as Error).message }) })
@@ -504,15 +570,55 @@ function DocumentForm({ doc, types, onSaved, onCancel }: {
         </label>
       </div>
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_2fr]">
-        <Label text={t('docs.fFileName')}>
-          <Input value={fileName} onChange={(e) => setFileName(e.target.value)}
-            placeholder="guvohnoma.pdf" />
+      {/* FAYL — foydalanuvchi SERVER YO'LINI yozmaydi.
+          Ilgari bu yerda `file_ref` matn maydoni turardi va unga
+          `file:///D:/...` kabi MAHALLIY yo'l yozilardi: brauzer
+          `http://` sahifadan `file://` ga o'tishni bloklaydi, ya'ni
+          havola bosilardi va HECH NARSA bo'lmasdi — xato ham
+          chiqmasdi. 13 ta bazaviy qatorda aynan shunday. */}
+      <div className="mb-4">
+        <Label text={t('docs.fFile')}>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={faylRef} type="file" className="sr-only"
+              accept={QABUL_QILINADI}
+              onChange={(e) => {
+                const f = e.target.files?.[0] || null
+                setFaylXato(null)
+                if (f && f.size > MAX_UPLOAD_MB * 1024 * 1024) {
+                  // CHEGARA BRAUZERDA HAM: server baribir tekshiradi
+                  // (`_yuklangani`), lekin 25 MB ni yuborib keyin rad
+                  // javobini kutish foydalanuvchi uchun ma'nosiz.
+                  setFaylXato(t('err.FILE_TOO_LARGE', { max_mb: MAX_UPLOAD_MB }))
+                  setFayl(null)
+                  return
+                }
+                setFayl(f)
+                if (f) setFileName(f.name)
+              }} />
+            <Button type="button" variant="outline" size="sm"
+              onClick={() => faylRef.current?.click()}>
+              {t('docs.chooseFile')}
+            </Button>
+            <span className="text-caption text-muted-foreground">
+              {fayl ? `${fayl.name} · ${(fayl.size / 1024).toFixed(0)} KB`
+                    : (doc?.yuklama_id ? (doc.file_name || t('docs.hasFile'))
+                                       : t('docs.noFile'))}
+            </span>
+            {fayl && (
+              <button type="button" className="text-caption underline"
+                onClick={() => { setFayl(null); if (faylRef.current) faylRef.current.value = '' }}>
+                {t('common.cancel')}
+              </button>
+            )}
+          </div>
         </Label>
-        <Label text={t('docs.fFileRef')}>
-          <Input value={fileRef} onChange={(e) => setFileRef(e.target.value)}
-            placeholder={t('docs.refPlaceholder')} />
-        </Label>
+        {faylXato && (
+          <p className="mt-1 text-caption text-urgent-strong">{faylXato}</p>
+        )}
+        <p className="mt-1 text-caption text-muted-foreground">
+          {t('docs.fileHint', { max_mb: MAX_UPLOAD_MB })}
+        </p>
       </div>
 
       <Label text={t('docs.fNote')}>

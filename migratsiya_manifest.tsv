@@ -101,3 +101,4 @@
 820	0080_chat_manba	schema_patch_chat_manba.sql
 830	0081_chat_tiklash	schema_patch_chat_tiklash.sql
 840	0082_chat_tiklash_2	schema_patch_chat_tiklash_2.sql
+850	0083_yuklama	schema_patch_yuklama.sql

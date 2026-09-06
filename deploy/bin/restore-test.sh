@@ -126,6 +126,40 @@ muammo=0
 N_VEC="$(jadval "SELECT count(*) FROM pg_extension WHERE extname='vector'")"
 [ "$N_VEC" = "1" ] || { log "XATO: pgvector kengaytmasi tiklanmadi"; muammo=1; }
 
+# --- YUKLANGAN FAYLLAR — BAZA YOLG'IZ YETARLI EMAS --------------------------
+#
+# `yuklama` jadvali tiklanadi, lekin FIZIK FAYL diskda. Ikkisi ajralib
+# qolsa tizim eng yomon shaklda buziladi: interfeys hujjatni "bor"
+# deb ko'rsatadi, foydalanuvchi bosadi va FAYL TOPILMAYDI. Bu faqat
+# bosilganda bilinadi — ya'ni tiklashdan keyin ham UZOQ vaqt
+# ko'rinmasligi mumkin.
+#
+# Shuning uchun mashq FAYL ARXIVINI ham tekshiradi. Arxiv nomi baza
+# dump'i bilan AYNI shtamp bo'yicha topiladi.
+FAYL_ARXIV="${ZAXIRA%.dump}-fayllar.tar.gz"
+N_YUKLAMA="$(jadval "SELECT count(*) FROM yuklama WHERE arxiv_at IS NULL")"
+if [ "$N_YUKLAMA" -gt 0 ]; then
+    if [ ! -f "$FAYL_ARXIV" ]; then
+        log "XATO: bazada $N_YUKLAMA ta faol yuklama bor, FAYL ARXIVI yo'q"
+        log "  ($FAYL_ARXIV). Tiklangan tizimda hujjatlar OCHILMAYDI."
+        muammo=1
+    else
+        if [ -f "${FAYL_ARXIV}.sha256" ]            && ! sha256sum -c "${FAYL_ARXIV}.sha256" >/dev/null 2>&1; then
+            log "XATO: fayl arxivi sha256 MOS KELMADI"
+            muammo=1
+        fi
+        N_FAYL="$(tar -tzf "$FAYL_ARXIV" 2>/dev/null | grep -cv '/$' || echo 0)"
+        log "fayl arxivi: $N_FAYL ta fayl, bazada $N_YUKLAMA ta yozuv"
+        # ANIQ TENGLIK TALAB QILINMAYDI: arxiv olingandan keyin yangi
+        # fayl yuklangan bo'lishi mumkin va bu NORMAL. Lekin BO'SH
+        # arxiv — aniq nuqson.
+        [ "$N_FAYL" -gt 0 ] || {
+            log "XATO: fayl arxivi BO'SH"; muammo=1; }
+    fi
+else
+    log "yuklangan fayl yo'q — fayl arxivi tekshirilmadi"
+fi
+
 if [ "$muammo" -ne 0 ]; then
     xato "TIKLASH MASHQI OTMADI"
 fi

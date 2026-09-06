@@ -435,9 +435,21 @@ def test_tiklash_olchovi(db):
         print("        [i] 3 ta bo'sh sessiya yo'q — namuna sinovi o'tkazilmadi")
 
     # IDOR JUFTLIGI + takroriy chaqiruv.
+    #
+    # `company_id = 2` SHART QILIB QO'YILDI (2026-09-06). Ilgari
+    # nomzod filtrsiz `LIMIT 1` bilan tanlanardi, quyidagi shart esa
+    # egasi AYNAN 2 ekaniga tayanardi (`tiklash_qayd(sid, 2, ...)`).
+    # Bazada BOSHQA ijarachining sessiyasi paydo bo'lgach nomzod
+    # o'shanikiga tushdi va TO'RTTA shart yiqildi -- kod TO'G'RI edi,
+    # u begona yozuvni ATAYLAB rad etgan.
+    #
+    # Bu `requirement_test` dagi bilan AYNI sinf: aytilmagan shart +
+    # tartibsiz `LIMIT 1`. `ORDER BY id` ham qo'shildi: nomzodni
+    # Postgres rejasi emas, sinov tanlasin.
     sid = db.scalar("SELECT id::text FROM chat_session "
                     "WHERE manba IS DISTINCT FROM 'eval' AND NOT archived "
-                    "  AND tiklandi_at IS NULL LIMIT 1")
+                    "  AND company_id = 2 "
+                    "  AND tiklandi_at IS NULL ORDER BY id LIMIT 1")
     if not sid:
         print("        [i] belgisiz sessiya yo'q — tekshiruv o'tkazilmadi")
         return

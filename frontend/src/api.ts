@@ -1,7 +1,8 @@
 // Backend API qatlami — barcha so'rovlar shu yerdan o'tadi.
 // Bazaviy manzil .env dagi VITE_API_BASE dan (zaxira: `/api`, same-origin).
 import type {
-  AiMatchResult, CatalogMatchResponse, Category, CompanyDocument,
+  AiMatchResult, CatalogMatchResponse, Category, ChatFayl, CompanyDocument,
+  FaylHolat,
   CompanyProfileData, ComplianceResult,
   DocumentTextResult, DocumentType, Freshness, GoNoGoResult, Paged, PricingInputs,
   PricingSaved, Product, ProductSuggestion, Region, SavedSearch, Stats, Status,
@@ -125,6 +126,99 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
 export const apiUrl = (path?: string): string =>
   path?.startsWith('/') ? BASE + path : (path ?? '')
 
+/** SERVER XATOSINI BIR JOYDA o'qiydi va `ApiError` ko'taradi.
+ *
+ * NEGA AJRATILDI: `request()`, `yuborFayl()` va `faylniYuklabOl()` —
+ * uchalasi ham server javobini bir xil o'qishi kerak. Uch nusxa
+ * bo'lsa biri kodli javobni (`{error:{code,params}}`) qo'llab, ikkinchisi
+ * qo'llamay qolardi va foydalanuvchi bir joyda tarjima qilingan xabar,
+ * boshqa joyda xom matn ko'rardi. Bu loyihada shunga o'xshash
+ * ajralish allaqachon bo'lgan.
+ */
+async function xatoniKotar(res: Response): Promise<never> {
+  let detail = res.statusText
+  let raw: unknown = null
+  let kod: string | undefined
+  let params: Record<string, unknown> | undefined
+  let fields: { field: string; code: string }[] | undefined
+  let tashxis: string | undefined
+  let kodli = false
+  try {
+    const b = await res.json()
+    raw = b.detail
+    const xato = b.error
+    // KODLI JAVOB (20-vazifadan keyin server shunday qaytaradi):
+    // matn SHU YERDA, foydalanuvchi tilida yig'iladi. Ilgari
+    // server o'zbekcha jumla yuborardi va u rus/ingliz
+    // interfeysiga o'zbekcha yetib borardi.
+    if (xato && typeof xato === 'object' && typeof xato.code === 'string') {
+      kod = xato.code
+      params = (xato.params || {}) as Record<string, unknown>
+      fields = xato.fields
+      tashxis = xato.diagnostic_id || undefined
+      detail = xatoMatni(kod!, params as TVars)
+      kodli = true
+    } else {
+      detail = errMatn(b.detail) || (typeof xato === 'string' ? xato : '')
+        || detail
+    }
+  } catch { /* JSON emas — masalan proksi bergan HTML */ }
+  const ra = Number(res.headers.get('Retry-After'))
+  // KODSIZ javobda holat raqami MATNDA qoladi: u yagona
+  // ma'lumot va uni yashirsak xato "sababsiz" ko'rinardi.
+  throw new ApiError(kodli ? detail : `${res.status}: ${detail}`,
+    res.status, raw, Number.isFinite(ra) && ra > 0 ? ra : undefined,
+    kod, params, fields, tashxis)
+}
+
+/** FAYL YUBORISH — `FormData`, xom `fetch`.
+ *
+ * NEGA `request()` EMAS: u tanani `JSON.stringify` qiladi va
+ * `Content-Type: application/json` qo'yadi. `FormData` da sarlavhani
+ * BRAUZER qo'yishi kerak, chunki unda multipart chegara satri bor.
+ * Uni qo'lda yozish so'rovni jimgina buzadi — server "fayl yo'q"
+ * deydi va sabab ko'rinmaydi.
+ */
+async function yuborFayl<T>(path: string, f: File): Promise<T> {
+  const fd = new FormData()
+  fd.append('file', f)
+  const res = await fetch(apiUrl(path), {
+    method: 'POST', body: fd,
+    headers: authHeaders(),        // faqat CSRF; Content-Type YO'Q
+    credentials: 'include',
+  })
+  // XATO KODI SAQLANADI: chaqiruvchi `err.FILE_TOO_LARGE` kabi
+  // tarjimani ko'rsatsin, xom matnni emas (§25).
+  if (!res.ok) await xatoniKotar(res)
+  return (await res.json()) as T
+}
+
+/** YUKLAB OLISH — `blob` orqali.
+ *
+ * ODDIY `<a href>` ISHLATILMAYDI: `BASE` boshqa originda bo'lishi
+ * mumkin (masalan `/api` proksisi yoki alohida domen) va o'sha holda
+ * top-level navigatsiyada sessiya cookie'si yuborilmasligi mumkin —
+ * foydalanuvchi fayl o'rniga 401 sahifasini ko'rardi. `fetch` esa
+ * `credentials: 'include'` bilan aniq ishlaydi va xatoni TUTADI.
+ */
+export async function faylniYuklabOl(path: string, nom: string): Promise<void> {
+  const res = await fetch(apiUrl(path), {
+    method: 'GET', credentials: 'include', headers: authHeaders(),
+  })
+  if (!res.ok) await xatoniKotar(res)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nom
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // Darhol `revoke` qilish ba'zi brauzerlarda yuklashni UZADI —
+  // bosishdan keyin bir marta navbatga qo'yamiz.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
 /** FastAPI 422 validatsiya xatosining bir elementi */
 interface ValidationIssue {
   loc?: (string | number)[]
@@ -239,39 +333,7 @@ async function request<T>(
       setToken(null)
       onUnauthorized?.()
     }
-    let detail = res.statusText
-    let raw: unknown = null
-    let kod: string | undefined
-    let params: Record<string, unknown> | undefined
-    let fields: { field: string; code: string }[] | undefined
-    let tashxis: string | undefined
-    let kodli = false
-    try {
-      const b = await res.json()
-      raw = b.detail
-      const xato = b.error
-      // KODLI JAVOB (20-vazifadan keyin server shunday qaytaradi):
-      // matn SHU YERDA, foydalanuvchi tilida yig'iladi. Ilgari
-      // server o'zbekcha jumla yuborardi va u rus/ingliz
-      // interfeysiga o'zbekcha yetib borardi.
-      if (xato && typeof xato === 'object' && typeof xato.code === 'string') {
-        kod = xato.code
-        params = (xato.params || {}) as Record<string, unknown>
-        fields = xato.fields
-        tashxis = xato.diagnostic_id || undefined
-        detail = xatoMatni(kod!, params as TVars)
-        kodli = true
-      } else {
-        detail = errMatn(b.detail) || (typeof xato === 'string' ? xato : '')
-          || detail
-      }
-    } catch { /* JSON emas — masalan proksi bergan HTML */ }
-    const ra = Number(res.headers.get('Retry-After'))
-    // KODSIZ javobda holat raqami MATNDA qoladi: u yagona
-    // ma'lumot va uni yashirsak xato "sababsiz" ko'rinardi.
-    throw new ApiError(kodli ? detail : `${res.status}: ${detail}`,
-      res.status, raw, Number.isFinite(ra) && ra > 0 ? ra : undefined,
-      kod, params, fields, tashxis)
+    await xatoniKotar(res)
   }
   // 204 No Content — TANA BO'SH. DELETE va /catalog/seen shunday javob beradi.
   // Shartsiz res.json() chaqirilsa bu yerda SyntaxError chiqadi va chaqiruvchi
@@ -533,6 +595,32 @@ export const api = {
     request<CompanyDocument>('PUT', `/company/documents/${id}`, { body }),
   deleteCompanyDocument: (id: number) =>
     request<null>('DELETE', `/company/documents/${id}`),
+
+  // --- HAQIQIY FAYL: yuklash, holat, yuklab olish ---
+  //
+  // `request()` EMAS, xom `fetch`: u tanani JSON qilib yuboradi va
+  // `FormData` bilan `Content-Type` ni brauzer O'ZI qo'yishi kerak
+  // (chegara satri bilan). Qo'lda qo'ysak multipart buziladi.
+  uploadCompanyDocumentFile: (id: number, f: File) =>
+    yuborFayl<CompanyDocument & { fayl: FaylHolat }>(
+      `/company/documents/${id}/fayl`, f),
+  companyDocumentFile: (id: number) =>
+    request<FaylHolat | null>('GET', `/company/documents/${id}/fayl`),
+
+  // --- AI chat biriktirmalari ---
+  //
+  // BO'SH SESSIYA fayl biriktirishdan OLDIN yaratiladi: yuklash
+  // `session_id` ni talab qiladi, sessiya esa ilgari faqat birinchi
+  // savolda paydo bo'lardi.
+  createChatSession: (body: { tender_id?: number | null; lang?: string
+                              manba?: string | null }) =>
+    request<{ session_id: string }>('POST', '/chat/sessions', { body }),
+  chatFiles: (sessionId: string) =>
+    request<ChatFayl[]>('GET', `/chat/sessions/${sessionId}/fayl`),
+  chatUploadFile: (sessionId: string, f: File) =>
+    yuborFayl<FaylHolat>(`/chat/sessions/${sessionId}/fayl`, f),
+  chatDetachFile: (sessionId: string, fileId: string) =>
+    request<null>('DELETE', `/chat/sessions/${sessionId}/fayl/${fileId}`),
 
   // --- P0-10: bildirishnoma (email + Telegram) ---
   notifySettings: () => request<NotifySettingsData>('GET', '/notify/settings'),

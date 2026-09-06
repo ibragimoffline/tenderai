@@ -572,6 +572,37 @@ export interface CompanyDocument {
   note: Nullable<string>
   status: 'ok' | 'expiring_soon' | 'expired'
   days_left: Nullable<number>
+  /** Biriktirilgan HAQIQIY fayl. `null` = eski qator (`file_ref` matn). */
+  yuklama_id?: Nullable<string>
+}
+
+/** YUKLANGAN FAYL HOLATI — serverdagi `yuklama.holat` bilan AYNI.
+ *
+ * `too_large` ATAYLAB YO'Q: chegara saqlashdan OLDIN ishlaydi va
+ * bunday qator hech qachon yaratilmaydi. Uni ro'yxatga qo'shish
+ * "bunday holat bo'lishi mumkin" degan yolg'on berardi.
+ *
+ * `yuklandi`/`ajratilmoqda` — ikkalasi ham UI da "Ishlanmoqda".
+ * `tayyor` FAQAT matn HAQIQATAN ajratilganda keladi (§17).
+ */
+export type FaylHolatKod =
+  | 'yuklandi' | 'ajratilmoqda' | 'tayyor'
+  | 'qollab_quvvatlanmaydi' | 'oqilmadi' | 'yiqildi'
+
+export interface FaylHolat {
+  id: string
+  nom: string
+  ext: Nullable<string>
+  mime: Nullable<string>
+  size_bytes: number
+  holat: FaylHolatKod
+  xato: Nullable<string>
+  matn_belgi: Nullable<number>
+  sahifa_soni: Nullable<number>
+}
+
+export interface ChatFayl extends FaylHolat {
+  chunk_soni: number
 }
 
 export interface ComplianceItem {

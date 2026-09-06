@@ -296,6 +296,41 @@ Jadval soni 10 dan kam bo'lsa dump **o'chiriladi** — shubhali.
 > yurgandan keyin ma'lum bo'ladi. Bu yerda taxminiy raqam
 > yozilmaydi.
 
+### Yuklangan fayllar — **baza yolg'iz yetarli emas**
+
+`pg_dump` faqat bazani oladi. Foydalanuvchi yuklagan hujjat esa
+**diskda** (`UPLOAD_ROOT`) va bazada faqat kalit saqlanadi. Ikkisi
+ajralib qolsa tizim eng yomon shaklda buziladi: interfeys hujjatni
+"bor" deb ko'rsatadi, foydalanuvchi bosadi va **fayl topilmaydi** —
+ya'ni yo'qotish faqat bosilganda bilinadi.
+
+Shuning uchun `backup.sh` **ikkinchi arxiv** yasaydi:
+
+```
+tenderai-<muhit>-<stamp>.dump                 baza
+tenderai-<muhit>-<stamp>-fayllar.tar.gz       yuklangan fayllar
+```
+
+Ikkalasi ham `.sha256` bilan va ikkalasi ham `BACKUP_REMOTE_CMD`
+orqali uzoqqa ketadi.
+
+**Bo'sh arxiv jim o'tmaydi.** `backup.sh` bazadagi faol `yuklama`
+soni bilan arxivdagi fayl sonini solishtiradi: bazada fayl bor-u
+arxiv bo'sh bo'lsa — **xato bilan to'xtaydi**. Aks holda noto'g'ri
+`UPLOAD_ROOT` bilan zaxira yashil ko'rinardi.
+
+`restore-test.sh` mashqda fayl arxivini ham tekshiradi: mavjudligi,
+SHA-256 va bo'sh emasligi.
+
+> **`UPLOAD_ROOT` reliz ichida bo'lmasin.** `deploy.sh` har relizda
+> **yangi katalog** yasaydi; yo'l reliz ichida bo'lsa fayllar keyingi
+> joylashtiruvda ko'rinmay qoladi. Ishlab chiqarishda:
+> `UPLOAD_ROOT=/var/lib/tenderai/uploads`. `backup.sh` yo'l reliz
+> ichida ekanini sezsa **ogohlantiradi**.
+
+Batafsil: [`docs/fayl_yuklash.md`](fayl_yuklash.md).
+
+
 ---
 
 ## 9. Jurnal
