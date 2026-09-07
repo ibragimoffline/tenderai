@@ -461,6 +461,34 @@ yarat)
         exit 1
     fi
     log "0071_topshiriq TASDIQLANDI (jurnal + sxema)"
+
+    # --- ESKI SINOV HISOBLARI — NUSXADA, AYTIB TOZALANADI -------------------
+    # `zztest_*` va `zzyuklama_*` — sinovlar yaratadigan kompaniyalar.
+    # Sinovlarning O'ZI ularni oxirida faolsizlantiradi
+    # (`topshiriq_test`, `yuklama_test:839`), lekin YIQILGAN yurish
+    # buni bajarmaydi va hisob FAOL qolib ketadi.
+    #
+    # O'LCHANGAN OQIBAT: staging da 4 ta faol qoldiq (id 8..11) va
+    # ular `sole_company_id()` ga tayangan to'plamlarni yiqitardi —
+    # ya'ni bir sinovning qoldig'i boshqalarini o'ldirardi.
+    #
+    # BU YERDA — NUSXADA. `tenderai_staging` ga TEGILMAYDI: darvoza
+    # o'lchov vositasi, tozalash vositasi emas.
+    #
+    # JIM EMAS. Topilgan har bir qoldiq NOMI bilan chiqadi: jimgina
+    # tozalash buzuq fixture hayot siklini abadiy yashirardi.
+    QOLDIQ="$(psql "$NISHON_OWNER" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT string_agg(username, ', ' ORDER BY id)
+           FROM company_account WHERE username LIKE 'zz%' AND active")"
+    if [ -n "$QOLDIQ" ]; then
+        log "NUSXADA eski sinov hisoblari: $QOLDIQ"
+        log "  (sabab: yiqilgan yurish tozalamagan; nusxada o'chiriladi)"
+        psql "$NISHON_OWNER" -v ON_ERROR_STOP=1 -qtA -c \
+            "UPDATE company_account SET active = false
+              WHERE username LIKE 'zz%' AND active" >/dev/null
+    else
+        log "nusxada eski sinov hisobi yo'q"
+    fi
     MUVAFFAQIYAT=1
 
     # YAGONA STDOUT YOZUVI. Bundan yuqoridagi hamma narsa stderr ga
@@ -492,9 +520,71 @@ sinov)
         exit 2
     fi
     log "sinov bazasi: $BAZA  rol: ${SINOV_ROL:-ANIQLANMADI}"
+
+    # --- MUHIT SHARTNOMASI ------------------------------------------------
+    # `aktor_test`, `inson_dalil_test`, `xavfsizlik_test` ilovaning
+    # ishga tushish tekshiruvini chaqiradi va u `APP_PUBLIC_URL` ni
+    # TALAB qiladi. Darvoza jarayoniga u YETIB KELMASA uchala to'plam
+    # "APP_PUBLIC_URL=https://<domen> kerak" bilan yiqiladi —
+    # holbuki sabab KODDA emas, uzatilmagan o'zgaruvchida.
+    #
+    # QIYMAT O'YLAB TOPILMAYDI. Bu yerda soxta URL qo'yish
+    # `xavfsizlik_test` ni ALDAB yashil qilardi — u aynan URL
+    # siyosatini o'lchaydi. Shuning uchun yo'q bo'lsa TO'XTAYMIZ va
+    # NIMA yetishmayotganini aytamiz.
+    if [ -z "${APP_PUBLIC_URL:-}" ]; then
+        echo "XATO: darvoza jarayoniga APP_PUBLIC_URL yetib kelmadi." >&2
+        echo "      Usiz aktor_test, inson_dalil_test va xavfsizlik_test" >&2
+        echo "      ilovaning ishga tushish tekshiruvida yiqiladi — sabab" >&2
+        echo "      KODDA emas, uzatilmagan o'zgaruvchida." >&2
+        echo "      Qiymat SIR EMAS; o'rama uni uzatishi kerak:" >&2
+        echo "        APP_PUBLIC_URL, AUTH_COOKIE_SECURE" >&2
+        echo "      Soxta qiymat QO'YILMAYDI: xavfsizlik_test aynan URL" >&2
+        echo "      siyosatini o'lchaydi va aldangan yashil bermasin." >&2
+        exit 1
+    fi
+
+    # --- SIZISH QO'RIQCHISI: OLDIN --------------------------------------
+    OLDIN="$(psql "$SINOV_DSN" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT count(*) FROM company_account
+          WHERE username LIKE 'zz%' AND active")"
+    log "sinovdan OLDIN faol zz* hisoblar: $OLDIN"
+    if [ "$OLDIN" != "0" ]; then
+        echo "XATO: sinov boshlanishidan OLDIN faol qoldiq bor ($OLDIN)." >&2
+        echo "      Nusxa tozalanmagan — darvoza natijasi ishonchsiz." >&2
+        exit 1
+    fi
+
     cd "$ILDIZ_TOLIQ"
-    XT_DB_DSN="$SINOV_DSN" APP_ENV=staging \
+    # IMTIYOZ AJRATILGAN: oddiy to'plamlar `XT_DB_DSN` (ilova roli)
+    # bilan yuradi; `XT_DB_DSN_TEST_ADMIN` ham uzatiladi, lekin undan
+    # FAQAT `migratsiya_test` ning baza yaratish/tashlash yordamchisi
+    # foydalanadi (`_admin_kon()`). Butun to'plam admin roliga
+    # O'TMAYDI.
+    ADMIN_DSN="$(dsn_baza "${XT_DB_DSN_TEST_ADMIN:-}" "postgres")"
+    set +e
+    XT_DB_DSN="$SINOV_DSN" \
+    XT_DB_DSN_TEST_ADMIN="$ADMIN_DSN" \
+    APP_ENV=staging \
+    APP_PUBLIC_URL="$APP_PUBLIC_URL" \
+    AUTH_COOKIE_SECURE="${AUTH_COOKIE_SECURE:-1}" \
         "${PY:-python3}" run_tests.py
+    SINOV_KOD=$?
+    set -e
+
+    # --- SIZISH QO'RIQCHISI: KEYIN --------------------------------------
+    # Sinovlar yiqilgan bo'lsa ham o'lchanadi: sizish AYRIM nosozlik
+    # va u yiqilish bilan birga yashirinib qolmasin.
+    KEYIN="$(psql "$SINOV_DSN" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT count(*) FROM company_account
+          WHERE username LIKE 'zz%' AND active")"
+    log "sinovdan KEYIN faol zz* hisoblar: $KEYIN"
+    if [ "$KEYIN" != "0" ]; then
+        echo "XATO: sinov FAOL qoldiq qoldirdi ($KEYIN) — fixture sizishi." >&2
+        echo "      Bu 'jimgina tozalab, PASS' bo'lmaydi: darvoza YIQILADI." >&2
+        exit 1
+    fi
+    exit "$SINOV_KOD"
     ;;
 
 tozala)
