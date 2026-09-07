@@ -106,6 +106,79 @@ if [ -z "$PY" ]; then
 fi
 
 psql_() { psql "$XT_DB_DSN_TEST_ADMIN" -v ON_ERROR_STOP=1 -qtA "$@"; }
+
+# --- TO'LIQ DARAXT: DARVOZA ILDIZDAGI FAYLLARGA MUHTOJ ----------------------
+# O'ramaning arxivi `deploy` bilan CHEKLANGAN (`git archive "$SHA" deploy`),
+# darvoza esa ildizdagi `migratsiya.py` va `run_tests.py` ga muhtoj.
+#
+# O'LCHANGAN NUQSON (2026-09-07): nusxa muvaffaqiyatli olingandan
+# KEYIN migratsiya qadami
+#
+#     python3: can't open file '/tmp/tender-darvoza.XXXX/migratsiya.py'
+#
+# bilan yiqildi — ya'ni nosozlik BAZA YARATILGANDAN keyin chiqdi va
+# darvoza bazasi qolib ketdi.
+#
+# YECHIM AYNI SNAPSHOTDAN. O'rama `RELEASE_SHA` ni eksport qiladi,
+# ya'ni biz TAXMIN QILMAYMIZ: ayni o'sha o'zgarmas kommitdan to'liq
+# daraxtni ochamiz. `main` QAYTA O'QILMAYDI — u harakatlanuvchi va
+# uni bu yerda ishlatish "bir snapshot" invariantini buzardi.
+ILDIZ_TOLIQ="${ILDIZ}"
+darvoza_ildiz() {
+    # Kerakli fayllar shu daraxtda bormi?
+    _yetarli() {
+        [ -f "$1/migratsiya.py" ] && [ -f "$1/run_tests.py" ] \
+            && [ -f "$1/migratsiya_manifest.tsv" ] \
+            && [ -d "$1/api" ] && [ -d "$1/_tests" ]
+    }
+    if _yetarli "$ILDIZ"; then ILDIZ_TOLIQ="$ILDIZ"; return 0; fi
+
+    if [ -n "${RELEASE_SHA:-}" ]; then
+        local repo="${TENDERAI_REPO:-/opt/tenderai/repo.git}"
+        local kat="${ILDIZ}/.toliq"
+        mkdir -p "$kat"
+        log "arxiv faqat deploy/ ni o'z ichiga olgan — to'liq daraxt ochilmoqda"
+        log "manba: $repo @ ${RELEASE_SHA}"
+        if git --git-dir="$repo" archive "$RELEASE_SHA" | tar -x -C "$kat" 2>/dev/null \
+           && _yetarli "$kat"; then
+            ILDIZ_TOLIQ="$kat"
+            log "to'liq daraxt tayyor"
+            return 0
+        fi
+    fi
+
+    # BAZA YARATILISHIDAN OLDIN TO'XTAYMIZ. Yetishmagan fayl NOMMA-NOM
+    # aytiladi: "can't open file" degan xabar qaysi qadam yiqilganini
+    # ham, nima yetishmayotganini ham tushuntirmasdi.
+    echo "XATO: darvoza uchun zarur fayllar YO'Q." >&2
+    for f in migratsiya.py run_tests.py migratsiya_manifest.tsv api _tests; do
+        [ -e "${ILDIZ}/$f" ] || echo "      yetishmaydi: $f" >&2
+    done
+    echo "      RELEASE_SHA='${RELEASE_SHA:-<berilmagan>}'" >&2
+    echo "      O'rama arxivi to'liq daraxtni chiqarishi kerak:" >&2
+    echo "      git archive \"\$SHA\"   (\`deploy\` cheklovisiz)" >&2
+    exit 1
+}
+
+# --- YIQILSA DARVOZA BAZASI QOLMASIN ----------------------------------------
+# Ilgari faqat `pg_restore` yiqilganda tashlanardi. Migratsiya yoki
+# 0071 tasdig'i yiqilsa baza QOLIB KETARDI — o'lchandi
+# (`tenderai_gate_20260907_215231`) va uni qo'lda tozalashga to'g'ri keldi.
+#
+# `MUVAFFAQIYAT` faqat HAMMA qadam o'tgach qo'yiladi. `yarat` muvaffaqiyatli
+# tugasa baza ATAYLAB QOLADI — keyingi `sinov "$GATE"` unga muhtoj.
+DARVOZA_YARATILDI=0
+MUVAFFAQIYAT=0
+DARVOZA_NOM=""
+tozalash_tuzogi() {
+    kod=$?
+    if [ "$DARVOZA_YARATILDI" = "1" ] && [ "$MUVAFFAQIYAT" != "1" ] \
+       && [ -n "$DARVOZA_NOM" ]; then
+        log "yiqildi -> darvoza bazasi tashlanmoqda: $DARVOZA_NOM"
+        psql_ -c "DROP DATABASE IF EXISTS ${DARVOZA_NOM}" >/dev/null 2>&1 || true
+    fi
+    exit "$kod"          # ASL chiqish kodi saqlanadi
+}
 # JURNAL STDERR GA. `yarat` ning STDOUT i — MASHINA O'QIYDIGAN
 # KANAL: u faqat bitta qator, darvoza bazasining nomini beradi.
 #
@@ -159,12 +232,19 @@ yarat)
     esac
     : "${XT_DB_DSN_OWNER:?nusxa uchun XT_DB_DSN_OWNER kerak (muhit faylida)}"
 
+    # FAYLLAR BAZADAN OLDIN TEKSHIRILADI: yetishmasa hech narsa
+    # yaratilmaydi va tozalaydigan narsa ham qolmaydi.
+    darvoza_ildiz
+    trap tozalash_tuzogi EXIT
+
     YANGI="${DARVOZA_PREFIKS}$(date +%Y%m%d_%H%M%S)"
     nom_tekshir "$YANGI"
+    DARVOZA_NOM="$YANGI"
 
     log "manba : $MANBA"
     log "nishon: $YANGI"
     psql_ -c "CREATE DATABASE ${YANGI} ENCODING 'UTF8'" >/dev/null
+    DARVOZA_YARATILDI=1
     log "baza yaratildi"
 
     # NUSXA — `pg_dump | pg_restore` OQIM bilan: 27 MB+ oraliq fayl
@@ -179,8 +259,7 @@ yarat)
                       --exit-on-error 2>/tmp/darvoza-restore.$$; then
         tail -20 /tmp/darvoza-restore.$$ >&2 || true
         rm -f /tmp/darvoza-restore.$$
-        psql_ -c "DROP DATABASE IF EXISTS ${YANGI}" >/dev/null
-        echo "XATO: nusxa olinmadi — darvoza bazasi tashlandi." >&2
+        echo "XATO: nusxa olinmadi — darvoza bazasi tuzoq orqali tashlanadi." >&2
         exit 1
     fi
     rm -f /tmp/darvoza-restore.$$
@@ -190,7 +269,7 @@ yarat)
     # butunlay chetda qoladi va tiqilinchning ma'nosi shu.
     log "migratsiya qo'llanmoqda…"
     # Migratsiya yurgizuvchisi ko'p qator chop etadi — STDERR ga.
-    "${PY:-python3}" "${ILDIZ}/migratsiya.py" --qolla --dsn "$NISHON_OWNER" >&2
+    "${PY:-python3}" "${ILDIZ_TOLIQ}/migratsiya.py" --qolla --dsn "$NISHON_OWNER" >&2
 
     # 0071 TASDIG'I — jurnalga ISHONMAYMIZ, SO'RAYMIZ.
     QOLLANGAN="$(psql "$NISHON_OWNER" -qtA -c \
@@ -200,7 +279,17 @@ yarat)
         echo "XATO: 0071_topshiriq qo'llanmadi (topildi: $QOLLANGAN)" >&2
         exit 1
     fi
-    log "0071_topshiriq TASDIQLANDI"
+    # SXEMA SHARTI — jurnalning O'ZI yetarli emas. `0071` jadval
+    # yaratadi; jurnalda yozuv bo'lib, jadval bo'lmasligi mumkin
+    # (patch ichida `RETURN` bo'lsa). Shuning uchun IKKALASI ham.
+    JADVAL="$(psql "$NISHON_OWNER" -qtA -c \
+        "SELECT to_regclass('public.tender_topshiriq') IS NOT NULL" 2>/dev/null || echo f)"
+    if [ "$JADVAL" != "t" ]; then
+        echo "XATO: 0071 jurnalda bor, lekin \`tender_topshiriq\` jadvali YO'Q." >&2
+        exit 1
+    fi
+    log "0071_topshiriq TASDIQLANDI (jurnal + sxema)"
+    MUVAFFAQIYAT=1
 
     # YAGONA STDOUT YOZUVI. Bundan yuqoridagi hamma narsa stderr ga
     # ketdi, ya'ni `$(...)` aynan shu qatorni oladi.
@@ -219,8 +308,9 @@ sinov)
     nom_tekshir "$BAZA"
     : "${XT_DB_DSN:?sinov uchun XT_DB_DSN kerak (ilova roli)}"
     SINOV_DSN="$(dsn_baza "$XT_DB_DSN" "$BAZA")"
+    darvoza_ildiz
     log "sinov bazasi: $BAZA  (ilova roli)"
-    cd "$ILDIZ"
+    cd "$ILDIZ_TOLIQ"
     XT_DB_DSN="$SINOV_DSN" APP_ENV=staging \
         "${PY:-python3}" run_tests.py
     ;;
