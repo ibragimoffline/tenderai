@@ -51,6 +51,16 @@ DARVOZA_PREFIKS="tenderai_gate_"
 
 nom_tekshir() {
     local n="$1"
+    # BEGONA BELGI YO'Q. Glob dagi `*` YANGI QATORNI HAM oladi,
+    # ya'ni "tenderai_gate_1\nDROP DATABASE ..." naqshga TUSHARDI.
+    # Shuning uchun avval belgilar to'plami qattiq tekshiriladi:
+    # faqat kichik harf, raqam va pastki chiziq.
+    case "$n" in
+        *[!0-9a-z_]*)
+            echo "XATO: nomda begona belgi bor (bo'shliq/yangi qator?)." >&2
+            echo "      Ruxsat: faqat [0-9a-z_]." >&2
+            exit 2 ;;
+    esac
     case "$n" in
         "${DARVOZA_PREFIKS}"[0-9a-z_]*) ;;
         *) echo "XATO: '$n' darvoza bazasi EMAS." >&2
@@ -96,7 +106,16 @@ if [ -z "$PY" ]; then
 fi
 
 psql_() { psql "$XT_DB_DSN_TEST_ADMIN" -v ON_ERROR_STOP=1 -qtA "$@"; }
-log() { printf '[darvoza-baza] %s\n' "$*"; }
+# JURNAL STDERR GA. `yarat` ning STDOUT i — MASHINA O'QIYDIGAN
+# KANAL: u faqat bitta qator, darvoza bazasining nomini beradi.
+#
+# O'LCHANGAN NUQSON (2026-09-07): `log()` stdout ga yozardi va
+#
+#     GATE="$(tender-darvoza yarat)"
+#
+# nomi o'rniga BUTUN JURNALNI ushlab olardi. Keyingi `sinov "$GATE"`
+# ko'p qatorli qiymat bilan chaqirilardi.
+log() { printf '[darvoza-baza] %s\n' "$*" >&2; }
 
 # --- DSN dagi bazani ALMASHTIRISH -------------------------------------------
 # Darvoza bazasi uchun alohida DSN yozilmaydi: mavjud DSN dagi
@@ -170,16 +189,21 @@ yarat)
     # MIGRATSIYA — AYNAN NUSXAGA. Haqiqiy staging bazasi bu qadamdan
     # butunlay chetda qoladi va tiqilinchning ma'nosi shu.
     log "migratsiya qo'llanmoqda…"
-    "${PY:-python3}" "${ILDIZ}/migratsiya.py" --qolla --dsn "$NISHON_OWNER"
+    # Migratsiya yurgizuvchisi ko'p qator chop etadi — STDERR ga.
+    "${PY:-python3}" "${ILDIZ}/migratsiya.py" --qolla --dsn "$NISHON_OWNER" >&2
 
     # 0071 TASDIG'I — jurnalga ISHONMAYMIZ, SO'RAYMIZ.
     QOLLANGAN="$(psql "$NISHON_OWNER" -qtA -c \
         "SELECT count(*) FROM schema_migration WHERE id LIKE '0071%'" 2>/dev/null || echo 0)"
+    QOLLANGAN="$(printf '%s' "$QOLLANGAN" | tr -dc '0-9')"
     if [ "$QOLLANGAN" != "1" ]; then
         echo "XATO: 0071_topshiriq qo'llanmadi (topildi: $QOLLANGAN)" >&2
         exit 1
     fi
     log "0071_topshiriq TASDIQLANDI"
+
+    # YAGONA STDOUT YOZUVI. Bundan yuqoridagi hamma narsa stderr ga
+    # ketdi, ya'ni `$(...)` aynan shu qatorni oladi.
     printf '%s\n' "$YANGI"
     ;;
 
