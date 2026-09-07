@@ -111,15 +111,35 @@ else
 fi
 
 # --- 3) MIGRATSIYA BUTUNLIGI -------------------------------------------------
-# DSN bo'lmasa STATIK butunlik (manifest, checksum, fayllar) baribir
-# tekshiriladi — u bazasiz ham ma'noli va aynan "diskda bor, manifestda
-# yo'q" nuqsonini ushlaydi.
+# DSN MAJBURIY. Ilgari bu yerda "DSN bo'lmasa STATIK butunlik baribir
+# tekshiriladi" deb yozilgan va `else` shoxi `migratsiya.py --tekshir`
+# ni DSN siz chaqirardi.
+#
+# DA'VO YOLG'ON EDI (o'lchandi 2026-09-07):
+#
+#     $ python migratsiya.py --tekshir
+#     XT_DB_DSN o'rnatilmagan (.env ni tekshiring)     -> kod 1
+#
+# `migratsiya.py` da statik rejim UMUMAN yo'q: `main()` har qanday
+# holatda `Jurnal(dsn)` quradi va u `psycopg2` ni import qiladi.
+# Ya'ni "statik tekshiruv o'tdi" degan xabar HECH QACHON chiqmagan;
+# `else` shoxiga tushgan yurish shunchaki tushunarsiz xato bilan
+# yiqilardi va sabab "migratsiya butunligi (statik)" deb ko'rinardi.
+#
+# NEGA YECHIM "STATIK REJIM QO'SHISH" EMAS. Darvozaning vazifasi --
+# bazadagi holat repozitoriydagi matnga MOS ekanini tasdiqlash.
+# Faylni faylning o'zi bilan solishtirish bu savolga javob bermaydi.
+# Ya'ni statik rejim bo'lganda ham u DARVOZA uchun yetarli bo'lmasdi.
+#
+# Shuning uchun: DSN bo'lmasa darvoza YIQILADI va NIMA yetishmayotgani
+# aytiladi. "Tekshirdim" deb yolg'on aytmaydi.
 log "migratsiya butunligi"
-if [ -n "${XT_DB_DSN_OWNER:-}" ]; then
-    "$PY" migratsiya.py --tekshir --dsn "$XT_DB_DSN_OWNER" \
-        || xato "migratsiya butunligi (baza bilan)"
-else
-    "$PY" migratsiya.py --tekshir || xato "migratsiya butunligi (statik)"
-fi
+DSN_M="${XT_DB_DSN_OWNER:-${XT_DB_DSN:-}}"
+[ -n "$DSN_M" ] || xato "migratsiya butunligi TEKSHIRILMADI: XT_DB_DSN_OWNER
+   ham, XT_DB_DSN ham yo'q. Bu 'o'tdi' EMAS — o'lchanmagan.
+   \`deploy.sh\` muhit faylini 4-bo'limda o'qiydi; darvoza qo'lda
+   yurgizilsa DSN ni muhitda bering."
+"$PY" migratsiya.py --tekshir --dsn "$DSN_M" \
+    || xato "migratsiya butunligi"
 
 log "HAMMA TEKSHIRUV O'TDI — reliz chiqishi mumkin"

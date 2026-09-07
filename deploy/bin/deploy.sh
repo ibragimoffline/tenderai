@@ -47,6 +47,26 @@ xato() { printf '[%s] XATO: %s\n' "$(date '+%F %T')" "$*" >&2; exit 1; }
 
 [ -f "$ENVFILE" ] || xato "muhit fayli yo'q: $ENVFILE"
 
+# --- 0a) REF -> O'ZGARMAS SHA ------------------------------------------------
+# `main` HARAKATLANUVCHI. Staging uni bir kommitda tekshiradi, ertaga
+# esa `main` boshqa kommitni ko'rsatadi va `.verified` da hamon "main"
+# yozilgan bo'ladi -- ya'ni production darvozasi TEKSHIRILMAGAN kodni
+# o'tkazib yuboradi va buni HECH KIM ko'rmaydi.
+#
+# O'LCHANGAN HOLAT (2026-09-07): `.verified` = "main", staging esa
+# 5-sentabr kodida turardi. Ayni paytda `main` 129 fayl oldinda edi.
+# `deploy.sh production main` shu holatda darvozadan O'TARDI.
+#
+# Shuning uchun bundan keyin TENGLIK REF DA emas, SHA DA tekshiriladi.
+# `$REF` odam uchun qoladi (jurnal, katalog nomi), qaror esa `$SHA` da.
+SHA="$(git --git-dir="$REPO" rev-parse --verify "${REF}^{commit}" 2>/dev/null)" \
+    || xato "'$REF' ko'zguda topilmadi: $REPO"
+case "$SHA" in
+    ????????????????????????????????????????) ;;
+    *) xato "SHA 40 belgi emas: '$SHA'" ;;
+esac
+log "$REF -> $SHA"
+
 # --- 0) SOZLAMA TEKSHIRUVI — QIMMAT QADAMLARDAN OLDIN ------------------------
 # ENG BOSHIDA turishining sababi: to'ldirilmagan sozlama ilgari FAQAT
 # 6-bo'limda (migratsiya) chiqardi, ya'ni `venv`, `npm ci` va frontend
@@ -66,11 +86,26 @@ BU_KATALOG="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ "$MUHIT" = "production" ]; then
     TASDIQ="${TENDERAI_STAGING_ILDIZ:-/opt/tenderai/staging}/.verified"
     [ -f "$TASDIQ" ] || xato "staging tasdigi yoq ($TASDIQ). Avval: deploy.sh staging $REF"
-    TASDIQLANGAN="$(cat "$TASDIQ")"
-    if [ "$TASDIQLANGAN" != "$REF" ]; then
-        xato "staging da BOSHQA ref tekshirilgan: '$TASDIQLANGAN' != '$REF'"
+    TASDIQLANGAN="$(tr -d ' \t\n\r' < "$TASDIQ")"
+
+    # ESKI FORMATNI JIMGINA QABUL QILMAYMIZ. `.verified` da shox nomi
+    # ("main") tursa, u qaysi KOMMIT tekshirilganini AYTMAYDI --
+    # ya'ni tenglik tekshiruvi ma'nosiz. Bunday tasdiq PASS emas,
+    # QAYTA TEKSHIRISH talabi: staging bir marta yangi format bilan
+    # yurgizilsa muammo o'z-o'zidan yopiladi.
+    case "$TASDIQLANGAN" in
+        ????????????????????????????????????????) ;;
+        *) xato "staging tasdigi ESKI FORMATDA ('$TASDIQLANGAN') --
+   u shox NOMI, kommit emas va qaysi kod tekshirilganini aytmaydi.
+   Avval: deploy.sh staging $REF" ;;
+    esac
+
+    if [ "$TASDIQLANGAN" != "$SHA" ]; then
+        xato "staging da BOSHQA KOMMIT tekshirilgan:
+   tekshirilgan : $TASDIQLANGAN
+   so'ralgan    : $SHA  ($REF)"
     fi
-    log "staging tasdigi topildi: $REF"
+    log "staging tasdigi topildi: $SHA"
 fi
 
 # --- 2) Yangi reliz katalogi -------------------------------------------------
@@ -295,8 +330,10 @@ if [ "$MUHIT" = "staging" ]; then
     fi
     log "E2E o'tdi"
 
-    printf '%s' "$REF" > "${ILDIZ}/.verified"
-    log "staging tasdigi yozildi: $REF"
+    # REF EMAS, SHA. `.verified` ning butun ma'nosi "AYNAN SHU kod
+    # tekshirildi" -- shox nomi buni ifodalay olmaydi.
+    printf '%s' "$SHA" > "${ILDIZ}/.verified"
+    log "staging tasdigi yozildi: $SHA  ($REF)"
 fi
 
 # --- 11) Eski relizlar (oxirgi 5 tasi qoladi) -------------------------------
