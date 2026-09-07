@@ -99,10 +99,25 @@ muhit_tekshir() {
 : "${XT_DB_DSN_TEST_ADMIN:?XT_DB_DSN_TEST_ADMIN kerak (tai_test_admin, faqat staging)}"
 
 ILDIZ="${ILDIZ:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# PYTHON — BOG'LIQLIKLARI BOR MUHIT KERAK.
+#
+# O'LCHANGAN (2026-09-07): darvoza vaqtinchalik katalogda yuradi va
+# u yerda `venv` YO'Q. Zaxira `python3` esa tizimniki —
+#
+#     ModuleNotFoundError: No module named 'psycopg2'
+#
+# Reliz `venv` i (`/opt/tenderai/<muhit>/current/.venv`) — ilova
+# HAQIQATAN yuradigan muhit, ya'ni darvoza uni ishlatsa sinov
+# ishlab chiqarishdagi bilan AYNI to'plamda yuradi. Bu tasodifiy
+# tanlov emas: boshqa `venv` da o'tgan sinov ishlab chiqarishda
+# yiqilishi mumkin va aksincha.
 PY="${TENDERAI_PY:-}"
 if [ -z "$PY" ]; then
-    if [ -x "${ILDIZ}/.venv/bin/python" ]; then PY="${ILDIZ}/.venv/bin/python"
-    else PY="python3"; fi
+    for _p in "${ILDIZ}/.venv/bin/python" \
+              "/opt/tenderai/${APP_ENV:-staging}/current/.venv/bin/python"; do
+        if [ -x "$_p" ]; then PY="$_p"; break; fi
+    done
+    PY="${PY:-python3}"
 fi
 
 psql_() { psql "$XT_DB_DSN_TEST_ADMIN" -v ON_ERROR_STOP=1 -qtA "$@"; }
