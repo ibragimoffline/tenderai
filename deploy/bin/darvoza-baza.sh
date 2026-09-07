@@ -380,6 +380,25 @@ tekshir)
         echo "TEKSHIR: FAIL — invariant buzilgan (yuqorida)." >&2
         exit 1
     fi
+    # --- QOLGAN DARVOZA BAZALARI ------------------------------------------
+    # Darvoza bazasi bir martalik. Qolib ketgani ikki narsani
+    # bildiradi: disk yeyilyapti va oldingi yurish tozalanmagan.
+    #
+    # O'LCHANGAN (2026-09-08): `sinov` nolga teng bo'lmagan kod
+    # qaytargach chaqiruvchi qobiq `set -e` bilan to'xtadi va
+    # `tozala` UMUMAN yurmadi. Ya'ni tozalash chaqiruvchining
+    # intizomiga tayangan edi — endi sanoq shu yerda KO'RINADI.
+    _gate="$(psql_ -c "SELECT count(*) FROM pg_database
+                        WHERE datname LIKE 'tenderai_gate_%'")"
+    _gate_nom="$(psql_ -c "SELECT COALESCE(string_agg(datname, ', '
+                                            ORDER BY datname), '-')
+                             FROM pg_database
+                            WHERE datname LIKE 'tenderai_gate_%'")"
+    echo "darvoza bazalari: ${_gate}  (${_gate_nom})"
+    [ "$_gate" = "0" ] || {
+        echo "OGOHLANTIRISH: ${_gate} ta darvoza bazasi qolgan —" >&2
+        echo "               'tozala <nom>' bilan olib tashlang." >&2; }
+
     echo "TEKSHIR: PASS — besh invariant ham o'tdi"
     ;;
 
