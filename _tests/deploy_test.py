@@ -1930,6 +1930,73 @@ def test_darvoza_stdout_kelishuvi():
                   f"kod={kod} {xato[:120]}")
 
 
+
+def test_darvoza_toliq_daraxt():
+    bolim("25. DARVOZA: TO'LIQ DARAXT va YIQILGANDA TOZALASH")
+
+    # O'LCHANGAN (2026-09-07): o'rama arxivi `deploy` bilan cheklangan,
+    # darvoza esa ildizdagi `migratsiya.py` va `run_tests.py` ga
+    # muhtoj. Nusxa OLINGANDAN KEYIN migratsiya
+    # "can't open file .../migratsiya.py" bilan yiqildi va darvoza
+    # bazasi QOLIB KETDI.
+    #
+    # Ikki xulosa, ikki tuzatish:
+    #   1. Zarur fayllar BAZA YARATILISHIDAN OLDIN tekshiriladi.
+    #   2. Yaratilgandan keyin HAR QANDAY yiqilishda baza tashlanadi.
+    src = oqi("bin", "darvoza-baza.sh")
+
+    check("zarur fayllar ro'yxati bor",
+          "migratsiya.py" in src and "run_tests.py" in src
+          and "migratsiya_manifest.tsv" in src)
+    check("to'liq daraxt AYNI SHA dan ochiladi",
+          '"$RELEASE_SHA"' in src and "archive" in src,
+          "`main` qayta o'qilsa 'bir snapshot' invarianti buzilardi")
+    check("`main` QAYTA O'QILMAYDI",
+          'archive "$RELEASE_SHA"' in src and 'archive main' not in src)
+
+    # Tuzoq: yaratildi + muvaffaqiyatsiz -> tashlanadi.
+    check("tozalash TUZOG'I bor", "trap tozalash_tuzogi EXIT" in src)
+    check("bayroqlar ajratilgan",
+          "DARVOZA_YARATILDI=1" in src and "MUVAFFAQIYAT=1" in src)
+    check("MUVAFFAQIYAT faqat 0071 tasdiqlangach qo'yiladi",
+          src.index("0071_topshiriq TASDIQLANDI") < src.index("MUVAFFAQIYAT=1"))
+    check("asl chiqish kodi SAQLANADI", 'exit "$kod"' in src,
+          "tuzoq kodni yutib yuborsa yiqilish `0` bo'lib ko'rinardi")
+    check("`yarat` muvaffaqiyatli bo'lsa baza QOLADI",
+          '"$MUVAFFAQIYAT" != "1"' in src,
+          "`sinov \"$GATE\"` keyin unga muhtoj")
+
+    # 0071 uchun SXEMA sharti ham bor — jurnalning o'zi yetarli emas.
+    check("0071: jurnal VA sxema tekshiriladi",
+          "to_regclass('public.tender_topshiriq')" in src,
+          "jurnalda yozuv bo'lib, jadval bo'lmasligi mumkin")
+
+    # YURGIZIB: fayllar yo'q va RELEASE_SHA ham yo'q -> baza
+    # yaratilmasdan, TUSHUNARLI xato bilan to'xtasin.
+    bash = _mashq_bash()
+    if not bash:
+        check("bash yo'q — yurgizib tekshirilmadi", True)
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "deploy", "bin"))
+        shutil.copy(os.path.join(D, "bin", "darvoza-baza.sh"),
+                    os.path.join(tmp, "deploy", "bin", "darvoza-baza.sh"))
+        e = dict(os.environ)
+        e["APP_ENV"] = "staging"
+        e["XT_DB_DSN_TEST_ADMIN"] = "dbname=x user=x host=127.0.0.1 port=1"
+        e["XT_DB_DSN_OWNER"] = "dbname=x user=x host=127.0.0.1 port=1"
+        e.pop("RELEASE_SHA", None)
+        r = subprocess.run([bash, os.path.join(tmp, "deploy", "bin",
+                                               "darvoza-baza.sh"), "yarat"],
+                           capture_output=True, text=True, env=e, timeout=60)
+        check("fayl yo'q: baza YARATILMASDAN to'xtaydi", r.returncode != 0,
+              f"kod={r.returncode}")
+        check("fayl yo'q: NIMA yetishmayotgani aytiladi",
+              "yetishmaydi: migratsiya.py" in r.stderr, r.stderr[:200])
+        check("fayl yo'q: stdout da darvoza nomi YO'Q",
+              "tenderai_gate_" not in r.stdout, repr(r.stdout[:120]))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -1966,6 +2033,7 @@ def main():
     test_darvoza_xulosani_oqiydi()
     test_cookie_secure_siyosati()
     test_darvoza_stdout_kelishuvi()
+    test_darvoza_toliq_daraxt()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)
