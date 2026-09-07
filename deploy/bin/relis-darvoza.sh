@@ -64,16 +64,41 @@ set +e
 KOD=$?
 set -e
 
-XULOSA="$(grep -E '^JAMI: [0-9]+ to.plam' "$LOG" | tail -1 || true)"
+# NAQSH IKKI FORMATNI HAM OLADI va bu O'LCHANGAN SABABGA ega.
+#
+# `run_tests.py` xulosani "JAMI: 44/44 to'plam yurdi, ..." shaklida
+# chop etadi. Eski naqsh `^JAMI: [0-9]+ to.plam` esa raqamdan KEYIN
+# darhol bo'shliq kutardi va `44/44` ga MOS KELMASDI.
+#
+# O'LCHANGAN OQIBAT (2026-09-07, staging joylashtiruvi): 44 to'plam
+# HAQIQATAN yurdi va 35 tasi yiqildi, darvoza esa
+#
+#     "xulosa qatori yo'q — to'plam UMUMAN BAJARILMADI"
+#
+# dedi. Ya'ni darvozaning BUTUN maqsadi — "yurmadi" ni "yiqildi" dan
+# ajratish — aynan shu joyda buzilgan edi: u to'g'ri to'sdi, lekin
+# NOTO'G'RI sababni ko'rsatdi va operatorni yurgizuvchining o'zida
+# nosozlik bor deb o'ylashga majbur qilardi.
+#
+# Darvoza to'sdi, demak zarar bo'lmadi — lekin "yashil bo'lib
+# ko'ringan yolg'on" ning teskarisi ham xuddi shunday qimmat:
+# QIZIL bo'lib ko'ringan YOLG'ON SABAB.
+XULOSA="$(grep -E "^JAMI: [0-9]+(/[0-9]+)? to.plam" "$LOG" | tail -1 || true)"
 if [ -z "$XULOSA" ]; then
     tail -30 "$LOG" >&2
     xato "xulosa qatori yo'q — to'plam UMUMAN BAJARILMADI (chiqish kodi $KOD)"
 fi
 
-JAMI="$(printf '%s' "$XULOSA"   | sed -E 's/^JAMI: ([0-9]+).*/\1/')"
-YIQILGAN="$(printf '%s' "$XULOSA" | sed -E 's/.*o.tdi, ([0-9]+) yiqildi.*/\1/')"
+# BIRINCHI raqam — YURGAN to'plamlar soni ("44/44" da ham, "44" da ham).
+JAMI="$(printf '%s' "$XULOSA"   | sed -E "s@^JAMI: ([0-9]+).*@\\1@")"
+YIQILGAN="$(printf '%s' "$XULOSA" | sed -E "s@.*o.tdi, ([0-9]+) yiqildi.*@\\1@")"
 # Yiqilgan bo'lmasa yurgizuvchi bu qismni chop etmaydi -> raqam chiqmaydi.
 case "$YIQILGAN" in ''|*[!0-9]*) YIQILGAN=0 ;; esac
+case "$JAMI" in ''|*[!0-9]*)
+    tail -30 "$LOG" >&2
+    xato "xulosa qatorini O'QIB BO'LMADI: '$XULOSA'
+   Bu 'o'tdi' EMAS — format o'zgargan bo'lsa naqsh ham yangilansin." ;;
+esac
 
 log "xulosa: $XULOSA"
 
