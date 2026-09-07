@@ -620,6 +620,15 @@ PROBE2
     log "--- BOLA PROBE A (ildizdan) ---"
     ( cd "$ILDIZ_TOLIQ" && PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 \
         "$PY" "${ILDIZ_TOLIQ}/_darvoza_probe.py" 2>&1 | sed 's/^/    /' ) >&2 || true
+    # PROBE C — HAQIQIY TO'PLAM, `run_tests.py` bergan AYNI argument
+    # bilan. A va B probe lari o'tdi, ya'ni joy ham, ketma-ketlik ham
+    # aybdor emas. Qolgan yagona farq — to'plamning O'ZI va unga
+    # uzatiladigan bayroq. Bu probe uni bevosita yurgizadi.
+    log "--- BOLA PROBE C (aktor_test --tarmoqsiz, bevosita) ---"
+    ( cd "$ILDIZ_TOLIQ" && PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 \
+        "$PY" "${ILDIZ_TOLIQ}/_tests/aktor_test.py" --tarmoqsiz 2>&1 \
+        | tail -12 | sed 's/^/    /' ) >&2 || true
+
     log "--- BOLA PROBE B (_tests dan, suite ketma-ketligi) ---"
     ( cd "$ILDIZ_TOLIQ" && PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 \
         "$PY" "${ILDIZ_TOLIQ}/_tests/_darvoza_probe2.py" 2>&1 | sed 's/^/    /' ) >&2 || true
