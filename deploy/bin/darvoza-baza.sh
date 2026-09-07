@@ -88,8 +88,24 @@ muhit_tekshir() {
 # bu skript baribir uni ISHLATMAYDI.
 : "${XT_DB_DSN_TEST_ADMIN:?XT_DB_DSN_TEST_ADMIN kerak (tai_test_admin, faqat staging)}"
 
+ILDIZ="${ILDIZ:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+PY="${TENDERAI_PY:-}"
+if [ -z "$PY" ]; then
+    if [ -x "${ILDIZ}/.venv/bin/python" ]; then PY="${ILDIZ}/.venv/bin/python"
+    else PY="python3"; fi
+fi
+
 psql_() { psql "$XT_DB_DSN_TEST_ADMIN" -v ON_ERROR_STOP=1 -qtA "$@"; }
 log() { printf '[darvoza-baza] %s\n' "$*"; }
+
+# --- DSN dagi bazani ALMASHTIRISH -------------------------------------------
+# Darvoza bazasi uchun alohida DSN yozilmaydi: mavjud DSN dagi
+# `dbname=` almashtiriladi. Sabab — SIR TAKRORLANMASIN: parol allaqachon
+# bitta joyda (`/etc/tenderai/staging.env`), ikkinchi nusxa esa uni
+# eskirishi va ajralib ketishi mumkin bo'lgan joyga ko'chirardi.
+dsn_baza() {
+    printf '%s' "$1" | sed -E "s/dbname=[A-Za-z0-9_]+/dbname=$2/"
+}
 
 case "$AMAL" in
 tekshir)
@@ -115,31 +131,77 @@ tekshir)
                     WHERE rolname = 'tai_service'), '<rol yo''q>')"
     ;;
 
-nom)
-    printf '%s%s\n' "$DARVOZA_PREFIKS" "$(date +%Y%m%d_%H%M%S)"
-    ;;
-
 yarat)
+    # NUSXA + MIGRATSIYA. Haqiqiy staging bazasiga TEGILMAYDI.
     muhit_tekshir
-    MANBA="${2:?manba baza nomi kerak}"
+    MANBA="${MANBA_BAZA:-tenderai_staging}"
     case "$MANBA" in
         tenderai_production) echo "XATO: production MANBA sifatida ishlatilmaydi." >&2; exit 2 ;;
     esac
+    : "${XT_DB_DSN_OWNER:?nusxa uchun XT_DB_DSN_OWNER kerak (muhit faylida)}"
+
     YANGI="${DARVOZA_PREFIKS}$(date +%Y%m%d_%H%M%S)"
     nom_tekshir "$YANGI"
 
-    # `CREATE DATABASE ... TEMPLATE` — eng arzon nusxa, LEKIN u
-    # manbaga ULANISH BO'LMASLIGINI talab qiladi. Staging da API
-    # tirik, shuning uchun bu yo'l ishlamaydi va biz uni SINAB
-    # KO'RMAYMIZ ham: yiqilgan urinish manba bazani qulflab qo'yishi
-    # mumkin. Ishonchli yo'l — dump/restore.
-    log "manba: $MANBA -> $YANGI"
+    log "manba : $MANBA"
+    log "nishon: $YANGI"
     psql_ -c "CREATE DATABASE ${YANGI} ENCODING 'UTF8'" >/dev/null
-    log "yaratildi: $YANGI"
+    log "baza yaratildi"
+
+    # NUSXA — `pg_dump | pg_restore` OQIM bilan: 27 MB+ oraliq fayl
+    # diskda qolmaydi va yiqilsa yarim fayl ham qolmaydi.
+    #
+    # `--no-owner`: nusxada egalik `tai_test_admin` ga tushadi va bu
+    # MAYLI — bu baza bir martalik va yurish oxirida tashlanadi.
+    NISHON_OWNER="$(dsn_baza "$XT_DB_DSN_OWNER" "$YANGI")"
+    log "nusxa olinmoqda (pg_dump | pg_restore)…"
+    if ! pg_dump "$XT_DB_DSN_OWNER" -Fc --no-owner --no-privileges \
+         | pg_restore -d "$NISHON_OWNER" --no-owner --no-privileges \
+                      --exit-on-error 2>/tmp/darvoza-restore.$$; then
+        tail -20 /tmp/darvoza-restore.$$ >&2 || true
+        rm -f /tmp/darvoza-restore.$$
+        psql_ -c "DROP DATABASE IF EXISTS ${YANGI}" >/dev/null
+        echo "XATO: nusxa olinmadi — darvoza bazasi tashlandi." >&2
+        exit 1
+    fi
+    rm -f /tmp/darvoza-restore.$$
+    log "nusxa tayyor"
+
+    # MIGRATSIYA — AYNAN NUSXAGA. Haqiqiy staging bazasi bu qadamdan
+    # butunlay chetda qoladi va tiqilinchning ma'nosi shu.
+    log "migratsiya qo'llanmoqda…"
+    "${PY:-python3}" "${ILDIZ}/migratsiya.py" --qolla --dsn "$NISHON_OWNER"
+
+    # 0071 TASDIG'I — jurnalga ISHONMAYMIZ, SO'RAYMIZ.
+    QOLLANGAN="$(psql "$NISHON_OWNER" -qtA -c \
+        "SELECT count(*) FROM schema_migration WHERE id LIKE '0071%'" 2>/dev/null || echo 0)"
+    if [ "$QOLLANGAN" != "1" ]; then
+        echo "XATO: 0071_topshiriq qo'llanmadi (topildi: $QOLLANGAN)" >&2
+        exit 1
+    fi
+    log "0071_topshiriq TASDIQLANDI"
     printf '%s\n' "$YANGI"
     ;;
 
-tashla)
+sinov)
+    # BACKEND DARVOZASI — NUSXA USTIDA, ILOVA ROLI BILAN.
+    #
+    # `tai_service` ATAYLAB: sinovlar ishlab chiqarishdagi bilan AYNI
+    # imtiyozda yurishi kerak. `tai_test_admin` faqat yaratish/tashlash
+    # uchun va u bu yerda ISHLATILMAYDI — aks holda darvoza superuser
+    # huquqida yashil bo'lib, ishlab chiqarishda qizarardi.
+    muhit_tekshir
+    BAZA="${2:?darvoza bazasi nomi kerak}"
+    nom_tekshir "$BAZA"
+    : "${XT_DB_DSN:?sinov uchun XT_DB_DSN kerak (ilova roli)}"
+    SINOV_DSN="$(dsn_baza "$XT_DB_DSN" "$BAZA")"
+    log "sinov bazasi: $BAZA  (ilova roli)"
+    cd "$ILDIZ"
+    XT_DB_DSN="$SINOV_DSN" APP_ENV=staging \
+        "${PY:-python3}" run_tests.py
+    ;;
+
+tozala)
     muhit_tekshir
     BAZA="${2:?tashlanadigan baza nomi kerak}"
     nom_tekshir "$BAZA"
@@ -147,6 +209,10 @@ tashla)
               WHERE datname = '${BAZA}' AND pid <> pg_backend_pid()" >/dev/null || true
     psql_ -c "DROP DATABASE IF EXISTS ${BAZA}" >/dev/null
     log "tashlandi: $BAZA"
+    ;;
+
+nom)
+    printf '%s%s\n' "$DARVOZA_PREFIKS" "$(date +%Y%m%d_%H%M%S)"
     ;;
 
 *) echo "Noma'lum amal: $AMAL" >&2; exit 2 ;;
