@@ -554,7 +554,14 @@ sinov)
     # Endi interpretator AYTILADI va bog'liqliklar sinovlardan OLDIN
     # tekshiriladi. Yetishmasa darvoza to'xtaydi va QAYSI python,
     # QAYSI modul yetishmayotganini nomma-nom aytadi.
+    # INTERPRETATOR ISHONCHLI AYTILADI. `$PY` ning O'ZI yetarli emas:
+    # `run_tests.py` bolalarni `sys.executable` bilan yurgizadi va
+    # agar u boshqa python bo'lsa, bog'liqlik tekshiruvi BOSHQA
+    # muhitni o'lchagan bo'lardi. Shuning uchun `sys.executable` va
+    # `dotenv` ning JOYI aynan o'sha interpretatordan so'raladi.
     log "python: $PY"
+    log "sys.executable: $("$PY" -c 'import sys;print(sys.executable)' 2>&1 | tail -1)"
+    log "dotenv: $("$PY" -c 'import dotenv;print(dotenv.__file__)' 2>&1 | tail -1)"
     if ! "$PY" -c "import dotenv, psycopg2" >/dev/null 2>&1; then
         _zaxira="/opt/tenderai/${APP_ENV:-staging}/current/.venv/bin/python"
         if [ -x "$_zaxira" ] && "$_zaxira" -c "import dotenv, psycopg2" >/dev/null 2>&1; then
