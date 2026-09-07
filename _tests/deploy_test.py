@@ -1997,6 +1997,98 @@ def test_darvoza_toliq_daraxt():
               "tenderai_gate_" not in r.stdout, repr(r.stdout[:120]))
 
 
+
+def test_0071_tasdigi():
+    bolim("26. 0071 TASDIG'I — SQL XATOSI NOL EMAS")
+
+    # O'LCHANGAN NUQSON (2026-09-07): tekshiruv shunday edi —
+    #
+    #     psql ... "WHERE id LIKE '0071%'" 2>/dev/null || echo 0
+    #
+    # Ustun `id` emas, `migratsiya_id`, ya'ni so'rov HAR SAFAR xato
+    # berardi; `|| echo 0` esa xatoni yutib, natijani `0` ga
+    # aylantirardi. Migratsiya HAQIQATAN qo'llangan bo'lsa ham
+    # darvoza "0071 qo'llanmadi" derdi va sabab ko'rinmasdi.
+    #
+    # BU SINOV `psql` NI SHIMLAYDI: haqiqiy baza kerak emas, uch
+    # holatni ham ISHONCHLI yasash mumkin.
+    src = oqi("bin", "darvoza-baza.sh")
+    check("ustun `migratsiya_id`", "migratsiya_id LIKE '0071%'" in src)
+    check("holat `tugadi` ham tekshiriladi", "holat = 'tugadi'" in src)
+    # IZOHLAR CHIQARILADI: eski nuqson shu faylning IZOHIDA
+    # ataylab yozilgan va uni naqsh deb sanash sinovni o'zi yasagan
+    # yolg'on bilan yiqitardi.
+    kod_qatorlar = [q for q in src.splitlines()
+                    if not q.lstrip().startswith("#")]
+    check("fail-open naqsh YO'Q",
+          "2>/dev/null || echo 0" not in chr(10).join(kod_qatorlar),
+          "SQL xatosi nolga aylanmasin")
+    check("`ON_ERROR_STOP=1` ishlatiladi", "ON_ERROR_STOP=1" in src)
+
+    bash = _mashq_bash()
+    if not bash:
+        check("bash yo'q — yurgizib tekshirilmadi", True)
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_0071_")
+    try:
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі)
+        N = chr(10)
+        # SHIM: `SHIM_REJIM` ga qarab uch xil javob beradi.
+        #   xato   -> chiqish kodi 1 (o'lchab bo'lmadi)
+        #   yoq    -> jurnal 0
+        #   jadvalsiz -> jurnal 1, sxema `f`
+        #   toliq  -> jurnal 1, sxema `t`
+        shim = os.path.join(qutі, "psql")
+        io.open(shim, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N +
+            'case "$SHIM_REJIM" in' + N +
+            '  xato) echo "ERROR: column does not exist" >&2; exit 1 ;;' + N +
+            'esac' + N +
+            'for a in "$@"; do case "$a" in' + N +
+            '  *to_regclass*) if [ "$SHIM_REJIM" = "jadvalsiz" ]; then echo f;'
+            ' else echo t; fi; exit 0 ;;' + N +
+            '  *migratsiya_id*) if [ "$SHIM_REJIM" = "yoq" ]; then echo 0;'
+            ' else echo 1; fi; exit 0 ;;' + N +
+            'esac; done' + N + "exit 0" + N)
+        os.chmod(shim, 0o755)
+
+        def yurgiz(rejim):
+            e = dict(os.environ)
+            e["APP_ENV"] = "staging"
+            e["XT_DB_DSN_TEST_ADMIN"] = "dbname=x user=x"
+            e["SHIM_REJIM"] = rejim
+            e["PATH"] = _posix_yol(bash, qutі) + os.pathsep + e["PATH"]
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 _posix_yol(bash, qutі),
+                 os.path.join(D, "bin", "darvoza-baza.sh"),
+                 "tasdiq", "dbname=x"],
+                capture_output=True, text=True, env=e, timeout=60)
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+        kod, chiq = yurgiz("toliq")
+        check("1-holat: jurnal + jadval bor -> PASS", kod == 0, chiq[-200:])
+
+        kod, chiq = yurgiz("yoq")
+        check("2-holat: jurnal yo'q -> FAIL", kod != 0)
+        check("2-holat: sabab 'jurnalda YO'Q'", "jurnalda YO'Q" in chiq, chiq[-200:])
+
+        kod, chiq = yurgiz("xato")
+        check("3-holat: SQL xatosi -> FAIL", kod != 0)
+        check("3-holat: 'o'lchanmagan' deyiladi va NOL DEYILMAYDI",
+              "LCHANMAGAN" in chiq.upper() and "jurnalda YO" not in chiq,
+              chiq[-250:])
+
+        kod, chiq = yurgiz("jadvalsiz")
+        check("4-holat: jurnal bor, jadval yo'q -> FAIL", kod != 0)
+        check("4-holat: sabab AYTILADI",
+              "tender_topshiriq" in chiq, chiq[-200:])
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -2034,6 +2126,7 @@ def main():
     test_cookie_secure_siyosati()
     test_darvoza_stdout_kelishuvi()
     test_darvoza_toliq_daraxt()
+    test_0071_tasdigi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)
