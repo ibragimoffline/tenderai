@@ -470,11 +470,30 @@ def test_url_qorovuli():
     import importlib
     eski_env = os.environ.get("APP_ENV")
     eski_url = os.environ.get("PUBLIC_BASE_URL")
+    # `APP_PUBLIC_URL` HAM SAQLANADI VA TOZALANADI.
+    #
+    # O'LCHANGAN NUQSON (2026-09-08): darvoza jarayoniga
+    # `APP_PUBLIC_URL` uzatila boshlagach bu sinov yiqildi —
+    #
+    #     APP_PUBLIC_URL va PUBLIC_BASE_URL IKKALASI ham berilgan,
+    #     lekin qiymatlari boshqa
+    #
+    # Sinov ESKI nomni (`PUBLIC_BASE_URL`) ataylab qo'yadi, YANGI nom
+    # esa MUHITDAN kelib qolardi. Ya'ni sinov o'zi boshqarmagan
+    # o'zgaruvchidan yiqilardi.
+    #
+    # MAHSULOT XULQI TO'G'RI VA O'ZGARMAYDI: ikki nom har xil qiymat
+    # bilan berilsa `ommaviy_url` ATAYLAB to'xtaydi — "qaysi biri
+    # to'g'ri" degan savolga taxmin bilan javob berish ikkita haqiqat
+    # manbai demak. Tuzatish faqat SINOV IZOLYATSIYASIDA: sinov URL
+    # sozlamasining IKKALA nomini ham o'zi egallaydi.
+    eski_yangi_url = os.environ.get("APP_PUBLIC_URL")
     try:
         from api import notify
 
         os.environ["APP_ENV"] = "production"
         os.environ.pop("PUBLIC_BASE_URL", None)
+        os.environ.pop("APP_PUBLIC_URL", None)
         importlib.reload(notify)
         try:
             notify.card_url("http://localhost:5173", 42)
@@ -507,6 +526,10 @@ def test_url_qorovuli():
         from api import notify as n2
         importlib.reload(n2)
 
+        if eski_yangi_url is None:
+            os.environ.pop("APP_PUBLIC_URL", None)
+        else:
+            os.environ["APP_PUBLIC_URL"] = eski_yangi_url
 
 def test_ogohlantirish():
     """NOSOZLIK OGOHLANTIRISHI — ikki qatlam (O-3)."""
