@@ -540,6 +540,35 @@ sinov)
     fi
     log "sinov bazasi: $BAZA  rol: ${SINOV_ROL:-ANIQLANMADI}"
 
+    # --- PYTHON BOG'LIQLIKLARI — OLDINDAN VA AYTIB ------------------------
+    # O'LCHANGAN (2026-09-08): beshta to'plam import da yiqildi —
+    #
+    #     from dotenv import load_dotenv
+    #     ModuleNotFoundError: No module named 'dotenv'
+    #
+    # Sabab KODDA emas: tanlangan interpretatorda bog'liqlik yo'q edi.
+    # Qolgan to'plamlar `dotenv` ni try/except bilan olgani uchun jim
+    # o'tib ketardi, ya'ni bitta muhit nuqsoni BESHTA "sinov yiqildi"
+    # bo'lib ko'rinardi.
+    #
+    # Endi interpretator AYTILADI va bog'liqliklar sinovlardan OLDIN
+    # tekshiriladi. Yetishmasa darvoza to'xtaydi va QAYSI python,
+    # QAYSI modul yetishmayotganini nomma-nom aytadi.
+    log "python: $PY"
+    if ! "$PY" -c "import dotenv, psycopg2" >/dev/null 2>&1; then
+        _zaxira="/opt/tenderai/${APP_ENV:-staging}/current/.venv/bin/python"
+        if [ -x "$_zaxira" ] && "$_zaxira" -c "import dotenv, psycopg2" >/dev/null 2>&1; then
+            log "bog'liqlik yo'q edi -> reliz venv iga o'tildi: $_zaxira"
+            PY="$_zaxira"
+        else
+            echo "XATO: sinov interpretatorida bog'liqlik yetishmaydi." >&2
+            echo "      python: $PY" >&2
+            "$PY" -c "import dotenv" 2>&1 | tail -1 >&2
+            echo "      Zaxira ham yaramadi: $_zaxira" >&2
+            exit 1
+        fi
+    fi
+
     # --- MUHIT SHARTNOMASI ------------------------------------------------
     # `aktor_test`, `inson_dalil_test`, `xavfsizlik_test` ilovaning
     # ishga tushish tekshiruvini chaqiradi va u `APP_PUBLIC_URL` ni

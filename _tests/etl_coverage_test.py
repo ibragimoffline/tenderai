@@ -514,6 +514,17 @@ def test_qayta_urinish() -> None:
     import run_etl
 
     fix = os.path.join(ROOT, "_tests", "fixtures")
+    # KATALOG YARATILADI. `_tests/fixtures/` da kuzatiladigan fayl
+    # YO'Q, ya'ni u git da mavjud emas va `git archive` dan chiqqan
+    # TOZA daraxtda ham bo'lmaydi.
+    #
+    # O'LCHANGAN (2026-09-08, izolyatsiyalangan darvoza):
+    #   FileNotFoundError: '.../_tests/fixtures/_soxta_bola.py'
+    #
+    # Ishlab chiquvchi mashinasida katalog oldingi yurishlardan
+    # QOLGAN, shuning uchun nuqson faqat toza daraxtda ko'rinadi —
+    # "menda ishlayapti" sinfining aynan o'zi.
+    os.makedirs(fix, exist_ok=True)
     sanoq = os.path.join(fix, "_urinish.txt")
     bola = os.path.join(fix, "_soxta_bola.py")
     io.open(bola, "w", encoding="utf-8").write(
