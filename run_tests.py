@@ -105,6 +105,19 @@ def yurgiz(yol: str, rejim_nomi: str) -> Tuple[str, int, float, str, str]:
     # bo'lgani yetarli emas — har bola O'Z oqimini o'zi ochadi.
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
 
+    # CHAQIRUVNI KO'RSATISH — NOSOZLIK IZLASH UCHUN, STANDART O'CHIQ.
+    #
+    # O'LCHANGAN JUMBOQ (2026-09-08): beshta to'plam
+    # `ModuleNotFoundError: dotenv` beradi, AYNI to'plam esa AYNI
+    # interpretator bilan BEVOSITA yurgizilganda 91/97 gacha boradi.
+    # Ya'ni ayb to'plamda ham, interpretatorda ham emas — CHAQIRUVDA.
+    # Chaqiruv esa hech qayerda ko'rinmasdi.
+    if os.environ.get("TENDERAI_DEBUG_LAUNCH"):
+        print(f"  [launch] {nom}: argv={args}", flush=True)
+        print(f"  [launch] {nom}: cwd={HERE}", flush=True)
+        for k in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "PATH"):
+            print(f"  [launch] {nom}: {k}={env.get(k)!r}", flush=True)
+
     t0 = time.time()
     try:
         r = subprocess.run(args, cwd=HERE, env=env, capture_output=True,
