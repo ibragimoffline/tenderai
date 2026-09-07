@@ -618,7 +618,13 @@ def shape_document(r: Dict[str, Any],
         "issued_at": iso(r.get("issued_at")),
         "valid_until": iso(r.get("valid_until")),
         "file_name": r.get("file_name"),
+        # ESKI MATN HAVOLASI — yangi qatorlarda `null`. Qoldirilgan,
+        # chunki mavjud 13 qatorda u yagona ma'lumot.
         "file_ref": r.get("file_ref"),
+        # HAQIQIY FAYL. `str()` SHART: `uuid.UUID` JSON ga
+        # serializatsiya BO'LMAYDI va endpoint 500 berardi.
+        "yuklama_id": (str(r["yuklama_id"])
+                       if r.get("yuklama_id") else None),
         "note": r.get("note"),
         "status": doc_status(r, today),
         "days_left": _days_left(r.get("valid_until"), today),
@@ -771,8 +777,12 @@ _TEXT_LABELS = {
     "doc_text": "Biriktirilgan hujjat matni",
 }
 
+# `yuklama_id` RO'YXATDA ham kerak: interfeys "yuklab olish"
+# tugmasini FAQAT shu maydonga qarab chizadi. Usiz fayl yuklangan
+# bo'lsa ham tugma ko'rinmasdi va foydalanuvchi faylni QAYTA
+# yuklashga urinardi.
 _DOC_COLS = ("id, doc_type, name, number, issued_at, valid_until, "
-             "file_name, file_ref, note, created_at, updated_at")
+             "file_name, file_ref, yuklama_id, note, created_at, updated_at")
 
 # KOMPANIYA HUJJATLARI — ijarachi siri (J1.6). Har so'rovda `company_id`.
 # `id` bo'yicha murojaatda ham filtr bor: begona hujjatni taxmin qilib

@@ -649,6 +649,58 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "search_uploaded_file",
+        "description": (
+            "FOYDALANUVCHI SHU SUHBATGA YUKLAGAN fayl(lar) ichidan qidiradi. "
+            "Suhbatda biriktirilgan fayl bo'lsa va savol 'shu fayl', "
+            "'yuklagan hujjatim', 'bu hujjatda' kabi so'zlar bilan kelsa "
+            "BIRINCHI NAVBATDA shuni ishlating -- tender korpusidan EMAS.\n"
+            "Foydalanuvchi 'faqat shu fayl asosida javob ber' desa, "
+            "BOSHQA HECH QANDAY qidiruv tool'ini chaqirmang: javob "
+            "topilmasa 'yuklangan faylda topilmadi' deb ayting va "
+            "umumiy korpusdan TO'LDIRMANG.\n"
+            "Fayl hali `tayyor` bo'lmasa tool shuni aytadi -- kuting, "
+            "taxmin qilmang."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "Nimani qidirmoqchisiz"},
+                "file_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Faqat shu fayllar ichidan. Bo'sh -- "
+                                   "suhbatdagi HAMMA biriktirilgan fayl",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "search_company_documents",
+        "description": (
+            "KOMPANIYANING O'Z HUJJATLARI (litsenziya, sertifikat, kafolat "
+            "xati, ustav) ichidan qidiradi.\n"
+            "FAQAT foydalanuvchi ATAYLAB o'z hujjatlarini so'raganda "
+            "ishlating: 'bizning litsenziyamizda', 'kompaniya hujjatlarida', "
+            "'sertifikatimiz qachon tugaydi'. Har savolda AVTOMATIK "
+            "chaqirmang -- bu foydalanuvchi so'ramagan joyda uning shaxsiy "
+            "hujjati matnini javobga olib chiqadi.\n"
+            "Hujjat MAVJUDLIGI va MUDDATI uchun bu tool KERAK EMAS -- "
+            "`check_compliance` aniq javob beradi. Bu tool hujjat MATNI "
+            "ichidan qidiradi."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "Hujjat matnidan nimani qidirmoqchisiz"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "compare_tenders",
         "description": (
             "BIR NECHTA tenderni yonma-yon taqqoslaydi: HUJJATDAN "
@@ -936,6 +988,125 @@ def _t_get_tender(args: dict, ctx: ChatContext) -> dict:
     return detail
 
 
+def _yuklama_iqtibos(ctx: ChatContext, r: dict, manba_turi: str) -> int:
+    """Iqtibosni `ctx` ga yozadi va MANBA RAQAMINI qaytaradi.
+
+    RAQAM SESSIYA BO'YLAB UZLUKSIZ — `_t_search_documents` bilan AYNI
+    qoida. Ikki xil qidiruv o'z raqamlashini boshlasa javobdagi [3]
+    qaysi manbaga tegishli ekani noaniq bo'lardi va frontend
+    (`CitationChip` massiv indeksi + 1) mos kelmasdi.
+    """
+    ctx.citations.append({
+        "manba_turi": manba_turi,
+        "yuklama_id": str(r["yuklama_id"]),
+        "chunk_id": r["id"],
+        "chunk_no": r["chunk_no"],
+        # SAHIFA FAQAT MA'LUM BO'LSA. `None` qoladi va UI bo'lak
+        # raqamini ko'rsatadi — DOCX/TXT uchun soxta sahifa
+        # yasalmaydi (§20).
+        "sahifa": r.get("sahifa"),
+        "file_name": r["original_nom"],
+        "char_start": r["char_start"],
+        "char_end": r["char_end"],
+        "snippet": (r["text"] or "")[:200],
+    })
+    return len(ctx.citations)
+
+
+def _t_search_uploaded_file(args: dict, ctx: ChatContext) -> dict:
+    """Suhbatga biriktirilgan fayllardan qidiradi.
+
+    QAMROV IKKI QAVAT CHEKLANGAN: avval shu SESSIYAning faol
+    biriktirmalari ro'yxati olinadi, keyin qidiruvning O'ZI
+    `company_id` bilan filtrlaydi. Model bergan `file_ids` shu
+    ro'yxat bilan KESISHTIRILADI — model boshqa faylning id sini
+    aytsa u jimgina tashlanadi, tashqariga chiqmaydi.
+    """
+    from api import yuklama as _y
+
+    q = (args.get("query") or "").strip()
+    if not q:
+        return {"error": "Qidiruv matni juda qisqa."}
+
+    faol = _y.chat_fayllari(ctx.session_id, ctx.company_id)
+    if not faol:
+        return {"natija": [], "izoh": "Bu suhbatga fayl biriktirilmagan."}
+
+    # HOLAT AYTILADI, YASHIRILMAYDI: hali ajratilmagan fayl "topilmadi"
+    # deb ko'rsatilsa model "faylda bunday ma'lumot yo'q" deb XATO
+    # xulosa chiqarardi.
+    tayyor = [f for f in faol if f["holat"] == "tayyor"]
+    kutilmoqda = [f["original_nom"] for f in faol
+                  if f["holat"] in ("yuklandi", "ajratilmoqda")]
+    muammoli = [{"nom": f["original_nom"], "holat": f["holat"],
+                 "sabab": f["xato"]} for f in faol
+                if f["holat"] in ("oqilmadi", "qollab_quvvatlanmaydi",
+                                  "yiqildi")]
+    if not tayyor:
+        return {"natija": [], "kutilmoqda": kutilmoqda,
+                "muammoli": muammoli,
+                "izoh": ("Fayl(lar) hali tayyor emas yoki matn ajratilmadi. "
+                         "Javob bermang, foydalanuvchiga holatni ayting.")}
+
+    ruxsat = {str(f["yuklama_id"]) for f in tayyor}
+    soralgan = [str(x) for x in (args.get("file_ids") or [])]
+    tanlov = sorted(ruxsat & set(soralgan)) if soralgan else sorted(ruxsat)
+    if not tanlov:
+        return {"natija": [], "izoh": "Ko'rsatilgan fayl bu suhbatda yo'q."}
+
+    rows = _y.qidir(ctx.company_id, q, faylar=tanlov, k=TOP_K_CHUNKS)
+    natija = []
+    for r in rows:
+        raqam = _yuklama_iqtibos(ctx, r, "chat_upload")
+        natija.append({
+            "manba_raqami": raqam,
+            "fayl": r["original_nom"],
+            "bolak": r["chunk_no"],
+            "sahifa": r.get("sahifa"),
+            "topilish": r["topilish"],
+            "text": (r["text"] or "")[:CHUNK_SNIPPET_CHARS],
+        })
+    return {"natija": natija, "kutilmoqda": kutilmoqda,
+            "muammoli": muammoli,
+            "izoh": ("Topilmasa 'yuklangan faylda topilmadi' deb ayting. "
+                     "Umumiy korpusdan TO'LDIRMANG.") if not natija else None}
+
+
+def _t_search_company_documents(args: dict, ctx: ChatContext) -> dict:
+    """Kompaniyaning O'Z hujjatlari matnidan qidiradi.
+
+    `manba_turi='company_doc'` bilan cheklangan: suhbatga yuklangan
+    fayllar bu tool orqali KO'RINMAYDI va teskarisi ham. Ikki
+    qamrovni bitta tool qilish "faqat shu fayl asosida javob ber"
+    talabini (§19) buzardi.
+    """
+    from api import yuklama as _y
+
+    q = (args.get("query") or "").strip()
+    if not q:
+        return {"error": "Qidiruv matni juda qisqa."}
+
+    rows = _y.qidir(ctx.company_id, q, manba_turi="company_doc",
+                    k=TOP_K_CHUNKS)
+    if not rows:
+        return {"natija": [],
+                "izoh": ("Kompaniya hujjatlari matnidan topilmadi. "
+                         "Hujjat MAVJUDLIGI/MUDDATI uchun "
+                         "`check_compliance` ni ishlating.")}
+    natija = []
+    for r in rows:
+        raqam = _yuklama_iqtibos(ctx, r, "company_document")
+        natija.append({
+            "manba_raqami": raqam,
+            "fayl": r["original_nom"],
+            "bolak": r["chunk_no"],
+            "sahifa": r.get("sahifa"),
+            "topilish": r["topilish"],
+            "text": (r["text"] or "")[:CHUNK_SNIPPET_CHARS],
+        })
+    return {"natija": natija}
+
+
 def _t_search_documents(args: dict, ctx: ChatContext) -> dict:
     # IDENTIFIKATOR BIR JOYDA HAL QILINADI (`_tender_id_ol`).
     # Sxema `integer` desa ham model matn uzatishi mumkin -- ilgari
@@ -962,6 +1133,13 @@ def _t_search_documents(args: dict, ctx: ChatContext) -> dict:
     for r in rows:
         # Iqtibosni ctx ga yozamiz — frontend shu bo'yicha chip chizadi.
         ctx.citations.append({
+            # MANBA TURI HAR IQTIBOSDA. Ilgari iqtibos faqat tender
+            # korpusidan kelardi va tur AYTILMAS edi. Endi uch manba
+            # bor (`tender`, `chat_upload`, `company_document`) va
+            # foydalanuvchi javob QAYERDAN kelganini ko'rishi kerak —
+            # "hujjatda shunday yozilgan" bilan "o'z litsenziyangizda
+            # shunday" bir xil vaznda emas.
+            "manba_turi": "tender",
             "chunk_id": r["id"],
             "tender_id": r["tender_id"],
             "file_ref": r["file_ref"],
@@ -1398,6 +1576,8 @@ TOOL_IMPL: Dict[str, Callable[[dict, ChatContext], dict]] = {
     "search_tenders":   _t_search_tenders,
     "get_tender":       _t_get_tender,
     "search_documents": _t_search_documents,
+    "search_uploaded_file": _t_search_uploaded_file,
+    "search_company_documents": _t_search_company_documents,
     "compare_tenders":  _t_compare_tenders,
     "check_stock":      _t_check_stock,
     "calc_price":       _t_calc_price,

@@ -165,11 +165,32 @@ fi
 # (`api/ommaviy_url.py`). Berilmasa xizmat ko'tarilmaydi, lekin
 # `example.uz` MAHALLIY EMAS va u qo'rovuldan O'TIB KETADI: xizmat
 # ko'tariladi, havolalar esa mavjud bo'lmagan domenga ketadi.
+# MAHALLIY MANZIL: STAGING da RUXSAT, PRODUCTION da QAT'IY TO'SIQ.
+#
+# QAROR (2026-09-07, B varianti). Bu o'rnatmada staging ga domen
+# ATAYLAB berilmagan: nginx bloki `listen 127.0.0.1:8091` da turadi
+# va unga SSH tunnel orqali kiriladi (`_server/bin/11-nginx.sh`
+# izohi). Ya'ni mahalliy `APP_PUBLIC_URL` -- xato emas, SHU
+# ARXITEKTURANING O'ZI.
+#
+# Ilgari tekshiruv muhitni ajratmasdi va staging ni HAR SAFAR
+# to'sardi. Natijasi eng yomon turdagi darvoza bo'lardi: u hech
+# qachon o'tmaydi, demak undan CHETLAB O'TISHNI o'rganishadi.
+#
+# PRODUCTION UCHUN HECH NARSA YUMSHATILMADI: u yerda mahalliy
+# manzil ham, HTTPS bo'lmagani ham, namunaviy domen ham TO'SIQ.
+# Staging da esa mahalliy manzil OGOHLANTIRISH bo'lib qoladi --
+# jim emas, lekin to'smaydi.
 URL="$(qiy APP_PUBLIC_URL)"
+MAHALLIY=0
+printf '%s' "$URL" | grep -qE 'localhost|127\.0\.0\.1' && MAHALLIY=1
 if [ -z "$URL" ]; then
     tosiq "APP_PUBLIC_URL bo'sh — xizmat UMUMAN ishga tushmaydi"
-elif printf '%s' "$URL" | grep -qE 'localhost|127\.0\.0\.1'; then
-    tosiq "APP_PUBLIC_URL MAHALLIY manzil"
+elif [ "$MAHALLIY" = "1" ] && [ "$MUHIT" = "production" ]; then
+    tosiq "APP_PUBLIC_URL MAHALLIY manzil — production da MUMKIN EMAS"
+elif [ "$MAHALLIY" = "1" ]; then
+    ogoh "APP_PUBLIC_URL mahalliy ($URL) — staging tashqariga chiqmaydi, \
+bu shu o'rnatmaning tanlovi; havolalar faqat SSH tunnelda ochiladi"
 elif printf '%s' "$URL" | grep -q 'example\.uz'; then
     tosiq "APP_PUBLIC_URL hali NAMUNAVIY domen (example.uz)"
 elif ! printf '%s' "$URL" | grep -q '^https://'; then

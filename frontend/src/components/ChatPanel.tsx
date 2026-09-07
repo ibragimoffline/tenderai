@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from './Icon'
+import ChatFayllar from './ChatFayllar'
+import type { ChatFayl } from '@/types'
 import ToolBadge from './ToolBadge'
 import CitationChip from './CitationChip'
 import { Button } from '@/components/ui/button'
@@ -71,6 +73,33 @@ export default function ChatPanel({ tenderId, manba, onClose,
   const [tarix, setTarix] = useState<Msg[]>([])
   const oxiriRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // BIRIKTIRILGAN FAYLLAR. `ChatFayllar` o'zi boshqaradi, bu yerda
+  // faqat NUSXASI turadi — savol yuborishda modelga "suhbatda fayl
+  // bor" deb aytish uchun.
+  const [fayllar, setFayllar] = useState<ChatFayl[]>([])
+  /** Kamida bitta fayl AI ishlata oladigan holatdami. */
+  const tayyorFayl = fayllar.some((f) => f.holat === 'tayyor')
+  // Sessiya `useChatStream` ichida birinchi savolda yaratiladi.
+  // Fayl esa undan OLDIN biriktirilishi mumkin, shuning uchun
+  // bu yerda ALOHIDA saqlanadi va `yubor()` uni uzatadi.
+  const [oldindanSid, setOldindanSid] = useState<string | null>(null)
+  // FAQAT SHU FAYL ASOSIDA (§19). Bayroq savol matniga ANIQ
+  // ko'rsatma qo'shadi — modelga "umumiy korpusdan to'ldirma" deb
+  // aytiladi va tool ta'rifi ham shuni takrorlaydi.
+  const [faqatFayl, setFaqatFayl] = useState(false)
+  const sid = state.sessionId || oldindanSid
+
+  /** Fayl biriktirish uchun BO'SH sessiya ochadi. */
+  const sessiyaOch = useCallback(async () => {
+    if (sid) return sid
+    const r = await api.createChatSession({
+      tender_id: tenderId ?? null, lang,
+      manba: manba ?? (tenderId ? 'panel' : 'global'),
+    })
+    setOldindanSid(r.session_id)
+    return r.session_id
+  }, [sid, tenderId, lang, manba])
 
   // --- SUHBATLAR TARIXI ---------------------------------------------
   // Backend `GET /chat/sessions` ni ANCHADAN BERI beradi, lekin
@@ -290,11 +319,21 @@ export default function ChatPanel({ tenderId, manba, onClose,
   function yubor() {
     const q = savol.trim()
     if (!q || state.streaming) return
+    // KO'RSATMA SAVOLGA QO'SHILADI, tarixga esa FOYDALANUVCHI
+    // YOZGANI yoziladi: ekranda o'zi yozmagan jumlani ko'rish
+    // chalkash bo'lardi.
+    const yuboriladigan = faqatFayl && tayyorFayl
+      ? `${q}
+
+[${t('chat.fileOnly')}]` : q
     setTarix((h) => [...h, { role: 'user', text: q }])
     setSavol('')
     // MANBA: kirish nuqtasidan kelgani ustun. Berilmasa — panel
     // yoki global, tender konteksti bor-yo'qligiga qarab.
-    void send(q, { sessionId: state.sessionId, tenderId, lang,
+    // OLDINDAN OCHILGAN SESSIYA USTUN: fayl unga biriktirilgan va
+    // yangi sessiya ochilsa biriktirma YO'QOLARDI — model faylni
+    // ko'rmasdi va buni foydalanuvchi faqat javobdan bilib qolardi.
+    void send(yuboriladigan, { sessionId: sid, tenderId, lang,
                    manba: manba ?? (tenderId ? 'panel' : 'global') })
     inputRef.current?.focus()
   }
@@ -520,7 +559,22 @@ export default function ChatPanel({ tenderId, manba, onClose,
 
       {/* --- Savol maydoni --------------------------------------------- */}
       <div className="border-t p-3">
-        <div className="flex items-end gap-2">
+        {/* BIRIKTIRMALAR KIRISH MAYDONIDAN YUQORIDA: 440px li panelda
+            ular yonma-yon sig'maydi va fayl nomi kesilib ketardi. */}
+        <ChatFayllar sessionId={sid} sessiyaOch={sessiyaOch}
+          onOzgardi={setFayllar} />
+        {/* FAQAT TAYYOR FAYL BO'LSA KO'RINADI. Ishlanayotgan fayl
+            bilan bu bayroqni yoqish "javob topilmadi" ga olib
+            kelardi va sabab ko'rinmasdi. */}
+        {tayyorFayl && (
+          <label className="mb-1 flex items-center gap-1.5 text-caption
+                            text-muted-foreground">
+            <input type="checkbox" checked={faqatFayl}
+              onChange={(e) => setFaqatFayl(e.target.checked)} />
+            {t('chat.fileOnly')}
+          </label>
+        )}
+        <div className="mt-2 flex items-end gap-2">
           <textarea
             ref={inputRef}
             value={savol}

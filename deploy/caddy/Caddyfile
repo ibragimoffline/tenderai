@@ -65,6 +65,27 @@ staging.example.uz {
 	# API — port muhitdan emas, bu yerda ANIQ: proksi qaysi portga
 	# urishini bilishi kerak va u `/etc/tenderai/staging.env` dagi
 	# `API_PORT` bilan MOS bo'lishi shart.
+	# TANA CHEGARASI — ILOVA CHEGARASIDAN BIR OZ KATTA.
+	#
+	# NEGA KERAK: `MAX_UPLOAD_MB=25` FAQAT ilova qatlamida ishlaydi.
+	# Proksi cheklamasa, 500 MB li so'rov ilovagacha yetib boradi va
+	# uni `_yuklangani()` bo'laklab o'qib rad etadi — lekin tarmoq
+	# va vaqt ALLAQACHON sarflangan. Bu qatlam so'rovni ERTAROQ
+	# to'xtatadi.
+	#
+	# NEGA 26 MB, 25 EMAS: multipart o'ramasi (chegara satrlari,
+	# sarlavhalar, fayl nomi) bir necha KB qo'shadi. Chegarani AYNAN
+	# 25 MB qilsak, 25 MB li fayl proksida 413 olardi va foydalanuvchi
+	# ilovaning tushunarli xatosini KO'RMASDI — u faqat proksining
+	# yalang'och 413 sahifasini ko'rardi.
+	#
+	# `MAX_UPLOAD_MB` o'zgarsa BU HAM o'zgarishi shart. Ikki joyda
+	# turgani yoqimsiz, lekin muqobili yo'q: Caddy ilova muhitini
+	# o'qimaydi. `_tests/deploy_test.py` ikkalasini SOLISHTIRADI.
+	request_body {
+		max_size 26MB
+	}
+
 	handle /api/* {
 		uri strip_prefix /api
 		reverse_proxy 127.0.0.1:8001 {
@@ -89,6 +110,27 @@ staging.example.uz {
 # ALMASHTIRING: tender.example.uz
 tender.example.uz {
 	import umumiy production
+
+	# TANA CHEGARASI — ILOVA CHEGARASIDAN BIR OZ KATTA.
+	#
+	# NEGA KERAK: `MAX_UPLOAD_MB=25` FAQAT ilova qatlamida ishlaydi.
+	# Proksi cheklamasa, 500 MB li so'rov ilovagacha yetib boradi va
+	# uni `_yuklangani()` bo'laklab o'qib rad etadi — lekin tarmoq
+	# va vaqt ALLAQACHON sarflangan. Bu qatlam so'rovni ERTAROQ
+	# to'xtatadi.
+	#
+	# NEGA 26 MB, 25 EMAS: multipart o'ramasi (chegara satrlari,
+	# sarlavhalar, fayl nomi) bir necha KB qo'shadi. Chegarani AYNAN
+	# 25 MB qilsak, 25 MB li fayl proksida 413 olardi va foydalanuvchi
+	# ilovaning tushunarli xatosini KO'RMASDI — u faqat proksining
+	# yalang'och 413 sahifasini ko'rardi.
+	#
+	# `MAX_UPLOAD_MB` o'zgarsa BU HAM o'zgarishi shart. Ikki joyda
+	# turgani yoqimsiz, lekin muqobili yo'q: Caddy ilova muhitini
+	# o'qimaydi. `_tests/deploy_test.py` ikkalasini SOLISHTIRADI.
+	request_body {
+		max_size 26MB
+	}
 
 	handle /api/* {
 		uri strip_prefix /api

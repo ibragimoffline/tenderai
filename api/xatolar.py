@@ -160,6 +160,20 @@ KODLAR: Dict[str, int] = {
     "CATALOG_IMPORT_INVALID": 400,
     "IMPORT_FORMAT_INVALID": 422,
 
+    # --- Yuklangan fayl (schema_patch_yuklama.sql) ---------------
+    #
+    # `FILE_NOT_FOUND` 404: BEGONA fayl uchun ham AYNI SHU kod
+    # qaytadi. 403 ("bor, lekin sizga emas") faylning MAVJUDLIGINI
+    # tasdiqlardi va id ni taxmin qilib korpusni sanab chiqish
+    # mumkin bo'lardi. Loyihada bu naqsh allaqachon ishlatiladi
+    # (`DOC_UPDATE_SQL` da `company_id` WHERE bandida -> 404).
+    "FILE_NOT_FOUND": 404,
+    "FILE_TYPE_MISMATCH": 422,
+    "FILE_NOT_READY": 409,
+    "UPLOAD_QUOTA_EXCEEDED": 413,
+    "STORAGE_BACKEND_UNKNOWN": 500,
+    "STORAGE_WRITE_FAILED": 500,
+
     # --- Bildirishnoma -------------------------------------------
     "NOTIFY_CONFIG_INVALID": 400,
     "NOTIFY_EMAIL_REQUIRED": 400,

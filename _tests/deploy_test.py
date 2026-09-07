@@ -273,8 +273,9 @@ def test_staging_birinchi():
     d = oqi("bin", "deploy.sh")
     check("production uchun staging tasdig'i TALAB qilinadi",
           ".verified" in d and "staging tasdigi yoq" in d)
-    check("AYNAN SHU ref tekshirilgani solishtiriladi",
-          "BOSHQA ref tekshirilgan" in d)
+    check("AYNAN SHU KOMMIT tekshirilgani solishtiriladi",
+          "BOSHQA KOMMIT tekshirilgan" in d,
+          "shox nomi bo'yicha solishtirish `main` uchun MA'NOSIZ")
     check("tasdiq staging MUVAFFAQIYATLI tugagach yoziladi",
           re.search(r'if \[ "\$MUHIT" = "staging" \].*?\.verified', d, re.S) is not None)
 
@@ -305,10 +306,105 @@ def test_proksi():
     check("API faqat 127.0.0.1 ga proksi", "reverse_proxy 127.0.0.1:" in c)
     check("staging YOPIQ (basic_auth)", "basic_auth" in c)
 
+    # TANA CHEGARASI IKKALA MUHITDA VA ILOVA CHEGARASI BILAN MOS.
+    #
+    # NEGA SINOV KERAK: `MAX_UPLOAD_MB` va Caddy `max_size` — ikki
+    # AYRIM joyda va Caddy ilova muhitini o'qimaydi. Ular ajralib
+    # ketsa nuqson JIM bo'ladi:
+    #   proksi kichik  -> foydalanuvchi ilovaning tushunarli xatosi
+    #                     o'rniga proksining yalang'och 413 sahifasini
+    #                     ko'radi;
+    #   proksi katta   -> 500 MB li so'rov ilovagacha yetib boradi.
+    import re as _re
+    olcham = _re.findall(r"max_size\s+(\d+)MB", c)
+    check("proksi tana chegarasi IKKALA muhitda bor",
+          len(olcham) >= 2, str(olcham))
+    if olcham:
+        from api import saqlash as _s
+        # Proksi ILOVADAN KATTA bo'lishi shart: multipart o'ramasi
+        # (chegara satrlari, sarlavhalar) bir necha KB qo'shadi.
+        check("proksi chegarasi ilova chegarasidan KATTA",
+              all(int(x) > _s.MAX_UPLOAD_MB for x in olcham),
+              f"caddy={olcham} ilova={_s.MAX_UPLOAD_MB}MB")
+        # Lekin CHEKSIZ ham emas: 2 barobardan oshsa proksi amalda
+        # himoya qilmay qo'yadi.
+        check("proksi chegarasi ilova chegarasiga YAQIN",
+              all(int(x) <= _s.MAX_UPLOAD_MB * 2 for x in olcham),
+              f"caddy={olcham} ilova={_s.MAX_UPLOAD_MB}MB")
+
     api = oqi("systemd", "tenderai-api@.service")
     check("uvicorn faqat 127.0.0.1 ga bog'lanadi",
           "--host 127.0.0.1" in api and "0.0.0.0" not in api)
     check("proksi sarlavhalari yoqilgan", "--proxy-headers" in api)
+
+
+def test_zaxira_tashqi():
+    bolim("8b. Zaxira — tashqi nusxa va fayl arxivi")
+    b = oqi("bin", "backup.sh")
+    # ISHLAB CHIQARISHDA TASHQI NUSXA MAJBURIY.
+    #
+    # NEGA SINOV: ilgari sozlanmagani faqat OGOHLANTIRISH edi va
+    # skript 0 bilan tugardi — `systemd` timer uni "muvaffaqiyatli"
+    # deb yozardi. Bitta diskdagi zaxira YASHIL ko'rinardi.
+    check("production da `BACKUP_REMOTE_CMD` MAJBURIY",
+          'elif [ "$MUHIT" = "production" ]' in b and "exit 1" in b)
+    check("staging da OGOHLANTIRISH bo'lib qoladi",
+          "staging uchun ruxsat" in b)
+    # FAYL ARXIVI — `pg_dump` yuklangan hujjatlarni OLMAYDI.
+    check("yuklangan fayllar ARXIVLANADI", "FAYL_ARXIV" in b and "tar -czf" in b)
+    check("fayl arxivi ham UZOQQA ketadi",
+          "FAYL_ARXIV:+" in b)
+    check("bo'sh arxiv JIM O'TMAYDI (baza soni bilan solishtiriladi)",
+          "FROM yuklama WHERE arxiv_at IS NULL" in b)
+    check("`UPLOAD_ROOT` reliz ichida bo'lsa OGOHLANTIRADI",
+          "RELIZ ICHIDA" in b)
+    r = oqi("bin", "restore-test.sh")
+    check("tiklash mashqi fayl arxivini ham tekshiradi",
+          "FAYL_ARXIV" in r and "fayl arxivi BO'SH" in r)
+
+
+def test_e2e_darvozasi():
+    bolim("8c. Staging E2E darvozasi — MAJBURIY")
+    d = oqi("bin", "deploy.sh")
+    # `.verified` NI QIDIRISH YETARLI EMAS: u sarlavha IZOHIDA ham,
+    # `TASDIQ=` ta'rifida ham bor va ikkalasi ham fayl BOSHIDA.
+    # Ilgari shu shart aynan shuning uchun yiqilgan edi -- skaner
+    # NASRni o'qidi, KODni emas. Solishtiriladigan narsa YOZUV AMALI.
+    yozuv = '> "${ILDIZ}/.verified"'
+    check("`.verified` yozuvi topildi", yozuv in d)
+    check("E2E `.verified` YOZUVIDAN OLDIN yuradi",
+          "e2e-fayl.sh" in d and yozuv in d
+          and d.index("e2e-fayl.sh") < d.index(yozuv))
+    # SOZLANMAGANI 'O'TDI' EMAS. `:?` bilan bo'sh o'zgaruvchi
+    # skriptni TO'XTATADI.
+    for o in ("E2E_URL", "E2E_LOGIN", "E2E_PAROL",
+              "E2E_BEGONA_LOGIN", "E2E_BEGONA_PAROL"):
+        check(f"`{o}` sozlanmagani XATO (`:?`)", f"{o}:?" in d)
+    # `--begona` va `--ai` DOIM beriladi: ularsiz ijarachi
+    # chegarasi va iqtibos zanjiri O'LCHANMAYDI.
+    check("`--begona` DOIM beriladi", "--begona" in d)
+    check("`--ai` DOIM beriladi (iqtibos zanjiri)", "--ai" in d)
+    # `--proksi` -- 413 QAYSI QATLAMDAN kelganini ajratadi.
+    # Busiz "413 keldi" degan xulosa Caddy chegarasi ISHLAYOTGANINI
+    # isbotlamasdi: uni ilova ham qaytaradi.
+    check("`--proksi` DOIM beriladi (Caddy chegarasi isboti)",
+          "--proksi" in d)
+    check("E2E yiqilsa ORQAGA QAYTARILADI",
+          "E2E YIQILDI" in d and d.count("ln -sfn \"$ESKI\"") >= 2)
+    # Skriptning O'ZI ham ikki shartni majburiy qiladi.
+    e = oqi("bin", "e2e-fayl.sh")
+    check("skript `--begona` siz YIQILADI",
+          "ijarachi chegarasi O'LCHANMADI" in e)
+    check("skript `--ai` siz YIQILADI",
+          "IQTIBOS O'LCHANMADI" in e)
+    check("skript javob va iqtibosni AJRATADI",
+          "citation" in e and "token" in e and "ajratilgan" in e)
+    check("skript 413 ni QATLAM bo'yicha ajratadi",
+          "FILE_TOO_LARGE" in e and "to'xtatgan qatlam" in e)
+    check("skript proksi JUDA KICHIK emasligini ham tekshiradi",
+          "proksidan O'TADI" in e)
+    check("skript BRAUZER sinovi EMASligini aytadi",
+          "BRAUZER sinovi EMAS" in e)
 
 
 def test_sogliq():
@@ -792,6 +888,30 @@ class _SoxtaAPI(threading.Thread):
         self.srv.shutdown()
 
 
+
+def _mashq_repo(yol, teg):
+    """Mashq uchun bitta kommitli bare repo yasaydi va teg qo'yadi.
+
+    `deploy.sh` `$REF` ni `rev-parse` bilan kommitga hal qiladi —
+    ya'ni mashqda ham HAQIQIY git obyekti kerak. Soxta yo'l bersak
+    skript birinchi qadamda to'xtaydi va mashq keyingi qadamlarni
+    umuman sinamaydi.
+    """
+    ish = yol + ".ish"
+    os.makedirs(ish, exist_ok=True)
+    io.open(os.path.join(ish, "README"), "w", encoding="utf-8").write("mashq\n")
+    e = dict(os.environ)
+    e.update({"GIT_AUTHOR_NAME": "mashq", "GIT_AUTHOR_EMAIL": "m@example.invalid",
+              "GIT_COMMITTER_NAME": "mashq", "GIT_COMMITTER_EMAIL": "m@example.invalid"})
+    for buyruq in (["git", "init", "-q", "-b", "main"],
+                   ["git", "add", "README"],
+                   ["git", "commit", "-q", "-m", "mashq"],
+                   ["git", "tag", teg]):
+        subprocess.run(buyruq, cwd=ish, env=e, capture_output=True)
+    subprocess.run(["git", "clone", "-q", "--bare", ish, yol],
+                   env=e, capture_output=True)
+
+
 def test_mashq():
     bolim("16. MASHQ — skriptlar HAQIQATAN yurgiziladi")
 
@@ -1002,9 +1122,19 @@ def test_mashq():
                 "BACKUP_DIR=" + _posix_yol(bash, pzaxira),
                 "",
             ]))
+        # HAQIQIY BARE REPO — `deploy.sh` endi `$REF` ni KOMMITGA
+        # hal qiladi (`.verified` o'zgarmas SHA saqlashi uchun) va
+        # buni har qanday tekshiruvdan OLDIN qiladi. Repo bo'lmasa
+        # mashq shu qadamda to'xtardi va tasdiq darvozasiga
+        # YETIB BORMASDI — ya'ni mashq o'zi ko'rmoqchi bo'lgan
+        # narsani ko'rmay qolardi.
+        prepo = os.path.join(baza, "mashq-repo.git")
+        _mashq_repo(prepo, "v1.2.3")
+
         pmuhit = {"TENDERAI_ILDIZ": _posix_yol(bash, pildiz),
                   "TENDERAI_STAGING_ILDIZ": _posix_yol(bash, ildiz),
                   "TENDERAI_ENVFILE": _posix_yol(bash, penv),
+                  "TENDERAI_REPO": _posix_yol(bash, prepo),
                   # Caddy mashq mashinasida yo'q -> "tekshirilmadi"
                   # (to'siq EMAS). Aniq ko'rsatiladi, chunki
                   # `/etc/caddy/Caddyfile` HAQIQATAN bor bo'lsa
@@ -1017,13 +1147,24 @@ def test_mashq():
                            qoshimcha=pmuhit)
         check("joylashtirish: staging TASDIG'I yo'q -> RAD", kod == 1,
               f"kod={kod}")
+        # ESKI FORMAT (shox/teg nomi) — endi RAD ETILADI. Sabab:
+        # "v1.2.2" qaysi KOMMIT tekshirilganini aytmaydi, ya'ni
+        # tenglik tekshiruvi himoya bermaydi.
         io.open(tasdiq, "w", encoding="utf-8").write("v1.2.2")
         kod, chiq = yurgiz("deploy.sh", "production", "v1.2.3",
                            qoshimcha=pmuhit)
-        check("joylashtirish: BOSHQA ref tekshirilgan -> RAD", kod == 1,
+        check("joylashtirish: ESKI FORMATDAGI tasdiq -> RAD", kod == 1,
               f"kod={kod}")
-        check("joylashtirish: qaysi ref tekshirilgani AYTILADI",
-              "v1.2.2" in chiq and "v1.2.3" in chiq)
+        check("joylashtirish: SABABI aytiladi (kommit emas)",
+              "ESKI FORMATDA" in chiq, chiq[-400:])
+
+        # 40 belgili, LEKIN BOSHQA kommit — asosiy holat.
+        io.open(tasdiq, "w", encoding="utf-8").write("b" * 40)
+        kod, chiq = yurgiz("deploy.sh", "production", "v1.2.3",
+                           qoshimcha=pmuhit)
+        check("joylashtirish: BOSHQA KOMMIT -> RAD", kod == 1, f"kod={kod}")
+        check("joylashtirish: IKKALA kommit ham ko'rsatiladi",
+              "b" * 40 in chiq, chiq[-400:])
 
         # --- deploy.sh: YIQILSA YARIM RELIZ QOLMAYDI ---------------------
         # `git archive` mavjud bo'lmagan repoda yiqiladi — mashqda
@@ -1036,8 +1177,13 @@ def test_mashq():
         qolgan = os.listdir(os.path.join(pildiz, "releases"))
         check("joylashtirish: yiqilgach YARIM RELIZ QOLMAYDI",
               qolgan == [], str(qolgan))
-        check("joylashtirish: tozalash JIMGINA emas",
-              "yarim reliz olib tashlanmoqda" in chiq)
+        # SHA hal qilish endi katalog yaratilishidan OLDIN yuradi,
+        # ya'ni yo'q repo bilan yarim reliz UMUMAN yaratilmaydi.
+        # Ikkala yo'l ham to'g'ri; muhimi — SABAB aytilsin va katalog
+        # qolmasin (yuqorida tekshirildi).
+        check("joylashtirish: yiqilish SABABI aytiladi",
+              ("yarim reliz olib tashlanmoqda" in chiq
+               or "ko'zguda topilmadi" in chiq), chiq[-400:])
     finally:
         try:
             api.toxta()
@@ -1352,6 +1498,245 @@ def test_oldindan_tekshiruv():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+
+def test_ozgarmas_tasdiq():
+    bolim("18. `.verified` O'ZGARMAS KOMMIT SAQLAYDI")
+
+    # NEGA. `main` HARAKATLANUVCHI. Staging uni bir kommitda
+    # tekshiradi, ertaga `main` boshqasini ko'rsatadi, `.verified`
+    # da esa hamon "main" yozilgan bo'ladi.
+    #
+    # O'LCHANGAN HOLAT (2026-09-07): `.verified` = "main", staging
+    # 5-sentabr kodida, `main` esa 129 fayl oldinda edi.
+    # `deploy.sh production main` shu holatda O'TARDI — ya'ni
+    # darvoza bor, himoya yo'q.
+    d = oqi("bin", "deploy.sh")
+
+    check("SHA `rev-parse` bilan hal qilinadi", "rev-parse --verify" in d)
+    check("tasdiqqa REF emas, SHA yoziladi",
+          'printf \'%s\' "$SHA" > "${ILDIZ}/.verified"' in d,
+          "`$REF` yozilsa shox nomi saqlanadi va tenglik ma'nosiz")
+    check("REF endi tasdiqqa YOZILMAYDI",
+          'printf \'%s\' "$REF" > "${ILDIZ}/.verified"' not in d)
+    check("production tenglikni SHA da tekshiradi",
+          '"$TASDIQLANGAN" != "$SHA"' in d)
+    check("eski format (shox nomi) RAD ETILADI", "ESKI FORMATDA" in d)
+
+    # SHA hal qilish QIMMAT qadamlardan oldin bo'lsin — noto'g'ri ref
+    # `venv` va `npm ci` dan KEYIN emas, DARHOL aytilsin.
+    if "rev-parse --verify" in d and "python3 -m venv" in d:
+        check("SHA hal qilish `venv` dan OLDIN",
+              d.index("rev-parse --verify") < d.index("python3 -m venv"))
+    if "rev-parse --verify" in d and "git archive" in d:
+        check("SHA hal qilish `git archive` dan OLDIN",
+              d.index("rev-parse --verify") < d.index("git archive"))
+
+    # 40 belgi qo'riqchisi IKKALA tomonda ham bo'lsin: yozishda ham,
+    # o'qishda ham. Bittasi yetmaydi — eski `.verified` fayli
+    # o'rnatmada allaqachon turibdi.
+    check("40 belgi qo'riqchisi ikki joyda",
+          d.count("????????????????????????????????????????") >= 2,
+          "biri SHA ni hal qilishda, biri tasdiqni o'qishda")
+
+
+def test_darvoza_dsn():
+    bolim("19. RELIZ DARVOZASI: DSN MAJBURIY (yolg'on 'statik' da'vosi yo'q)")
+
+    # O'LCHANGAN YOLG'ON (2026-09-07): darvoza "DSN bo'lmasa STATIK
+    # butunlik baribir tekshiriladi" deb yozardi va `migratsiya.py
+    # --tekshir` ni DSN siz chaqirardi. `migratsiya.py` da statik
+    # rejim UMUMAN yo'q — u har holatda `Jurnal(dsn)` quradi.
+    # Ya'ni "tekshirildi" degan xabar hech qachon rost bo'lmagan.
+    g = oqi("bin", "relis-darvoza.sh")
+
+    check("DSN siz `migratsiya.py` CHAQIRILMAYDI",
+          'migratsiya.py --tekshir || xato' not in g,
+          "eski `else` shoxi DSN siz chaqirardi va u hech qachon "
+          "ishlamagan")
+    check("'statik butunlik tekshiriladi' da'vosi olib tashlangan",
+          "STATIK butunlik (manifest, checksum, fayllar) baribir" not in g)
+    check("DSN yo'q bo'lsa darvoza YIQILADI",
+          "migratsiya butunligi TEKSHIRILMADI" in g)
+
+    # `migratsiya.py` da haqiqatan statik rejim YO'Qligini tasdiqlaymiz.
+    # Bo'lsa — bu tekshiruv eskirgan va qayta ko'rilishi kerak.
+    m = io.open(os.path.join(ROOT, "migratsiya.py"), encoding="utf-8").read()
+    check("`migratsiya.py` DSN siz ishlamaydi (da'vo shundan yolg'on edi)",
+          "XT_DB_DSN o'rnatilmagan" in m)
+
+    # YURGIZIB tekshiramiz: DSN siz darvoza to'xtasin va SABABINI
+    # aytsin. Matnni o'qish yetmaydi — `set -u` yoki tartib xatosi
+    # boshqa joyda yiqitishi mumkin edi.
+    bash = _mashq_bash()
+    if not bash:
+        check("bash yo'q — yurgizib tekshirilmadi", True)
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        # To'plamlar yurmasin: `run_tests.py` o'rniga bo'sh ildiz
+        # beramiz — darvoza 1-bo'limda yiqiladi va 3-bo'limga
+        # yetmaydi. Shuning uchun AYNAN 3-bo'limni tekshirish uchun
+        # skriptni matndan emas, o'z ildizida yurgizamiz va faqat
+        # DSN o'zgaruvchilarini olib tashlaymiz.
+        e = dict(os.environ)
+        e.pop("XT_DB_DSN", None)
+        e.pop("XT_DB_DSN_OWNER", None)
+        e["TENDERAI_KUTILGAN_TOPLAM"] = "999999"   # 1-bo'limda to'xtasin
+        r = subprocess.run([bash, os.path.join(D, "bin", "relis-darvoza.sh"),
+                            _posix_yol(bash, ROOT)],
+                           capture_output=True, text=True, env=e, cwd=tmp)
+        # 1-bo'lim to'xtatgani ham, 3-bo'lim to'xtatgani ham MAYLI —
+        # muhimi: darvoza "o'tdi" DEMAYDI.
+        check("DSN siz darvoza O'TMAYDI", r.returncode != 0,
+              f"chiqish kodi {r.returncode}")
+        check("chiqishda 'statik o'tdi' degan yolg'on yo'q",
+              "(statik)" not in (r.stdout + r.stderr))
+
+
+
+def test_mahalliy_url_muhitga_qarab():
+    bolim("20. MAHALLIY `APP_PUBLIC_URL`: staging RUXSAT, production TO'SIQ")
+
+    # QAROR (2026-09-07, B varianti). Bu o'rnatmada staging ga domen
+    # ATAYLAB berilmagan — nginx bloki `127.0.0.1:8091` da turadi va
+    # unga SSH tunnel orqali kiriladi.
+    #
+    # Ilgari tekshiruv muhitni ajratmasdi va staging ni HAR SAFAR
+    # to'sardi. Hech qachon o'tmaydigan darvozaning oqibati bitta:
+    # undan chetlab o'tishni o'rganishadi.
+    #
+    # PRODUCTION UCHUN HECH NARSA YUMSHATILMADI va bu sinovning
+    # ASOSIY vazifasi — aynan shuni qulflash.
+    bash = _mashq_bash()
+    if not bash:
+        check("bash yo'q — yurgizib tekshirilmadi", True)
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_url_")
+    try:
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        N = chr(10)
+        y = os.path.join(qutі, "psql")
+        io.open(y, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N + "echo 1" + N + "exit 0" + N)
+        os.chmod(y, 0o755)
+        shim_p = _posix_yol(bash, qutі)
+
+        def yurgiz(muhit, envfile, caddyfile):
+            e = dict(os.environ)
+            e["TENDERAI_ENVFILE"] = _posix_yol(bash, envfile)
+            e["TENDERAI_CADDYFILE"] = _posix_yol(bash, caddyfile)
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 shim_p, "deploy/bin/oldindan-tekshir.sh", muhit],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=180)
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+        def mahalliy(env):
+            return (env.replace("APP_PUBLIC_URL=https://tender.mycompany.uz",
+                                "APP_PUBLIC_URL=http://localhost:8091")
+                       .replace("APP_ENV=production", "APP_ENV=staging"))
+
+        # --- A) STAGING + mahalliy URL -> TO'SIQ EMAS ----------------
+        ey, cy = _oldindan_qur(os.path.join(baza, "st"),
+                               posix=lambda x: _posix_yol(bash, x),
+                               ozgartir=mahalliy)
+        kod, chiq = yurgiz("staging", ey, cy)
+        check("staging: mahalliy URL TO'SIQ EMAS",
+              "APP_PUBLIC_URL MAHALLIY manzil" not in chiq,
+              chiq[-600:])
+        check("staging: mahalliy URL JIM ham qolmaydi (ogohlantirish)",
+              "APP_PUBLIC_URL mahalliy" in chiq,
+              "to'smaslik va ko'rsatmaslik BOSHQA narsa")
+
+        # --- B) PRODUCTION + mahalliy URL -> QAT'IY TO'SIQ -----------
+        ey2, cy2 = _oldindan_qur(
+            os.path.join(baza, "pr"),
+            posix=lambda x: _posix_yol(bash, x),
+            ozgartir=lambda env: env.replace(
+                "APP_PUBLIC_URL=https://tender.mycompany.uz",
+                "APP_PUBLIC_URL=http://localhost:8091"))
+        kod2, chiq2 = yurgiz("production", ey2, cy2)
+        check("production: mahalliy URL TO'SIQ", kod2 == 1, f"kod={kod2}")
+        check("production: sabab AYTILADI",
+              "production da MUMKIN EMAS" in chiq2, chiq2[-600:])
+
+        # --- C) PRODUCTION + haqiqiy HTTPS -> shu sababdan to'siq yo'q
+        ey3, cy3 = _oldindan_qur(os.path.join(baza, "ok"),
+                                 posix=lambda x: _posix_yol(bash, x))
+        _kod3, chiq3 = yurgiz("production", ey3, cy3)
+        check("production: HTTPS domen bilan URL to'sig'i yo'q",
+              "APP_PUBLIC_URL MAHALLIY" not in chiq3
+              and "MUMKIN EMAS" not in chiq3, chiq3[-600:])
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
+
+def test_bajarish_bayrogi():
+    bolim("21. `deploy/bin/*.sh` — BAJARISH BAYROG'I (git rejimi)")
+
+    # BU NUQSON LOYIHADA IKKI MARTA BO'LGAN.
+    #
+    # Birinchi marta (#2): butun qatlam 100644 edi va joylashtirish
+    # umuman yurmasdi. Tuzatildi — LEKIN SINOV YOZILMADI.
+    #
+    # Ikkinchi marta (2026-09-07): uchta YANGI skript yana 100644
+    # bo'lib qo'shildi — `oldindan-tekshir.sh`, `relis-darvoza.sh`,
+    # `e2e-fayl.sh`.
+    #
+    # NEGA HECH KIM SEZMADI: `tender-deploy-ai` o'ramasi arxivni
+    # ochgach `chmod +x deploy/bin/*.sh` qiladi, ya'ni `deploy.sh`
+    # va u YONIDAN chaqiradigan `oldindan-tekshir.sh` ishlayverardi.
+    # Ammo `relis-darvoza.sh`, `health-check.sh` va `e2e-fayl.sh`
+    # RELIZ ICHIDAN (`${YANGI}/deploy/bin/...`) chaqiriladi, u esa
+    # `git archive` bilan ochiladi va CHMOD QILINMAYDI.
+    #
+    # Ya'ni reliz darvozasi ham, E2E darvozasi ham keyingi
+    # joylashtiruvda `126 Permission denied` bilan o'lardi —
+    # ikkalasi ham "darvoza" bo'lgani uchun bu eng yomon joy.
+    #
+    # DISKDAGI rejim EMAS, GIT dagi rejim tekshiriladi: reliz
+    # `git archive` dan chiqadi va u faqat git bilgan bayroqni
+    # olib chiqadi.
+    r = subprocess.run(["git", "ls-files", "-s", "deploy/"],
+                       capture_output=True, text=True, cwd=ROOT,
+                       encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        check("git ls-files ishladi", False, r.stderr[:200])
+        return
+
+    yomon = []
+    topildi = 0
+    for qator in r.stdout.splitlines():
+        if not qator.strip():
+            continue
+        rejim, _qolgani = qator.split(" ", 1)
+        yol = qator.split("\t", 1)[-1]
+        if not yol.endswith(".sh"):
+            continue
+        topildi += 1
+        if rejim != "100755":
+            yomon.append(f"{yol} [{rejim}]")
+
+    check("skriptlar topildi", topildi >= 8, f"{topildi} ta")
+    check("HAMMA `deploy/bin/*.sh` git da 100755", not yomon, str(yomon))
+
+    # RELIZ ICHIDAN chaqiriladiganlar ALOHIDA: aynan ular
+    # o'ramaning `chmod` idan foyda ko'rmaydi.
+    d = oqi("bin", "deploy.sh")
+    relizdan = re.findall(r'\$\{YANGI\}/deploy/bin/([A-Za-z0-9._-]+\.sh)', d)
+    check("reliz ichidan chaqiriladiganlar aniqlandi",
+          len(set(relizdan)) >= 2, str(sorted(set(relizdan))))
+    for nom in sorted(set(relizdan)):
+        yol = "deploy/bin/" + nom
+        rejim = next((q.split(" ", 1)[0] for q in r.stdout.splitlines()
+                      if q.endswith("\t" + yol)), None)
+        check(f"`{nom}` bajariladigan (relizdan chaqiriladi)",
+              rejim == "100755",
+              f"rejim={rejim} — `git archive` dan keyin 126 beradi")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -1369,6 +1754,8 @@ def main():
     test_zaxira()
     test_staging_birinchi()
     test_proksi()
+    test_zaxira_tashqi()
+    test_e2e_darvozasi()
     test_sogliq()
     test_jurnal()
     test_url_qorovuli()
@@ -1379,6 +1766,10 @@ def main():
     test_joylashuv_izchilligi()
     test_mashq()
     test_oldindan_tekshiruv()
+    test_ozgarmas_tasdiq()
+    test_darvoza_dsn()
+    test_mahalliy_url_muhitga_qarab()
+    test_bajarish_bayrogi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

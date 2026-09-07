@@ -222,6 +222,45 @@ qulflangan.
 
 ---
 
+## 5c. Staging E2E darvozasi — **majburiy**
+
+`deploy.sh` staging da `.verified` **yozishdan oldin**
+`deploy/bin/e2e-fayl.sh` ni yurgizadi. Yiqilsa — orqaga qaytarish,
+tasdiq **yozilmaydi**.
+
+**Nega `health-check.sh` yetarli emas:** u "xizmat javob
+beryaptimi" degan savolga javob beradi. Fayl yuklash oqimini —
+proksi tana chegarasi, `Content-Disposition`, cookie/CSRF,
+`StreamingResponse`, ijarachi chegarasi — u **umuman** tekshirmaydi.
+`_tests/yuklama_test.py` ham tekshirmaydi: u `TestClient` bilan
+yuradi va tarmoqqa **chiqmaydi**, ya'ni Caddy yo'lda **turmaydi**.
+
+```
+E2E_URL=https://staging.example.uz/api
+E2E_LOGIN=          E2E_PAROL=
+E2E_BEGONA_LOGIN=   E2E_BEGONA_PAROL=
+```
+
+**Ikki hisob shart:** ijarachi chegarasi bitta hisob bilan
+o'lchanmaydi. **Sozlanmagani "o'tdi" emas** — `deploy.sh` `:?`
+bilan to'xtaydi.
+
+> **Narxi:** `--ai` doim beriladi, ya'ni har staging joylashtiruvida
+> **bitta pullik model chaqiruvi** bo'ladi. Ataylab: iqtibos zanjiri
+> (fayl → bo'lak → javob) eng qimmat invariant va uni o'lchamasdan
+> "reliz tayyor" deb bo'lmaydi.
+
+Qo'lda ham yurgizsa bo'ladi:
+
+```bash
+deploy/bin/e2e-fayl.sh https://staging.example.uz/api \
+    broker 'parol' --begona broker2 'parol2' --ai
+```
+
+Batafsil: [`docs/fayl_yuklash.md`](fayl_yuklash.md) §9b.
+
+---
+
 ## 6. Sog'liq, tayyorlik, ETL yangiligi
 
 To'rt tekshiruv **ataylab ajratilgan** — ular boshqa-boshqa narsani
@@ -295,6 +334,41 @@ Jadval soni 10 dan kam bo'lsa dump **o'chiriladi** — shubhali.
 > **Hali o'lchanmagan:** RTO raqami faqat mashq birinchi marta
 > yurgandan keyin ma'lum bo'ladi. Bu yerda taxminiy raqam
 > yozilmaydi.
+
+### Yuklangan fayllar — **baza yolg'iz yetarli emas**
+
+`pg_dump` faqat bazani oladi. Foydalanuvchi yuklagan hujjat esa
+**diskda** (`UPLOAD_ROOT`) va bazada faqat kalit saqlanadi. Ikkisi
+ajralib qolsa tizim eng yomon shaklda buziladi: interfeys hujjatni
+"bor" deb ko'rsatadi, foydalanuvchi bosadi va **fayl topilmaydi** —
+ya'ni yo'qotish faqat bosilganda bilinadi.
+
+Shuning uchun `backup.sh` **ikkinchi arxiv** yasaydi:
+
+```
+tenderai-<muhit>-<stamp>.dump                 baza
+tenderai-<muhit>-<stamp>-fayllar.tar.gz       yuklangan fayllar
+```
+
+Ikkalasi ham `.sha256` bilan va ikkalasi ham `BACKUP_REMOTE_CMD`
+orqali uzoqqa ketadi.
+
+**Bo'sh arxiv jim o'tmaydi.** `backup.sh` bazadagi faol `yuklama`
+soni bilan arxivdagi fayl sonini solishtiradi: bazada fayl bor-u
+arxiv bo'sh bo'lsa — **xato bilan to'xtaydi**. Aks holda noto'g'ri
+`UPLOAD_ROOT` bilan zaxira yashil ko'rinardi.
+
+`restore-test.sh` mashqda fayl arxivini ham tekshiradi: mavjudligi,
+SHA-256 va bo'sh emasligi.
+
+> **`UPLOAD_ROOT` reliz ichida bo'lmasin.** `deploy.sh` har relizda
+> **yangi katalog** yasaydi; yo'l reliz ichida bo'lsa fayllar keyingi
+> joylashtiruvda ko'rinmay qoladi. Ishlab chiqarishda:
+> `UPLOAD_ROOT=/var/lib/tenderai/uploads`. `backup.sh` yo'l reliz
+> ichida ekanini sezsa **ogohlantiradi**.
+
+Batafsil: [`docs/fayl_yuklash.md`](fayl_yuklash.md).
+
 
 ---
 
