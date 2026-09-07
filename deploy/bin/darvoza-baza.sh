@@ -587,9 +587,42 @@ print("sys.path  :")
 for q in sys.path:
     print("   ", q or "<bo'sh>")
 PROBE
-    log "--- BOLA PROBE (suite bilan bir xil shaklda) ---"
+    # PROBE B — AYNAN SUITE JOYIDAN. Birinchi probe ildizdan yuradi va
+    # u O'TDI; to'plamlar esa `_tests/` dan yuradi va `sys.path` ga
+    # ikkita yo'l qo'shadi. Farq shu ikkisining orasida qoldi,
+    # shuning uchun ikkinchi probe AYNAN o'sha ketma-ketlikni
+    # takrorlaydi: `_tests/` da turadi, o'sha `sys.path.insert` larni
+    # qiladi va `konsol`/`rejim` ni `dotenv` dan OLDIN import qiladi.
+    cat > "${ILDIZ_TOLIQ}/_tests/_darvoza_probe2.py" <<'PROBE2'
+import os, sys
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+print("B: argv0    :", sys.argv[0])
+print("B: executable:", sys.executable)
+print("B: prefix   :", sys.prefix)
+print("B: path[0..2]:", sys.path[:3])
+try:
+    import konsol, rejim
+    print("B: konsol/rejim OK")
+    konsol.sozla()
+except Exception as e:
+    print("B: konsol/rejim XATO:", type(e).__name__, e)
+try:
+    from dotenv import load_dotenv
+    print("B: dotenv OK")
+except Exception as e:
+    print("B: dotenv XATO:", type(e).__name__, e)
+    print("B: sys.path:")
+    for q in sys.path:
+        print("     ", q or "<bosh>")
+PROBE2
+    log "--- BOLA PROBE A (ildizdan) ---"
     ( cd "$ILDIZ_TOLIQ" && PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 \
         "$PY" "${ILDIZ_TOLIQ}/_darvoza_probe.py" 2>&1 | sed 's/^/    /' ) >&2 || true
+    log "--- BOLA PROBE B (_tests dan, suite ketma-ketligi) ---"
+    ( cd "$ILDIZ_TOLIQ" && PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 \
+        "$PY" "${ILDIZ_TOLIQ}/_tests/_darvoza_probe2.py" 2>&1 | sed 's/^/    /' ) >&2 || true
     if ! "$PY" -c "import dotenv, psycopg2" >/dev/null 2>&1; then
         _zaxira="/opt/tenderai/${APP_ENV:-staging}/current/.venv/bin/python"
         if [ -x "$_zaxira" ] && "$_zaxira" -c "import dotenv, psycopg2" >/dev/null 2>&1; then
