@@ -389,13 +389,38 @@ def joylashuv_tekshir(ommaviy: str) -> None:
     sxema = urlsplit(ommaviy).scheme.lower()
 
     if sxema == "http" and COOKIE_SECURE:
-        raise JoylashuvXato(
-            f"APP_PUBLIC_URL={ommaviy} (http) va AUTH_COOKIE_SECURE=1 — "
-            "ZID.\n"
-            "  Brauzer `Secure` cookie ni http orqali YUBORMAYDI: "
-            "xizmat yashil ko'rinadi, kirish esa IMKONSIZ.\n"
-            "  Tuzatish: HTTPS qo'ying (tavsiya) yoki "
-            "`AUTH_COOKIE_SECURE=0` (faqat ichki tarmoqda).")
+        # ISTISNO — MAHALLIY MANZIL. Brauzerlar `Secure` cookie ni
+        # `localhost`/`127.0.0.1` uchun ishonchli kontekst deb
+        # hisoblaydi va http bo'lsa ham YUBORADI (yuqoridagi izohda
+        # ham "localhost dan tashqari" deb yozilgan). Ya'ni xususiy
+        # staging da bu juftlik ISHLAYDI va uni to'xtatish soxta
+        # to'siq bo'lardi.
+        #
+        # O'LCHANGAN (2026-09-07, staging darvozasi): `xavfsizlik_test`
+        # va `aktor_test` aynan shu yerda o'lardi, holbuki staging
+        # `127.0.0.1:8091` da SSH tunnel ortida turadi va sozlama
+        # to'g'ri edi.
+        #
+        # RUXSAT MUHITGA BOG'LIQ va manba YAGONA:
+        # `ommaviy_url.mahalliyga_ruxsat()` (dev/staging). Production
+        # da mahalliy manzilning O'ZI allaqachon to'siq, ya'ni bu
+        # tarmoq u yerda UMUMAN ochilmaydi — ikki qatlam bir xil
+        # ro'yxatdan oziqlanadi va ajralib keta olmaydi.
+        if ommaviy_url.mahalliymi(ommaviy) and ommaviy_url.mahalliyga_ruxsat():
+            logging.getLogger("api").warning(
+                "APP_PUBLIC_URL=%s (http) va AUTH_COOKIE_SECURE=1. "
+                "Mahalliy manzil uchun brauzer `Secure` cookie ni "
+                "baribir yuboradi, shuning uchun bu to'siq emas — "
+                "lekin bu sozlama OMMAVIY domenda kirishni butunlay "
+                "o'ldiradi (APP_ENV=%s).", ommaviy, muhit)
+        else:
+            raise JoylashuvXato(
+                f"APP_PUBLIC_URL={ommaviy} (http) va AUTH_COOKIE_SECURE=1 — "
+                "ZID.\n"
+                "  Brauzer `Secure` cookie ni http orqali YUBORMAYDI: "
+                "xizmat yashil ko'rinadi, kirish esa IMKONSIZ.\n"
+                "  Tuzatish: HTTPS qo'ying (tavsiya) yoki "
+                "`AUTH_COOKIE_SECURE=0` (faqat ichki tarmoqda).")
 
     if sxema == "https" and not TRUST_PROXY:
         logging.getLogger("api").warning(
