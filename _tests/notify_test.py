@@ -1249,6 +1249,28 @@ def main() -> None:
     if not os.environ.get("XT_DB_DSN"):
         sys.exit("XATO: XT_DB_DSN o'rnatilmagan (.env).")
 
+    # OMMAVIY URL MUHITDAN KELMASIN — BU SINOVNING SHARTNOMASI.
+    #
+    # Bu to'plam `notify_settings.base_url` (= `TEST_BASE`) havolani
+    # BELGILASHINI o'lchaydi. `api/ommaviy_url` esa MUHITDAGI
+    # `APP_PUBLIC_URL` ni bazadagi MAHALLIY qiymatdan ustun qo'yadi —
+    # va bu TO'G'RI xulq: ishlab chiqarishda bazada qolib ketgan
+    # `localhost` havolalarni buzmasligi kerak.
+    #
+    # O'LCHANGAN (2026-09-08): darvoza jarayoniga `APP_PUBLIC_URL`
+    # uzatila boshlagach uchta tekshiruv yiqildi, masalan
+    #
+    #   kutilgan 'http://localhost:5173/?tender=…'
+    #   olingan  'http://localhost:8091/?tender=…'
+    #
+    # ya'ni sinov o'zi boshqarmagan o'zgaruvchidan yiqilardi.
+    # `deploy_test:test_url_qorovuli` da ayni sinf tuzatilgan edi.
+    #
+    # MAHSULOT XULQI O'ZGARMAYDI: muhit ustunligi joyida qoladi,
+    # sinov shunchaki muhitni O'ZI egallaydi va oxirida tiklaydi.
+    _url_eski = {k: os.environ.pop(k, None)
+                 for k in ("APP_PUBLIC_URL", "PUBLIC_BASE_URL")}
+
     setup()
     print(f"Sinovlar: {len(CASES)} ta\n" + "-" * 52)
     try:
@@ -1262,6 +1284,9 @@ def main() -> None:
                 print(f"  XATO  {nomi}: {e}")
     finally:
         teardown()
+        for _k, _v in _url_eski.items():
+            if _v is not None:
+                os.environ[_k] = _v
         db.close_pool()
 
     print("-" * 52)
