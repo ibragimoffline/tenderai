@@ -5,6 +5,7 @@
 #     darvoza-baza.sh yarat   <manba-baza>    # nusxa + migratsiya
 #     darvoza-baza.sh tashla  <darvoza-baza>
 #     darvoza-baza.sh nom                     # yangi nom chop etadi
+#     darvoza-baza.sh tekshir                 # ulanish + rol (sirsiz)
 #
 # NEGA BU FAYL BOR — RELIZ TIQILINCHI
 # -----------------------------------
@@ -91,6 +92,29 @@ psql_() { psql "$XT_DB_DSN_TEST_ADMIN" -v ON_ERROR_STOP=1 -qtA "$@"; }
 log() { printf '[darvoza-baza] %s\n' "$*"; }
 
 case "$AMAL" in
+tekshir)
+    # ULANISH VA ROLNI TASDIQLAYDI — SIR CHOP ETMASDAN.
+    #
+    # DSN chiqishga TUSHMAYDI: u parol saqlaydi va bu skriptning
+    # chiqishi jurnalga hamda ko'p qo'ldan o'tadigan hisobotlarga
+    # ketadi. Faqat rol nomi, baza nomi va `CREATEDB` bayrog'i
+    # ko'rsatiladi — qaror uchun shuncha yetadi.
+    #
+    # `rolcreatedb` ALOHIDA tekshiriladi: rol mavjudligi uning
+    # baza YARATA OLISHINI bildirmaydi va bu farq aynan shu
+    # skript uchun hal qiluvchi.
+    psql_ -c "SELECT 'rol=' || current_user
+                  || '  baza=' || current_database()
+                  || '  createdb=' || (SELECT rolcreatedb FROM pg_roles
+                                        WHERE rolname = current_user)"
+    # `tai_service` da CREATEDB PAYDO BO'LIB QOLMAGANINI ham
+    # o'lchaymiz: bu loyihaning qat'iy qoidasi va uni "eslab
+    # qolishga" tayanib qoldirib bo'lmaydi.
+    psql_ -c "SELECT 'tai_service.createdb=' || COALESCE(
+                  (SELECT rolcreatedb::text FROM pg_roles
+                    WHERE rolname = 'tai_service'), '<rol yo''q>')"
+    ;;
+
 nom)
     printf '%s%s\n' "$DARVOZA_PREFIKS" "$(date +%Y%m%d_%H%M%S)"
     ;;
