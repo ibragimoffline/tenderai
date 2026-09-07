@@ -1737,6 +1737,82 @@ def test_bajarish_bayrogi():
               f"rejim={rejim} — `git archive` dan keyin 126 beradi")
 
 
+
+def test_darvoza_xulosani_oqiydi():
+    bolim("22. DARVOZA `run_tests.py` XULOSASINI HAQIQATAN O'QIYDIMI")
+
+    # O'LCHANGAN NUQSON (2026-09-07, staging joylashtiruvi).
+    #
+    # `run_tests.py` xulosani "JAMI: 44/44 to'plam yurdi, ..." deb
+    # chop etadi. Darvozaning naqshi esa `^JAMI: [0-9]+ to.plam` edi —
+    # raqamdan keyin darhol bo'shliq kutardi va "44/44" ga MOS
+    # KELMASDI.
+    #
+    # Natijada 44 to'plam HAQIQATAN yurdi, 35 tasi yiqildi, darvoza
+    # esa "to'plam UMUMAN BAJARILMADI" dedi. Darvozaning BUTUN
+    # maqsadi — "yurmadi" ni "yiqildi" dan ajratish — aynan shu
+    # joyda buzilgan edi.
+    #
+    # Darvoza to'sdi, ya'ni zarar bo'lmadi. Lekin YOLG'ON SABAB
+    # yolg'on yashilcha qimmat: operator yurgizuvchining o'zida
+    # nosozlik bor deb qidiradi.
+    #
+    # BU SINOV IKKI FAYLNI BOG'LAYDI. Format `run_tests.py` da,
+    # naqsh `relis-darvoza.sh` da — ular ALOHIDA o'zgaradi va
+    # aynan shuning uchun ajralib ketgan edi.
+    bash = _mashq_bash()
+    if not bash:
+        check("bash yo'q — yurgizib tekshirilmadi", True)
+        return
+
+    g = oqi("bin", "relis-darvoza.sh")
+    m = re.search(r'XULOSA="\$\(grep -E "([^"]+)"', g)
+    check("darvozadan naqsh topildi", m is not None,
+          "grep chaqirig'i o'zgargan bo'lsa sinov ham yangilansin")
+    if not m:
+        return
+    naqsh = m.group(1)
+
+    # FORMAT `run_tests.py` NING O'ZIDAN olinadi — qo'lda ko'chirilsa
+    # ikkinchi manba paydo bo'lardi va u ham ajralib ketardi.
+    rt = io.open(os.path.join(ROOT, "run_tests.py"), encoding="utf-8").read()
+    check("`run_tests.py` xulosani `JAMI:` bilan chop etadi",
+          'f"JAMI: {len(natijalar)}/{len(hamma_yol)} to\'plam yurdi, "' in rt,
+          "format o'zgargan — naqsh va bu sinov qayta ko'rilsin")
+
+    def urin(qator):
+        r = subprocess.run(
+            [bash, "-c",
+             'printf "%s\\n" "$1" | grep -E "$2" | tail -1', "_", qator, naqsh],
+            capture_output=True, text=True)
+        return r.stdout.strip()
+
+    # A) HAQIQIY format (yiqilgan bilan)
+    haqiqiy = "JAMI: 44/44 to'plam yurdi, 9 o'tdi, 35 yiqildi \u00b7 103s"
+    topildi = urin(haqiqiy)
+    check("YANGI format naqshga tushadi", topildi != "", haqiqiy)
+
+    if topildi:
+        def sed(ifoda):
+            r = subprocess.run(
+                [bash, "-c", 'printf "%s" "$1" | sed -E "$2"', "_",
+                 topildi, ifoda], capture_output=True, text=True)
+            return r.stdout.strip()
+        jami = sed("s@^JAMI: ([0-9]+).*@\\1@")
+        yiq = sed("s@.*o.tdi, ([0-9]+) yiqildi.*@\\1@")
+        check("YURGAN to'plam soni to'g'ri o'qiladi", jami == "44", jami)
+        check("YIQILGAN soni to'g'ri o'qiladi", yiq == "35", yiq)
+
+    # B) ESKI format ham ishlashda davom etsin (orqaga moslik)
+    check("ESKI format ham naqshga tushadi",
+          urin("JAMI: 44 to'plam, 0 yiqildi") != "")
+
+    # C) O'qib bo'lmagan xulosa "o'tdi" ga aylanmasin.
+    check("o'qib bo'lmagan xulosa uchun XATO bor",
+          "xulosa qatorini O'QIB BO'LMADI" in g,
+          "format yana o'zgarsa darvoza JIM qolmasin")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -1770,6 +1846,7 @@ def main():
     test_darvoza_dsn()
     test_mahalliy_url_muhitga_qarab()
     test_bajarish_bayrogi()
+    test_darvoza_xulosani_oqiydi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)
