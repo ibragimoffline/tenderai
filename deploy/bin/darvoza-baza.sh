@@ -194,6 +194,79 @@ tozalash_tuzogi() {
     fi
     exit "$kod"          # ASL chiqish kodi saqlanadi
 }
+
+# --- 0071 TASDIG'I — UCH HOLAT, IKKITA EMAS ---------------------------------
+# O'LCHANGAN NUQSON (2026-09-07, meniki): tekshiruv shunday edi —
+#
+#     psql ... "WHERE id LIKE '0071%'" 2>/dev/null || echo 0
+#
+# Ikki xato bir joyda:
+#   1. Ustun nomi `id` emas, `migratsiya_id` (`migratsiya.py:588`).
+#      Ya'ni so'rov HAR SAFAR xato berardi.
+#   2. `2>/dev/null || echo 0` o'sha xatoni YUTIB, natijani `0` ga
+#      aylantirardi — "o'lchay olmadim" "qo'llanmagan" bo'lib
+#      ko'rinardi.
+#
+# Natijada migratsiya HAQIQATAN qo'llangan bo'lsa ham darvoza
+# "0071 qo'llanmadi" deb yiqilardi va SABAB ko'rinmasdi.
+#
+# UCH HOLAT AJRATILADI:
+#   psql o'tdi + 1  -> PASS
+#   psql o'tdi + 0  -> FAIL: migratsiya YO'Q
+#   psql yiqildi    -> FAIL: O'LCHANMADI  (nol EMAS)
+#
+# Va JURNAL bilan SXEMA ALOHIDA tekshiriladi: patch ichida `RETURN`
+# bo'lsa jurnalda "tugadi" turib, jadval bo'lmasligi mumkin — ERP
+# 23-patchida aynan shu bo'lgan.
+tasdiq_0071() {
+    local dsn="$1" chiq kod
+
+    # `ON_ERROR_STOP=1` + chiqish kodini TEKSHIRISH. Chiqish kodi
+    # nolga teng bo'lmasa natija UMUMAN o'qilmaydi.
+    # `set -e` OSTIDA `$(...)` YIQILSA SKRIPT DARHOL O'LADI va
+    # quyidagi `kod` tekshiruvigacha YETIB BORMAYDI — ya'ni
+    # "o'lchanmadi" xabari hech qachon chiqmasdi va uch holat yana
+    # ikkitaga qisqarardi. Shuning uchun `errexit` shu ikki
+    # chaqiruvda ATAYLAB vaqtincha o'chiriladi.
+    set +e
+    chiq="$(psql "$dsn" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT count(*) FROM schema_migration
+          WHERE migratsiya_id LIKE '0071%' AND holat = 'tugadi'" 2>&1)"
+    kod=$?
+    set -e
+    if [ "$kod" -ne 0 ]; then
+        echo "XATO: 0071 JURNALINI O'QIB BO'LMADI (psql kodi $kod)." >&2
+        echo "      Bu 'qo'llanmagan' EMAS — O'LCHANMAGAN." >&2
+        printf '      %s\n' "$chiq" >&2
+        exit 1
+    fi
+    case "$chiq" in
+        1) log "0071 jurnal: tugadi" ;;
+        0) echo "XATO: 0071_topshiriq jurnalda YO'Q (holat='tugadi' emas)." >&2
+           exit 1 ;;
+        *) echo "XATO: 0071 jurnali kutilmagan qiymat qaytardi: '$chiq'" >&2
+           exit 1 ;;
+    esac
+
+    # SXEMA SHARTI — jurnaldan MUSTAQIL.
+    set +e
+    chiq="$(psql "$dsn" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT to_regclass('public.tender_topshiriq') IS NOT NULL" 2>&1)"
+    kod=$?
+    set -e
+    if [ "$kod" -ne 0 ]; then
+        echo "XATO: 0071 SXEMASINI O'QIB BO'LMADI (psql kodi $kod)." >&2
+        echo "      Bu 'jadval yo'q' EMAS — O'LCHANMAGAN." >&2
+        printf '      %s\n' "$chiq" >&2
+        exit 1
+    fi
+    if [ "$chiq" != "t" ]; then
+        echo "XATO: jurnal 'tugadi' deydi, \`public.tender_topshiriq\` esa YO'Q." >&2
+        echo "      Patch ichida \`RETURN\` bo'lgan bo'lishi mumkin." >&2
+        exit 1
+    fi
+    log "0071 sxema: tender_topshiriq bor"
+}
 # JURNAL STDERR GA. `yarat` ning STDOUT i — MASHINA O'QIYDIGAN
 # KANAL: u faqat bitta qator, darvoza bazasining nomini beradi.
 #
@@ -286,14 +359,7 @@ yarat)
     # Migratsiya yurgizuvchisi ko'p qator chop etadi — STDERR ga.
     "${PY:-python3}" "${ILDIZ_TOLIQ}/migratsiya.py" --qolla --dsn "$NISHON_OWNER" >&2
 
-    # 0071 TASDIG'I — jurnalga ISHONMAYMIZ, SO'RAYMIZ.
-    QOLLANGAN="$(psql "$NISHON_OWNER" -qtA -c \
-        "SELECT count(*) FROM schema_migration WHERE id LIKE '0071%'" 2>/dev/null || echo 0)"
-    QOLLANGAN="$(printf '%s' "$QOLLANGAN" | tr -dc '0-9')"
-    if [ "$QOLLANGAN" != "1" ]; then
-        echo "XATO: 0071_topshiriq qo'llanmadi (topildi: $QOLLANGAN)" >&2
-        exit 1
-    fi
+    tasdiq_0071 "$NISHON_OWNER"
     # SXEMA SHARTI — jurnalning O'ZI yetarli emas. `0071` jadval
     # yaratadi; jurnalda yozuv bo'lib, jadval bo'lmasligi mumkin
     # (patch ichida `RETURN` bo'lsa). Shuning uchun IKKALASI ham.
@@ -338,6 +404,13 @@ tozala)
               WHERE datname = '${BAZA}' AND pid <> pg_backend_pid()" >/dev/null || true
     psql_ -c "DROP DATABASE IF EXISTS ${BAZA}" >/dev/null
     log "tashlandi: $BAZA"
+    ;;
+
+tasdiq)
+    # FAQAT SINOV UCHUN. `tender-darvoza` o'ramasi bu amalni
+    # ochmaydi (uning ruxsat ro'yxati: tekshir|yarat|sinov|tozala).
+    tasdiq_0071 "${2:?dsn kerak}"
+    log "TASDIQ: PASS"
     ;;
 
 nom)
