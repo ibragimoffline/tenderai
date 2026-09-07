@@ -1722,11 +1722,40 @@ def test_bajarish_bayrogi():
     # DISKDAGI rejim EMAS, GIT dagi rejim tekshiriladi: reliz
     # `git archive` dan chiqadi va u faqat git bilgan bayroqni
     # olib chiqadi.
+    # GIT YO'Q BO'LSA — FAYL TIZIMIDAN O'LCHANADI, O'TKAZIB
+    # YUBORILMAYDI.
+    #
+    # O'LCHANGAN (2026-09-08): darvoza `git archive` dan chiqqan
+    # daraxtda yuradi va u yerda `.git` YO'Q:
+    #
+    #     fatal: not a git repository
+    #
+    # Ilgari bu `check(..., False)` bilan YIQILARDI — ya'ni sinov
+    # o'zi o'lchay olmagan joyda mahsulotni ayblardi.
+    #
+    # SKIP HAM QILINMAYDI. `git archive` bajarish bayrog'ini
+    # SAQLAYDI, ya'ni relizda diskdagi rejim git dagi rejimning
+    # aynan natijasi. Demak toza daraxtda `os.access(X_OK)` AYNI
+    # invariantni o'lchaydi — boshqa manbadan, lekin o'sha savolga.
     r = subprocess.run(["git", "ls-files", "-s", "deploy/"],
                        capture_output=True, text=True, cwd=ROOT,
                        encoding="utf-8", errors="replace")
-    if r.returncode != 0:
-        check("git ls-files ishladi", False, r.stderr[:200])
+    git_bor = r.returncode == 0
+    if not git_bor:
+        check("git yo'q — bajarish bayrog'i FAYL TIZIMIDAN o'lchanadi", True,
+              r.stderr.strip()[:80])
+        yomon_fs, topildi_fs = [], 0
+        for dirpath, _dn, fnames in os.walk(D):
+            for fn in sorted(fnames):
+                if not fn.endswith(".sh"):
+                    continue
+                topildi_fs += 1
+                yol = os.path.join(dirpath, fn)
+                if not os.access(yol, os.X_OK):
+                    yomon_fs.append(os.path.relpath(yol, ROOT))
+        check("skriptlar topildi", topildi_fs >= 8, f"{topildi_fs} ta")
+        check("HAMMA `deploy/bin/*.sh` BAJARILADIGAN", not yomon_fs,
+              str(yomon_fs))
         return
 
     yomon = []
