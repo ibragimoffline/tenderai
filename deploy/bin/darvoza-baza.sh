@@ -481,6 +481,35 @@ yarat)
     fi
     log "0071_topshiriq TASDIQLANDI (jurnal + sxema)"
 
+    # --- KORPUS SENZI — C GURUHI UCHUN YAGONA O'LCHOV --------------------
+    # O'n bir to'plam "sinov ma'lumoti yetarli emas" shaklida yiqiladi:
+    #   kod_pilot   FK: code=(26.30) `dim_good_code` da yo'q
+    #   kodlash     lug'at uch darajada emas / 5-daraja bo'sh
+    #   matn_moslik bo'lim 26 asosan TOVAR (>90%, hozir 0) -- 0/225
+    #   embed_qamrov qamrov foizi None%
+    #   rag_sifat   dalil topilmadi (0/0)
+    #   ...
+    #
+    # Bular ALOHIDA nuqson emas: hammasi NUSXADAGI KORPUSGA bog'liq.
+    # `dim_good_code` ning o'zi ham STATIK SEED EMAS — u
+    # `rebuild_good_code_dict()` bilan KORPUSDAN qayta quriladi
+    # (`schema_patch_goodcode.sql:181`). Ya'ni lug'atda qaysi kod
+    # borligi bazadagi ma'lumotdan kelib chiqadi.
+    #
+    # Shuning uchun taxmin qilish o'rniga SANAYMIZ. Bu FAQAT O'QIYDI.
+    log "--- KORPUS SENZI (nusxada) ---"
+    psql "$NISHON_OWNER" -v ON_ERROR_STOP=1 -qtA -F' | ' -c "
+      SELECT 'dim_good_code jami', count(*)::text FROM dim_good_code
+      UNION ALL SELECT 'dim_good_code daraja ' || level::text, count(*)::text
+                  FROM dim_good_code GROUP BY level
+      UNION ALL SELECT 'dim_good_code 26.30 bor?',
+                  (EXISTS(SELECT 1 FROM dim_good_code WHERE code='26.30'))::text
+      UNION ALL SELECT 'catalog_product', count(*)::text FROM catalog_product
+      UNION ALL SELECT 'catalog_product_code', count(*)::text FROM catalog_product_code
+      UNION ALL SELECT 'tender', count(*)::text FROM tender
+      UNION ALL SELECT 'doc_chunk', count(*)::text FROM doc_chunk
+      ORDER BY 1" 2>&1 | sed 's/^/    /' >&2 || true
+
     # --- ESKI SINOV HISOBLARI — NUSXADA, AYTIB TOZALANADI -------------------
     # `zztest_*` va `zzyuklama_*` — sinovlar yaratadigan kompaniyalar.
     # Sinovlarning O'ZI ularni oxirida faolsizlantiradi
