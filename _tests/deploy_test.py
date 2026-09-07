@@ -1869,6 +1869,67 @@ def test_cookie_secure_siyosati():
                 del sys.modules[m]
 
 
+
+def test_darvoza_stdout_kelishuvi():
+    bolim("24. `darvoza-baza.sh` — STDOUT MASHINA KANALI")
+
+    # O'LCHANGAN NUQSON (2026-09-07): `log()` stdout ga yozardi va
+    #
+    #     GATE="$(tender-darvoza yarat)"
+    #
+    # baza nomi o'rniga BUTUN JURNALNI ushlab olardi. Keyingi
+    # `sinov "$GATE"` ko'p qatorli qiymat bilan chaqirilardi.
+    #
+    # KELISHUV: `yarat` muvaffaqiyatli tugasa stdout da AYNAN BITTA
+    # qator — baza nomi. Qolgan hamma narsa stderr ga.
+    y = os.path.join(D, "bin", "darvoza-baza.sh")
+    check("`darvoza-baza.sh` mavjud", os.path.isfile(y))
+    if not os.path.isfile(y):
+        return
+    src = io.open(y, encoding="utf-8").read()
+
+    check("`log()` STDERR ga yozadi",
+          ">&2; }" in src.split("log() {")[1][:80],
+          "jurnal stdout ga tushsa `$(...)` uni nom deb oladi")
+    check("migratsiya chiqishi ham STDERR ga",
+          "--qolla --dsn \"$NISHON_OWNER\" >&2" in src)
+    check("`yarat` stdout ga FAQAT nom yozadi",
+          src.count("printf '%s\\n' \"$YANGI\"") == 1)
+
+    bash = _mashq_bash()
+    if not bash:
+        check("bash yo'q — yurgizib tekshirilmadi", True)
+        return
+
+    def yurgiz(*arg):
+        e = dict(os.environ)
+        e["APP_ENV"] = "staging"
+        e["XT_DB_DSN_TEST_ADMIN"] = "dbname=x user=x host=127.0.0.1 port=1"
+        r = subprocess.run([bash, y, *arg], capture_output=True, text=True,
+                           env=e, timeout=60)
+        return r.returncode, r.stdout, r.stderr
+
+    # A) YIQILGAN `yarat` — stdout da YAROQLI NOM BO'LMASIN.
+    # Bu eng xavfli holat: chaqiruvchi `set -e` siz yozilgan bo'lsa
+    # yiqilgan yurishning chiqishini nom deb ishlatib yuborardi.
+    kod, chiq, _ = yurgiz("yarat")
+    check("yiqilgan `yarat`: chiqish kodi nolga TENG EMAS", kod != 0, f"kod={kod}")
+    check("yiqilgan `yarat`: stdout da darvoza nomi YO'Q",
+          "tenderai_gate_" not in chiq, repr(chiq[:200]))
+
+    # B) KO'P QATORLI va BO'SHLIQLI qiymat — RAD.
+    # Glob dagi `*` yangi qatorni ham oladi, ya'ni bu qo'riqcha
+    # naqshning O'ZIDAN kelib chiqmaydi va alohida kerak.
+    for nom, izoh in ((chr(10).join(["tenderai_gate_1", "DROP"]), "ko'p qatorli"),
+                      ("tenderai_gate_1 x", "bo'shliqli"),
+                      ("TENDERAI_GATE_1", "katta harfli")):
+        for amal in ("sinov", "tozala"):
+            kod, chiq, xato = yurgiz(amal, nom)
+            check(f"`{amal}` {izoh} qiymatni RAD etadi",
+                  kod == 2 and "begona belgi" in xato,
+                  f"kod={kod} {xato[:120]}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -1904,6 +1965,7 @@ def main():
     test_bajarish_bayrogi()
     test_darvoza_xulosani_oqiydi()
     test_cookie_secure_siyosati()
+    test_darvoza_stdout_kelishuvi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)
