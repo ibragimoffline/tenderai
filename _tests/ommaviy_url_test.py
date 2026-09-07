@@ -285,7 +285,7 @@ def test_dev():
 
 
 def test_staging_production():
-    bolim("5. `staging` / `production` — mahalliy manzil RAD ETILADI")
+    bolim("5. `staging` / `production` — mahalliy manzil: staging QABUL, production RAD")
     from api import ommaviy_url as ou, notify
 
     for m in ("staging", "production"):
@@ -293,13 +293,35 @@ def test_staging_production():
             ok, d = yiqiladimi(ou.ishga_tushishda_tekshir, ou.OmmaviyUrlXato)
             check(f"{m}: manzil BERILMASA ishga tushmaydi", ok, d)
 
-        with Muhit(APP_ENV=m, APP_PUBLIC_URL="http://localhost:5173"):
-            ok, d = yiqiladimi(ou.ishga_tushishda_tekshir, ou.OmmaviyUrlXato)
-            check(f"{m}: MAHALLIY manzil ishga tushirmaydi", ok, d)
+        # MAHALLIY MANZIL: `production` da RAD, `staging` da QABUL.
+        #
+        # QAROR 2026-09-07. Bu o'rnatmada staging ga domen ATAYLAB
+        # berilmagan (nginx `127.0.0.1:8091`, SSH tunnel). Ilgari
+        # `oldindan-tekshir.sh` staging da mahalliy manzilni
+        # o'tkazardi, ILOVA esa rad etardi — ikki qatlam ZID siyosat
+        # yuritardi va `notify_test` bilan `xavfsizlik_test` aynan
+        # shundan yiqilardi.
+        #
+        # PRODUCTION SATRI SHU YERDA QOLADI va u bu sinovning
+        # ASOSIY vazifasi: yumshatish faqat staging ga tegdi.
+        kutilgan_rad = (m == "production")
+        for url, nima in (("http://localhost:5173", "MAHALLIY manzil"),
+                          ("https://10.0.0.5", "XUSUSIY tarmoq manzili")):
+            with Muhit(APP_ENV=m, APP_PUBLIC_URL=url):
+                ok, d = yiqiladimi(ou.ishga_tushishda_tekshir,
+                                   ou.OmmaviyUrlXato)
+                check(f"{m}: {nima} -> "
+                      + ("RAD ETILADI" if kutilgan_rad else "QABUL"),
+                      ok == kutilgan_rad, d)
 
-        with Muhit(APP_ENV=m, APP_PUBLIC_URL="https://10.0.0.5"):
+        # PRODUCTION DA HTTPS SHART. `Secure` cookie shifrlanmagan
+        # ulanishda YUBORILMAYDI — sessiya umuman o'rnatilmaydi va
+        # xato faqat brauzerda ko'rinadi.
+        with Muhit(APP_ENV=m, APP_PUBLIC_URL="http://tender.example.uz"):
             ok, d = yiqiladimi(ou.ishga_tushishda_tekshir, ou.OmmaviyUrlXato)
-            check(f"{m}: XUSUSIY tarmoq manzili ham rad etiladi", ok, d)
+            check(f"{m}: `http://` -> "
+                  + ("RAD ETILADI" if m == "production" else "QABUL"),
+                  ok == (m == "production"), d)
 
         with Muhit(APP_ENV=m, APP_PUBLIC_URL="tender.example.uz"):
             ok, d = yiqiladimi(ou.ishga_tushishda_tekshir, ou.OmmaviyUrlXato)

@@ -972,6 +972,7 @@ export const uz = {
   'err.DOCUMENT_TEXT_NOT_FOUND': 'Hujjat matni hali ajratilmagan.',
   'err.PRODUCT_NOT_FOUND': 'Mahsulot topilmadi.',
   'err.REQUIREMENT_NOT_FOUND': 'Talab topilmadi.',
+  'err.PILOT_NOT_FOUND': 'Pilot avlodi topilmadi (yoki allaqachon arxivlangan).',
   'err.SEARCH_NOT_FOUND': 'Saqlangan qidiruv topilmadi.',
   'err.SUBSCRIBER_NOT_FOUND': 'Obunachi topilmadi.',
   'err.CHAT_SESSION_NOT_FOUND': 'Suhbat topilmadi.',

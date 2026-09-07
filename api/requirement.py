@@ -1156,8 +1156,13 @@ def pilot_arxivla(company_id: int, avlod: int, kim: str) -> dict:
         RETURNING avlod, arxivlandi_at""",
         {"c": company_id, "a": avlod, "k": kim.strip()})
     if not r:
-        raise xatolar.Xato("NOT_FOUND",
-                           {"nima": f"pilot avlodi {avlod} (yoki allaqachon arxivlangan)"})
+        # "NOT_FOUND" `KODLAR` da YO'Q edi va `xatolar.Xato` ro'yxatda
+        # bo'lmagan kodni RAD ETADI — ya'ni bu yo'l 404 o'rniga
+        # `KeyError` bilan yiqilardi. Ro'yxat aniq kodlarni ishlatadi
+        # (`TENDER_NOT_FOUND`, `DOCUMENT_NOT_FOUND`, ...), umumiy
+        # "NOT_FOUND" esa unda yo'q va ATAYLAB yo'q: xato qaysi
+        # obyekt haqida ekanini KOD aytishi kerak.
+        raise xatolar.Xato("PILOT_NOT_FOUND", {"avlod": avlod})
     return {"avlod": int(r["avlod"]), "holat": "arxivlandi"}
 
 

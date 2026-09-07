@@ -966,6 +966,7 @@ export const ru: Dict = {
   'err.DOCUMENT_TEXT_NOT_FOUND': 'Текст документа ещё не извлечён.',
   'err.PRODUCT_NOT_FOUND': 'Товар не найден.',
   'err.REQUIREMENT_NOT_FOUND': 'Требование не найдено.',
+  'err.PILOT_NOT_FOUND': 'Поколение пилота не найдено (или уже архивировано).',
   'err.SEARCH_NOT_FOUND': 'Сохранённый поиск не найден.',
   'err.SUBSCRIBER_NOT_FOUND': 'Подписчик не найден.',
   'err.CHAT_SESSION_NOT_FOUND': 'Диалог не найден.',

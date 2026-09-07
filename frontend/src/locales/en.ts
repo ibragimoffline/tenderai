@@ -959,6 +959,7 @@ export const en: Dict = {
   'err.DOCUMENT_TEXT_NOT_FOUND': 'The document text has not been extracted yet.',
   'err.PRODUCT_NOT_FOUND': 'Product not found.',
   'err.REQUIREMENT_NOT_FOUND': 'Requirement not found.',
+  'err.PILOT_NOT_FOUND': 'Pilot generation not found (or already archived).',
   'err.SEARCH_NOT_FOUND': 'Saved search not found.',
   'err.SUBSCRIBER_NOT_FOUND': 'Subscriber not found.',
   'err.CHAT_SESSION_NOT_FOUND': 'Conversation not found.',
