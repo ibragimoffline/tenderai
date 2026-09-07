@@ -345,11 +345,59 @@ def tozala(db):
     for cid in _yaratilgan["company"]:
         db.execute_returning("UPDATE company_account SET active=false "
                              "WHERE id=%(i)s RETURNING id", {"i": cid})
+    # --- OLDINGI YURISHLARNING QOLDIG'I ------------------------------------
+    #
+    # Yuqoridagi tozalash `_yaratilgan` — SHU YURISHDA to'ldirilgan
+    # XOTIRADAGI ro'yxat — bo'yicha ishlaydi. Ya'ni yurish qatorni
+    # INSERT qilib, ID ni ro'yxatga qo'shishdan OLDIN yiqilsa, o'sha
+    # qator `active=true` bo'lib MANGU qoladi va uni keyingi yurish
+    # ham tozalamaydi: uning `_yaratilgan` i bo'sh.
+    #
+    # O'LCHANGAN OQIBAT (2026-09-07, staging darvozasi): qoldiq
+    # `zztest_topshiriq_*` kompaniyalari to'planib qoldi va
+    # `chat_test`, `import_test`, `notify_test` "Bir nechta faol
+    # kompaniya" bilan yiqila boshladi — ya'ni BU sinovning nuqsoni
+    # BOSHQA uchta to'plamni o'ldirardi va har yurish holatni
+    # yomonlashtirardi.
+    #
+    # PREFIKS — EGALIKNING ISHONCHLI BELGISI. `zztest_topshiriq`
+    # nomini faqat shu sinov qo'yadi (fayl sarlavhasida yozilgan),
+    # ya'ni bu qatorlar deterministik ravishda SINOVNIKI. Shuning
+    # uchun tozalash endi ID ro'yxati bilan emas, PREFIKS bilan ham
+    # yuradi.
+    #
+    # QOLDIQ JIM O'CHIRILMAYDI, AYTILADI: jimgina tozalash buzuq
+    # hayot siklini abadiy yashirardi. Son noldan katta bo'lsa
+    # sinov buni alohida qator qilib chiqaradi.
+    # `db.query()` FAQAT O'QIYDI — u oxirida `rollback()` qiladi va
+    # yozuv JIMGINA yo'qolardi. Yozish `execute_returning()` dan
+    # o'tishi SHART (u commit qiladi) va u bitta qator qaytaradi,
+    # shuning uchun avval ro'yxat olinadi, keyin bittalab o'chiriladi.
+    eski_qoldiq = db.query(
+        "SELECT id, username FROM company_account "
+        " WHERE username LIKE %(p)s AND active", {"p": PREFIX + "%"})
+    for r in eski_qoldiq:
+        db.execute_returning(
+            "UPDATE company_account SET active = false "
+            " WHERE id = %(i)s RETURNING id", {"i": r["id"]})
+    if eski_qoldiq:
+        check("OLDINGI yurishdan qoldiq topildi (o'chirildi)", False,
+              f"{len(eski_qoldiq)} ta: "
+              + ", ".join(r["username"] for r in eski_qoldiq[:5])
+              + " — fixture hayot sikli yiqilgan, tekshiring")
+    else:
+        check("oldingi yurishdan qoldiq yo'q", True)
+
     qoldi = db.scalar(
         "SELECT count(*) FROM tender_topshiriq t JOIN company_account c "
         "ON c.id = t.company_id WHERE c.username LIKE %(p)s",
         {"p": PREFIX + "%"})
     check("sinov topshiriqlari qolmadi", qoldi == 0, str(qoldi))
+
+    faol = db.scalar(
+        "SELECT count(*) FROM company_account "
+        " WHERE username LIKE %(p)s AND active", {"p": PREFIX + "%"})
+    check("FAOL sinov kompaniyasi qolmadi", faol == 0, str(faol))
 
 
 def main():
