@@ -591,6 +591,45 @@ sinov)
     SINOV_KOD=$?
     set -e
 
+    # --- YIQILGAN TO'PLAMLAR TAFSILOTI -----------------------------------
+    # `run_tests.py` har to'plam chiqishini `_test_natija/<nom>.log` ga
+    # yozadi, lekin darvoza jurnaliga faqat BITTA KESILGAN qator
+    # tushadi:
+    #
+    #     [XATO] kod_pilot_test  XULOSA QATORI YO'Q — DETAIL:  Key (code)=(26.30)...
+    #
+    # Vaqtinchalik daraxt esa yurish oxirida O'CHIRILADI, ya'ni to'liq
+    # traceback HECH QAYERGA yetib bormasdi va har tahlil uchun
+    # darvozani qayta yurgizish kerak bo'lardi.
+    #
+    # CHEGARALANGAN: har to'plamdan oxirgi 25 qator. Maqsad — sababni
+    # ko'rsatish, jurnalni to'ldirish emas.
+    NAT="${ILDIZ_TOLIQ}/_test_natija"
+    if [ "$SINOV_KOD" -ne 0 ] && [ -d "$NAT" ]; then
+        log "--- YIQILGAN TO'PLAMLAR: oxirgi 25 qator ---"
+        "${PY:-python3}" - "$NAT" <<'PYEOF' >&2 || true
+import io, json, os, sys
+nat = sys.argv[1]
+try:
+    x = json.load(io.open(os.path.join(nat, "xulosa.json"), encoding="utf-8"))
+except Exception as e:
+    print(f"[tafsilot] xulosa.json o'qilmadi: {e}"); raise SystemExit(0)
+# `yiqilgan` — yurgizuvchining O'ZI tuzgan ro'yxat (443-qator).
+# Uni qayta hisoblash ikkinchi haqiqat manbai bo'lardi.
+for nom in x.get("yiqilgan") or []:
+    if not nom:
+        continue
+    yol = os.path.join(nat, f"{nom}.log")
+    print(f"\n===== {nom} " + "=" * (60 - len(nom)))
+    try:
+        qatorlar = io.open(yol, encoding="utf-8", errors="replace").read().splitlines()
+        for q in qatorlar[-25:]:
+            print("  " + q)
+    except Exception as e:
+        print(f"  [log o'qilmadi: {e}]")
+PYEOF
+    fi
+
     # --- SIZISH QO'RIQCHISI: KEYIN --------------------------------------
     # Sinovlar yiqilgan bo'lsa ham o'lchanadi: sizish AYRIM nosozlik
     # va u yiqilish bilan birga yashirinib qolmasin.
