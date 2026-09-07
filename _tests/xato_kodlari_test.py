@@ -214,6 +214,63 @@ def test_manba():
           f"{len(xom)} ta")
 
 
+
+def test_hamma_kod_royxatda():
+    """HAR BIR ko'tarilgan kod `KODLAR` da bo'lsin — AVTOMATIK topib.
+
+    O'LCHANGAN NUQSON (2026-09-07, birinchi haqiqiy staging darvozasi):
+
+        api/topshiriq.py:288
+        raise xatolar.Xato("MIGRATION_MISSING", ...)
+
+    `MIGRATION_MISSING` `KODLAR` da YO'Q edi. `xatolar.Xato` ro'yxatda
+    bo'lmagan kodni RAD ETADI, ya'ni `schema_patch_topshiriq.sql`
+    qo'llanmagan o'rnatmada bu yo'l aniq 503 o'rniga `KeyError` bilan
+    yiqilardi — `topshiriq_test` aynan shunda o'lgan.
+
+    NEGA MAVJUD SINOVLAR USHLAMADI. `test_royxat` ro'yxatning O'ZINI
+    tekshiradi (tarjima, HTTP holati), `test_manba` esa faqat
+    `api/main.py` dagi `raise HTTPException` larni qaraydi. Kod
+    BOSHQA modulda va TO'G'RI shaklda (`xatolar.Xato(...)`)
+    ko'tarilganda ikkalasi ham jim qolardi.
+
+    Shuning uchun bu yerda ro'yxat qo'lda yozilmaydi — MANBADAN
+    TOPILADI. Yangi modul qo'shilsa u ham avtomatik qamrab olinadi.
+    """
+    bolim("7. Har bir ko'tarilgan kod ro'yxatda")
+    from api import xatolar
+
+
+    # Ikki shakl ham ishlatiladi:
+    #   xatolar.Xato("KOD", ...)          -> pozitsion
+    #   AIUnavailable(..., kod="KOD")     -> nomlangan
+    RX = [re.compile(r'Xato\(\s*"([A-Z][A-Z0-9_]+)"'),
+          re.compile(r'\bkod\s*=\s*"([A-Z][A-Z0-9_]+)"')]
+
+    api_dir = os.path.join(ROOT, "api")
+    topilgan = {}
+    for fn in sorted(os.listdir(api_dir)):
+        if not fn.endswith(".py"):
+            continue
+        yol = os.path.join(api_dir, fn)
+        src = io.open(yol, encoding="utf-8").read()
+        # IZOHLAR HISOBGA OLINMASIN: bu faylning o'z izohida ham
+        # "MIGRATION_MISSING" yozilgan va u kod EMAS. Aks holda
+        # sinov o'zi yasagan yolg'on bilan yiqilardi.
+        src = re.sub(r"#[^\n]*", "", src)
+        for rx in RX:
+            for kod in rx.findall(src):
+                topilgan.setdefault(kod, set()).add(fn)
+
+    check(f"{len(topilgan)} ta kod manbadan topildi", len(topilgan) >= 40,
+          "juda kam topildi — naqsh eskirgan bo'lishi mumkin")
+
+    yoq = sorted(k for k in topilgan if k not in xatolar.KODLAR)
+    check("ko'tarilgan hamma kod `KODLAR` da bor", not yoq,
+          "; ".join(f"{k} <- {sorted(topilgan[k])}" for k in yoq))
+
+
+
 def test_javob_shakli():
     bolim("4. JAVOB SHAKLI")
     from api import xatolar
@@ -377,6 +434,7 @@ def main():
     test_tarjima()
     test_manba()
     test_javob_shakli()
+    test_hamma_kod_royxatda()
     test_frontend()
 
     if args.bazasiz or not os.environ.get("XT_DB_DSN"):

@@ -49,12 +49,28 @@ Ikkalasi ham berilgan va QIYMATLARI BOSHQA bo'lsa — XATO. "Qaysi
 biri to'g'ri" degan savolga taxmin bilan javob berish yana ikkita
 haqiqat manbai demak; buni jimgina hal qilish mumkin emas.
 
-`localhost` GA RUXSAT — FAQAT `APP_ENV=dev`
---------------------------------------------
+`localhost` GA RUXSAT — `dev` VA `staging`, `production` DA HECH QACHON
+----------------------------------------------------------------------
 Alohida "ruxsat bayrog'i" (`ALLOW_LOCAL=1` kabi) ATAYLAB
 QO'SHILMADI: uni ishlab chiqarish muhitiga ham yozib qo'yish
 mumkin bo'lardi va qo'riqchi o'z-o'zini o'chirardi. Ruxsatning
-YAGONA ifodasi — muhitning o'zi `dev` bo'lishi.
+YAGONA ifodasi — MUHITNING O'ZI.
+
+`staging` 2026-09-07 da qo'shildi va sabab O'LCHANGAN. Bu
+o'rnatmada staging ga domen ATAYLAB berilmagan: nginx bloki
+`127.0.0.1:8091` da tinglaydi va unga SSH tunnel orqali kiriladi.
+Ya'ni staging da mahalliy manzil — nosozlik emas, ARXITEKTURA.
+
+Ilgari `deploy/bin/oldindan-tekshir.sh` va shu modul ZID siyosat
+yuritardi: joylashtirish tekshiruvi staging da mahalliy manzilni
+o'tkazardi, ilova esa uni RAD ETARDI. Natijada `notify_test` va
+`xavfsizlik_test` staging darvozasida yiqilardi va sabab
+sozlamada emas, IKKI QATLAMNING KELISHMAGANIDA edi.
+
+PRODUCTION UCHUN HECH NARSA YUMSHATILMADI: u yerda mahalliy
+manzil ham, HTTPS bo'lmagani ham xato bo'lib qoladi. Noma'lum
+muhit ham `production` kabi qattiq qaraladi (pastga qarang) —
+"tanimadim" hech qachon "ruxsat" ga aylanmasin.
 """
 from __future__ import annotations
 
@@ -105,6 +121,27 @@ def muhit() -> str:
 
 def dev_mi() -> bool:
     return muhit() == "dev"
+
+
+#: Mahalliy (loopback/xususiy) manzilga ruxsat berilgan muhitlar.
+#:
+#: `production` bu yerda YO'Q va hech qachon bo'lmaydi.
+#: Ro'yxat ATAYLAB YOPIQ: noma'lum yoki xato yozilgan `APP_ENV`
+#: (masalan "prod", "Production ", bo'sh) ro'yxatga TUSHMAYDI va
+#: qattiq qaraladi. "Tanimadim" -> "ruxsat" aylanishi bu qatlamda
+#: eng qimmat xato bo'lardi.
+MAHALLIY_RUXSAT_MUHITLARI = ("dev", "staging")
+
+
+def mahalliyga_ruxsat() -> bool:
+    """Shu muhitda mahalliy ommaviy manzil MAQBULMI.
+
+    YAGONA MANBA. `oldindan-tekshir.sh` ham ayni semantikani
+    ishlatadi (`MUHIT = production` -> to'siq, aks holda
+    ogohlantirish) va `_tests/ommaviy_url_test.py` ikkalasini
+    bir xil jadval bilan tekshiradi.
+    """
+    return muhit() in MAHALLIY_RUXSAT_MUHITLARI
 
 
 def sozlangan() -> Tuple[str, str]:
@@ -224,7 +261,21 @@ def bazani_tekshir(base: Optional[str]) -> None:
             f"Ommaviy manzil YAROQSIZ: {base!r}\n"
             + "".join(f"  - {n}\n" for n in nos)
             + f"  Tuzatish: `{ENV_ASOSIY}=https://<domen>`.")
-    if not dev_mi() and mahalliymi(base):
+    # PRODUCTION DA HTTPS SHART. Ilgari `nosozliklar()` faqat sxema
+    # BORLIGINI tekshirardi, ya'ni `http://zynq.uz` production da
+    # o'tib ketardi — cookie `Secure` bilan yuboriladi va bunday
+    # havolada SESSIYA UMUMAN o'rnatilmaydi, xato esa faqat
+    # brauzerda ko'rinadi.
+    #
+    # `dev`/`staging` da `http://` qoladi: u yerda TLS tugatgich
+    # bo'lmasligi mumkin va bu ARXITEKTURA, nosozlik emas.
+    if muhit() == "production" and not (base or "").lower().startswith("https://"):
+        raise OmmaviyUrlXato(
+            f"Ommaviy manzil HTTPS EMAS: {base}\n"
+            f"  APP_ENV=production da `https://` SHART: `Secure` cookie "
+            f"shifrlanmagan ulanishda yuborilmaydi.\n"
+            f"  Tuzatish: `{ENV_ASOSIY}=https://<domen>`.")
+    if not mahalliyga_ruxsat() and mahalliymi(base):
         raise OmmaviyUrlXato(
             f"Ommaviy manzil MAHALLIY: {base}\n"
             f"  APP_ENV={muhit()} da bu qabul qiluvchida OCHILMAYDIGAN "

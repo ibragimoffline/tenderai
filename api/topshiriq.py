@@ -285,7 +285,17 @@ def yarat(routing_id: int, company_id: int, tender_id: int, *,
         raise xatolar.Xato("INVALID_ENUM",
                            {"maydon": "ustuvorlik", "qiymat": ustuvorlik})
     if not ready():
-        raise xatolar.Xato("MIGRATION_MISSING",
+        # `SCHEMA_PATCH_MISSING` — loyihaning SHU holat uchun MAVJUD
+        # kodi (`auth.py`, `notify.py`, `main.py` da yetti joyda, ayni
+        # `{"patch": ...}` parametri bilan). Bu yerda "MIGRATION_MISSING"
+        # yozilgan va u `KODLAR` da YO'Q edi: `xatolar.Xato` esa
+        # ro'yxatda bo'lmagan kodni RAD ETADI, ya'ni patch qo'llanmagan
+        # o'rnatmada bu yo'l aniq 503 o'rniga `KeyError` bilan yiqilardi.
+        #
+        # Yangi kod QO'SHILMADI: ma'no bir xil bo'lgani uchun ikkinchi
+        # kod `KODLAR` izohidagi qoidani buzardi — "bitta ma'noli xato
+        # ikki endpointda ikki xil holat qaytarmasin".
+        raise xatolar.Xato("SCHEMA_PATCH_MISSING",
                            {"patch": "schema_patch_topshiriq.sql"})
     if tahlil is None:
         r = db.query_one(
