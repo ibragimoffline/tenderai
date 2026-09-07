@@ -1813,6 +1813,62 @@ def test_darvoza_xulosani_oqiydi():
           "format yana o'zgarsa darvoza JIM qolmasin")
 
 
+
+def test_cookie_secure_siyosati():
+    bolim("23. `AUTH_COOKIE_SECURE` + `http` — MUHITGA QARAB")
+
+    # O'LCHANGAN (2026-09-07, staging darvozasi): `xavfsizlik_test` va
+    # `aktor_test` `joylashuv_tekshir()` da o'lardi, chunki staging
+    # `http://127.0.0.1:8091` da (SSH tunnel) va `AUTH_COOKIE_SECURE=1`.
+    #
+    # Ammo BRAUZER `Secure` cookie ni `localhost`/`127.0.0.1` uchun
+    # http bo'lsa ham YUBORADI — bu ishonchli kontekst. Ya'ni o'sha
+    # juftlik xususiy staging da ISHLAYDI va uni to'xtatish SOXTA
+    # to'siq edi.
+    #
+    # BU SINOVNING ASOSIY VAZIFASI — production ni qulflash.
+    # Yumshatish FAQAT mahalliy manzilga va faqat dev/staging da
+    # tegdi; ommaviy domenli staging ham TO'SILADI.
+    import importlib
+    holatlar = [
+        ("production", "http://tender.uz",       True,  "to'siq"),
+        ("production", "https://tender.uz",      False, "o'tadi"),
+        ("staging",    "http://localhost:8091",  False, "o'tadi (mahalliy)"),
+        ("staging",    "http://tender.uz",       True,  "to'siq (ommaviy)"),
+        ("dev",        "http://localhost:5173",  False, "o'tadi"),
+        ("",           "http://localhost:8091",  True,  "to'siq (noma'lum)"),
+    ]
+    for env, url, kutilgan_tosiq, izoh in holatlar:
+        eski_env = {k: os.environ.get(k) for k in
+                    ("APP_ENV", "APP_PUBLIC_URL",
+                     "AUTH_COOKIE_SECURE", "TRUST_PROXY")}
+        os.environ.update({"APP_ENV": env, "APP_PUBLIC_URL": url,
+                           "AUTH_COOKIE_SECURE": "1", "TRUST_PROXY": "1"})
+        try:
+            # MODULLAR QAYTA YUKLANADI: `COOKIE_SECURE` modul
+            # darajasida o'qiladi, ya'ni muhitni o'zgartirish
+            # yetarli emas.
+            for m in [k for k in list(sys.modules) if k.startswith("api.")]:
+                del sys.modules[m]
+            from api import main as M
+            try:
+                M.joylashuv_tekshir(url)
+                tosildi = False
+            except M.JoylashuvXato:
+                tosildi = True
+            check(f"APP_ENV={env or '<bosh>'} + {url} -> {izoh}",
+                  tosildi == kutilgan_tosiq,
+                  f"to'sildi={tosildi}, kutilgan={kutilgan_tosiq}")
+        finally:
+            for k, v in eski_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            for m in [k for k in list(sys.modules) if k.startswith("api.")]:
+                del sys.modules[m]
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -1847,6 +1903,7 @@ def main():
     test_mahalliy_url_muhitga_qarab()
     test_bajarish_bayrogi()
     test_darvoza_xulosani_oqiydi()
+    test_cookie_secure_siyosati()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)
