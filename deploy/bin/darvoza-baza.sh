@@ -365,8 +365,27 @@ yarat)
     # MAYLI — bu baza bir martalik va yurish oxirida tashlanadi.
     NISHON_OWNER="$(dsn_baza "$XT_DB_DSN_OWNER" "$YANGI")"
     log "nusxa olinmoqda (pg_dump | pg_restore)…"
-    if ! pg_dump "$XT_DB_DSN_OWNER" -Fc --no-owner --no-privileges \
-         | pg_restore -d "$NISHON_OWNER" --no-owner --no-privileges \
+    # `--no-privileges` OLIB TASHLANDI va sabab O'LCHANGAN (2026-09-08).
+    #
+    # U bilan nusxada HAMMA GRANT yo'qolardi. Natijada `tai_service`
+    # nusxadagi birorta jadvalni ko'ra olmasdi va darvoza 20+ to'plamda
+    #
+    #     permission denied for table company_account
+    #
+    # berardi. Bu KOD nuqsoni emas, NUSXANING nuqsoni edi — ya'ni
+    # darvoza ishlab chiqarishda yo'q muammoni ko'rsatardi.
+    #
+    # HUQUQ PATCHI QAYTA YURMAYDI: `schema_patch_huquq.sql` (0057) va
+    # `_2` (0069) manifestda bor, lekin ular jurnalda ALLAQACHON
+    # "ok" — jurnal staging dan nusxa ko'chgan. Ya'ni jurnal
+    # "qo'llangan" deydi, GRANT lar esa yo'q. Bu loyihada takror
+    # uchraydigan sinf: JURNAL ≠ SHART.
+    #
+    # `--no-owner` QOLADI: egalik nusxada `tai_test_admin` ga tushadi
+    # va bu maqbul — baza bir martalik. GRANT lar esa rol NOMIGA
+    # bog'langan (`tai_service`), ya'ni ular ko'chganda ishlaydi.
+    if ! pg_dump "$XT_DB_DSN_OWNER" -Fc --no-owner \
+         | pg_restore -d "$NISHON_OWNER" --no-owner \
                       --exit-on-error 2>/tmp/darvoza-restore.$$; then
         tail -20 /tmp/darvoza-restore.$$ >&2 || true
         rm -f /tmp/darvoza-restore.$$
@@ -413,7 +432,17 @@ sinov)
     : "${XT_DB_DSN:?sinov uchun XT_DB_DSN kerak (ilova roli)}"
     SINOV_DSN="$(dsn_baza "$XT_DB_DSN" "$BAZA")"
     darvoza_ildiz
-    log "sinov bazasi: $BAZA  (ilova roli)"
+    # QAYSI ROL — AYTILADI. §9 talabi: oddiy sinovlar ILOVA roli
+    # bilan yurishi kerak. Buni "shunday deb o'ylash" yetarli emas;
+    # DSN dan rol nomi ajratib chiqariladi va jurnalga yoziladi.
+    # PAROL CHIQMAYDI — faqat `user=` qiymati.
+    SINOV_ROL="$(printf '%s' "$SINOV_DSN" | sed -nE 's/.*user=([A-Za-z0-9_]+).*/\1/p')"
+    if [ "$SINOV_ROL" = "tai_test_admin" ]; then
+        echo "XATO: oddiy sinovlar ADMIN roli bilan yurmaydi." >&2
+        echo "      XT_DB_DSN ilova rolini ko'rsatishi kerak." >&2
+        exit 2
+    fi
+    log "sinov bazasi: $BAZA  rol: ${SINOV_ROL:-ANIQLANMADI}"
     cd "$ILDIZ_TOLIQ"
     XT_DB_DSN="$SINOV_DSN" APP_ENV=staging \
         "${PY:-python3}" run_tests.py
