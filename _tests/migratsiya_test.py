@@ -301,7 +301,30 @@ def _sinov_dsn():
 
 
 def _admin_kon():
-    q = dict(_dsn_qism())
+    """`CREATE`/`DROP DATABASE` uchun IMTIYOZLI ulanish.
+
+    IMTIYOZ AJRATILGAN va bu ATAYLAB. Ilova roli (`tai_service`) da
+    `CREATEDB` YO'Q va bo'lmaydi ham — sinov qulayligi uchun uni
+    berish eng kam imtiyoz qoidasini sinov uchun buzish demak.
+
+    O'LCHANGAN (2026-09-08, izolyatsiyalangan darvoza): `XT_DB_DSN`
+    ilova roliga to'g'rilangach bu sinov
+
+        permission denied to create database
+
+    bilan yiqildi. Ya'ni to'g'ri sozlama sinovni yiqitdi — chunki
+    sinov IKKALA vazifa uchun ham BITTA DSN dan foydalanardi.
+
+    Endi FAQAT SHU funksiya — baza yaratish/tashlash — admin DSN ini
+    oladi. Qolgan hamma narsa (jumladan vaqtinchalik bazadagi
+    migratsiya va tekshiruvlar) ilova roli bilan yuradi, ya'ni sinov
+    ishlab chiqarishdagi imtiyozni o'lchashda davom etadi.
+
+    `XT_DB_DSN_TEST_ADMIN` bo'lmasa `XT_DB_DSN` ga qaytadi: ishlab
+    chiquvchi mashinasida bitta rol odatda ikkala ishni ham qiladi.
+    """
+    admin = os.environ.get("XT_DB_DSN_TEST_ADMIN", "").strip()
+    q = dict(M.dsn_qismlari(admin)) if admin else dict(_dsn_qism())
     q["dbname"] = "postgres"
     c = psycopg2.connect(" ".join(f"{k}={v}" for k, v in q.items()),
                          connect_timeout=8)
