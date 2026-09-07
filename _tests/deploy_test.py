@@ -2014,7 +2014,28 @@ def test_0071_tasdigi():
     # holatni ham ISHONCHLI yasash mumkin.
     src = oqi("bin", "darvoza-baza.sh")
     check("ustun `migratsiya_id`", "migratsiya_id LIKE '0071%'" in src)
-    check("holat `tugadi` ham tekshiriladi", "holat = 'tugadi'" in src)
+    # LITERAL MANBAGA BOG'LANADI. Men bu yerda IKKI MARTA adashdim:
+    # avval ustun nomini (`id` <- `migratsiya_id`), keyin holat
+    # qiymatini (`tugadi` <- `ok`) TAXMIN QILDIM. Ikkalasi ham
+    # `migratsiya.py` da yozilgan turgan edi.
+    #
+    # Shuning uchun sinov endi qiymatni qo'lda YOZMAYDI — uni
+    # `migratsiya.py` dan O'QIYDI. Kod o'zgarsa sinov ham o'zgaradi
+    # yoki YIQILADI; taxminga joy qolmaydi.
+    mp = io.open(os.path.join(ROOT, "migratsiya.py"), encoding="utf-8").read()
+    m = re.search(r'\.tugat\(\s*sid\s*,\s*"([a-z_]+)"', mp)
+    check("muvaffaqiyat literali `migratsiya.py` dan topildi", m is not None,
+          "`tugat(sid, \"...\")` naqshi o'zgargan bo'lsa sinov yangilansin")
+    if m:
+        muvaffaqiyat = m.group(1)
+        check(f"darvoza AYNI literalni kutadi ('{muvaffaqiyat}')",
+              f"        {muvaffaqiyat}) log" in src,
+              "darvoza va migratsiya.py ajralib ketgan")
+
+    # O'TKAZIB YUBORILGAN — ALOHIDA VA MUHIM.
+    check("`otkazildi` muvaffaqiyat deb SANALMAYDI",
+          "otkazildi)" in src and "O'TKAZIB YUBORILGAN" in src,
+          "skip = success — ERP 23-patchidagi nuqsonning aynan o'zi")
     # IZOHLAR CHIQARILADI: eski nuqson shu faylning IZOHIDA
     # ataylab yozilgan va uni naqsh deb sanash sinovni o'zi yasagan
     # yolg'on bilan yiqitardi.
@@ -2049,8 +2070,12 @@ def test_0071_tasdigi():
             'for a in "$@"; do case "$a" in' + N +
             '  *to_regclass*) if [ "$SHIM_REJIM" = "jadvalsiz" ]; then echo f;'
             ' else echo t; fi; exit 0 ;;' + N +
-            '  *migratsiya_id*) if [ "$SHIM_REJIM" = "yoq" ]; then echo 0;'
-            ' else echo 1; fi; exit 0 ;;' + N +
+            '  *migratsiya_id*) case "$SHIM_REJIM" in' + N +
+            '      yoq) echo "<qator yo\'q>" ;;' + N +
+            '      otkazildi) echo otkazildi ;;' + N +
+            '      boshlandi) echo boshlandi ;;' + N +
+            '      *) echo ok ;;' + N +
+            '    esac; exit 0 ;;' + N +
             'esac; done' + N + "exit 0" + N)
         os.chmod(shim, 0o755)
 
@@ -2073,12 +2098,24 @@ def test_0071_tasdigi():
 
         kod, chiq = yurgiz("yoq")
         check("2-holat: jurnal yo'q -> FAIL", kod != 0)
-        check("2-holat: sabab 'jurnalda YO'Q'", "jurnalda YO'Q" in chiq, chiq[-200:])
+        check("2-holat: sabab — jurnaldagi HOLAT ko'rsatiladi",
+              "qator yo" in chiq, chiq[-200:])
+
+        # 5-holat: O'TKAZIB YUBORILGAN — muvaffaqiyat EMAS.
+        kod, chiq = yurgiz("otkazildi")
+        check("5-holat: `otkazildi` -> FAIL", kod != 0)
+        check("5-holat: 'O'TKAZIB YUBORILGAN' deyiladi",
+              "TKAZIB YUBORILGAN" in chiq, chiq[-200:])
+
+        # 6-holat: tugamagan migratsiya ham muvaffaqiyat emas.
+        kod, chiq = yurgiz("boshlandi")
+        check("6-holat: `boshlandi` -> FAIL", kod != 0)
+        check("6-holat: holat AYTILADI", "boshlandi" in chiq, chiq[-200:])
 
         kod, chiq = yurgiz("xato")
         check("3-holat: SQL xatosi -> FAIL", kod != 0)
         check("3-holat: 'o'lchanmagan' deyiladi va NOL DEYILMAYDI",
-              "LCHANMAGAN" in chiq.upper() and "jurnalda YO" not in chiq,
+              "LCHANMAGAN" in chiq.upper() and "qator yo" not in chiq,
               chiq[-250:])
 
         kod, chiq = yurgiz("jadvalsiz")

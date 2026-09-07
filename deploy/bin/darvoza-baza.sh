@@ -228,10 +228,30 @@ tasdiq_0071() {
     # "o'lchanmadi" xabari hech qachon chiqmasdi va uch holat yana
     # ikkitaga qisqarardi. Shuning uchun `errexit` shu ikki
     # chaqiruvda ATAYLAB vaqtincha o'chiriladi.
+    # SANOQ EMAS, HOLATNING O'ZI so'raladi.
+    #
+    # `count(*) ... AND holat = '<literal>'` ikki xil nosozlikni
+    # BITTA `0` ga qo'shib yuboradi: "qator umuman yo'q" va "qator
+    # bor, lekin holati boshqa". Ikkinchisi esa aynan bilish kerak
+    # bo'lgan narsa — va men shu yerda IKKI MARTA adashdim
+    # (`id` o'rniga `migratsiya_id`, keyin `tugadi` o'rniga `ok`).
+    #
+    # HOLAT LITERALLARI KODDAN OLINGAN (`migratsiya.py:1086`):
+    #     "ok"          -- bajarildi
+    #     "xato"        -- yiqildi
+    #     "boshlandi"   -- boshlangan, tugamagan
+    #     "otkazildi"   -- O'TKAZIB YUBORILGAN
+    #     "bootstrap"   -- mavjud deb belgilangan
+    #
+    # `otkazildi` ALOHIDA VA MUHIM: "o'tkazib yuborildi" — bajarildi
+    # EMAS. Uni muvaffaqiyat deb sanash ERP 23-patchidagi "skip =
+    # success" nuqsonining aynan o'zi bo'lardi.
     set +e
     chiq="$(psql "$dsn" -v ON_ERROR_STOP=1 -qtA -c \
-        "SELECT count(*) FROM schema_migration
-          WHERE migratsiya_id LIKE '0071%' AND holat = 'tugadi'" 2>&1)"
+        "SELECT COALESCE(
+                  (SELECT holat FROM schema_migration
+                    WHERE migratsiya_id LIKE '0071%'
+                    ORDER BY id DESC LIMIT 1), '<qator yo''q>')" 2>&1)"
     kod=$?
     set -e
     if [ "$kod" -ne 0 ]; then
@@ -241,11 +261,14 @@ tasdiq_0071() {
         exit 1
     fi
     case "$chiq" in
-        1) log "0071 jurnal: tugadi" ;;
-        0) echo "XATO: 0071_topshiriq jurnalda YO'Q (holat='tugadi' emas)." >&2
-           exit 1 ;;
-        *) echo "XATO: 0071 jurnali kutilmagan qiymat qaytardi: '$chiq'" >&2
-           exit 1 ;;
+        ok) log "0071 jurnal: holat=ok" ;;
+        otkazildi)
+            echo "XATO: 0071_topshiriq O'TKAZIB YUBORILGAN (holat=otkazildi)." >&2
+            echo "      Bu 'bajarildi' EMAS — patch ishga tushmagan." >&2
+            exit 1 ;;
+        *)  echo "XATO: 0071_topshiriq bajarilmagan. Jurnaldagi holat: '$chiq'" >&2
+            echo "      Kutilgan: 'ok' (migratsiya.py:1086)." >&2
+            exit 1 ;;
     esac
 
     # SXEMA SHARTI — jurnaldan MUSTAQIL.
