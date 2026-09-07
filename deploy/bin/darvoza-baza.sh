@@ -322,16 +322,65 @@ tekshir)
     # `rolcreatedb` ALOHIDA tekshiriladi: rol mavjudligi uning
     # baza YARATA OLISHINI bildirmaydi va bu farq aynan shu
     # skript uchun hal qiluvchi.
-    psql_ -c "SELECT 'rol=' || current_user
-                  || '  baza=' || current_database()
-                  || '  createdb=' || (SELECT rolcreatedb FROM pg_roles
-                                        WHERE rolname = current_user)"
-    # `tai_service` da CREATEDB PAYDO BO'LIB QOLMAGANINI ham
-    # o'lchaymiz: bu loyihaning qat'iy qoidasi va uni "eslab
-    # qolishga" tayanib qoldirib bo'lmaydi.
-    psql_ -c "SELECT 'tai_service.createdb=' || COALESCE(
-                  (SELECT rolcreatedb::text FROM pg_roles
-                    WHERE rolname = 'tai_service'), '<rol yo''q>')"
+    # BESH INVARIANT — HAMMASI O'LCHANADI, HECH BIRI TAXMIN QILINMAYDI.
+    #
+    # Ilgari bu yerda faqat ADMIN dsn i tekshirilardi. Natijada
+    # `XT_DB_DSN` da `user=tai_test_admin` turgani faqat `sinov`
+    # bosqichida, 20+ to'plam "permission denied" bergandan KEYIN
+    # ko'rindi (2026-09-08). Sozlama nuqsoni sinov nuqsoni bo'lib
+    # ko'rinardi.
+    #
+    # PAROL CHIQMAYDI: faqat `current_user`, `current_database` va
+    # `rolcreatedb`.
+    _xato=0
+
+    # --- 1-2) ILOVA DSN i --------------------------------------------------
+    : "${XT_DB_DSN:?tekshiruv uchun XT_DB_DSN kerak}"
+    set +e
+    _app="$(psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT current_user || ' ' || current_database()" 2>&1)"
+    _k=$?
+    set -e
+    if [ "$_k" -ne 0 ]; then
+        echo "XATO: XT_DB_DSN ulanmadi (psql $_k) — O'LCHANMADI." >&2
+        printf '      %s\n' "$_app" >&2
+        exit 1
+    fi
+    _arol="${_app%% *}"; _abaza="${_app##* }"
+    echo "ilova : rol=${_arol}  baza=${_abaza}"
+    [ "$_arol" = "tai_service" ] || {
+        echo "XATO: XT_DB_DSN roli '${_arol}' — 'tai_service' bo'lishi SHART." >&2
+        _xato=1; }
+    [ "$_abaza" = "tenderai_staging" ] || {
+        echo "XATO: XT_DB_DSN bazasi '${_abaza}' — 'tenderai_staging' bo'lishi SHART." >&2
+        _xato=1; }
+
+    # --- 4) ADMIN DSN i ----------------------------------------------------
+    _adm="$(psql_ -c "SELECT current_user")"
+    echo "admin : rol=${_adm}"
+    [ "$_adm" = "tai_test_admin" ] || {
+        echo "XATO: XT_DB_DSN_TEST_ADMIN roli '${_adm}' — 'tai_test_admin' kutilgan." >&2
+        _xato=1; }
+
+    # --- 3, 5) CREATEDB BAYROQLARI -----------------------------------------
+    # Ikkalasi ham AYNI so'rovda: bitta rasm, ikki qiymat.
+    _svc="$(psql_ -c "SELECT COALESCE((SELECT rolcreatedb::text FROM pg_roles
+                                        WHERE rolname='tai_service'), 'YOQ')")"
+    _adm_c="$(psql_ -c "SELECT COALESCE((SELECT rolcreatedb::text FROM pg_roles
+                                          WHERE rolname='tai_test_admin'), 'YOQ')")"
+    echo "createdb: tai_service=${_svc}  tai_test_admin=${_adm_c}"
+    [ "$_svc" = "false" ] || {
+        echo "XATO: tai_service da CREATEDB bor — eng kam imtiyoz buzilgan." >&2
+        _xato=1; }
+    [ "$_adm_c" = "true" ] || {
+        echo "XATO: tai_test_admin da CREATEDB yo'q — darvoza ishlamaydi." >&2
+        _xato=1; }
+
+    if [ "$_xato" -ne 0 ]; then
+        echo "TEKSHIR: FAIL — invariant buzilgan (yuqorida)." >&2
+        exit 1
+    fi
+    echo "TEKSHIR: PASS — besh invariant ham o'tdi"
     ;;
 
 yarat)
