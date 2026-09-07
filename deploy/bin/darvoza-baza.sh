@@ -562,6 +562,34 @@ sinov)
     log "python: $PY"
     log "sys.executable: $("$PY" -c 'import sys;print(sys.executable)' 2>&1 | tail -1)"
     log "dotenv: $("$PY" -c 'import dotenv;print(dotenv.__file__)' 2>&1 | tail -1)"
+
+    # --- BOLA JARAYONI O'LCHOVI ------------------------------------------
+    # `run_tests.py` to'plamlarni `[sys.executable, <yol>]` bilan,
+    # `cwd=<ildiz>` va `env=dict(os.environ, ...)` bilan yurgizadi.
+    # Ota jarayonda `dotenv` BOR, bola esa "yo'q" deydi — farq
+    # qayerdaligini TAXMIN QILMASDAN o'lchaymiz: probe AYNAN o'sha
+    # shaklda yurgiziladi.
+    cat > "${ILDIZ_TOLIQ}/_darvoza_probe.py" <<'PROBE'
+import importlib.util as iu, os, sys
+print("uid/gid   :", os.getuid(), os.getgid())
+print("cwd       :", os.getcwd())
+print("argv0     :", sys.argv[0])
+print("executable:", sys.executable)
+print("prefix    :", sys.prefix)
+print("base_pref :", sys.base_prefix)
+print("version   :", sys.version.split()[0])
+print("PATH      :", (os.environ.get("PATH") or "")[:160])
+print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
+print("PYTHONHOME:", os.environ.get("PYTHONHOME"))
+print("VIRTUAL_ENV:", os.environ.get("VIRTUAL_ENV"))
+print("find_spec(dotenv):", iu.find_spec("dotenv"))
+print("sys.path  :")
+for q in sys.path:
+    print("   ", q or "<bo'sh>")
+PROBE
+    log "--- BOLA PROBE (suite bilan bir xil shaklda) ---"
+    ( cd "$ILDIZ_TOLIQ" && PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 \
+        "$PY" "${ILDIZ_TOLIQ}/_darvoza_probe.py" 2>&1 | sed 's/^/    /' ) >&2 || true
     if ! "$PY" -c "import dotenv, psycopg2" >/dev/null 2>&1; then
         _zaxira="/opt/tenderai/${APP_ENV:-staging}/current/.venv/bin/python"
         if [ -x "$_zaxira" ] && "$_zaxira" -c "import dotenv, psycopg2" >/dev/null 2>&1; then
@@ -642,9 +670,31 @@ sinov)
     # ko'rsatish, jurnalni to'ldirish emas.
     NAT="${ILDIZ_TOLIQ}/_test_natija"
     if [ "$SINOV_KOD" -ne 0 ] && [ -d "$NAT" ]; then
-        log "--- YIQILGAN TO'PLAMLAR: oxirgi 25 qator ---"
+        log "--- YIQILGAN TO'PLAMLAR: muhim qatorlar (niqoblangan) ---"
         "${PY:-python3}" - "$NAT" <<'PYEOF' >&2 || true
-import io, json, os, sys
+import io, json, os, re, sys
+
+# SIR CHIQMAYDI. Bu chiqish jurnalga va hisobotlarga ketadi, ya'ni
+# ko'p qo'ldan o'tadi. Niqob QIYMATNI oladi, KALIT NOMINI qoldiradi —
+# nosozlik izlash uchun nom yetarli, qiymat esa hech qachon kerak emas.
+_SIR = [
+    (re.compile(r"(password\s*=\s*)\S+", re.I), r"\1***"),
+    (re.compile(r"(passwd\s*=\s*)\S+", re.I), r"\1***"),
+    (re.compile(r"(api[_-]?key\s*[=:]\s*)\S+", re.I), r"\1***"),
+    (re.compile(r"(token\s*[=:]\s*)\S+", re.I), r"\1***"),
+    (re.compile(r"(authorization\s*:\s*)\S+", re.I), r"\1***"),
+    (re.compile(r"(service[_-]?key\s*[=:]\s*)\S+", re.I), r"\1***"),
+    (re.compile(r"sk-ant-[A-Za-z0-9_\-]+"), "sk-ant-***"),
+    (re.compile(r"(postgres(?:ql)?://[^:@\s]+:)[^@\s]+@"), r"\1***@"),
+]
+
+
+def niqob(q):
+    for rx, alm in _SIR:
+        q = rx.sub(alm, q)
+    return q
+
+
 nat = sys.argv[1]
 try:
     x = json.load(io.open(os.path.join(nat, "xulosa.json"), encoding="utf-8"))
@@ -659,10 +709,34 @@ for nom in x.get("yiqilgan") or []:
     print(f"\n===== {nom} " + "=" * (60 - len(nom)))
     try:
         qatorlar = io.open(yol, encoding="utf-8", errors="replace").read().splitlines()
-        for q in qatorlar[-25:]:
-            print("  " + q)
     except Exception as e:
         print(f"  [log o'qilmadi: {e}]")
+        continue
+
+    # NAQSH BO'YICHA + KONTEKST. Oxirgi N qator YETARLI EMAS: ko'p
+    # to'plam yiqilishni O'RTADA chop etadi va oxirida faqat xulosa
+    # qoladi — shuning uchun oltita to'plam tasniflanmay qolgandi.
+    RX = re.compile(r"\[FAIL\]|\[XATO\]|YIQILDI:|Traceback|AssertionError"
+                    r"|Error:|error:|Exception|kutilgan|expected|actual")
+    tanlangan = set()
+    for i, q in enumerate(qatorlar):
+        if RX.search(q):
+            for j in range(max(0, i - 2), min(len(qatorlar), i + 3)):
+                tanlangan.add(j)
+    if not tanlangan:                      # hech narsa mos kelmasa — oxiri
+        tanlangan = set(range(max(0, len(qatorlar) - 25), len(qatorlar)))
+
+    oxirgi = -2
+    chiqarildi = 0
+    for i in sorted(tanlangan):
+        if chiqarildi >= 120:
+            print("  … (chegara: 120 qator)")
+            break
+        if i != oxirgi + 1:
+            print("  ---")
+        print("  " + niqob(qatorlar[i]))
+        oxirgi = i
+        chiqarildi += 1
 PYEOF
     fi
 
