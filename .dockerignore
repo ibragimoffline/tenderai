@@ -1,0 +1,48 @@
+# QURILISH KONTEKSTI — KICHIK VA ANIQ.
+#
+# O'lchandi (2026-09-08): `frontend/node_modules` 315 MB, `.git` 8.7 MB,
+# reliz `.venv` 1.5 GB. Ular kontekstga tushsa har build sekinlashadi
+# va imijga tasodifan kirib qolishi mumkin.
+#
+# QOIDA: bu yerga faqat QAYTA YARATILADIGAN yoki MAXFIY narsa
+# yoziladi. Ishlab chiqarishda kerak bo'lgan narsa CHIQARILMAYDI.
+
+# --- Qayta yaratiladigan ---
+.git
+# `.gitattributes` CHIQARILMAYDI — `deploy_test` uning borligini
+# tekshiradi (u qator oxiri siyosatini belgilaydi va reliz uchun
+# ahamiyatli). O'lchandi: uni chiqarganda Docker da 333/334 bo'ldi,
+# hostda esa 340/340 — ya'ni farq mahsulotda emas, MENING
+# `.dockerignore` imda edi.
+.venv
+*/.venv
+frontend/node_modules
+frontend/dist
+**/__pycache__
+*.pyc
+*.pyo
+_test_natija
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# --- SIR. Imij qatlamiga hech qachon tushmasin ---
+.env
+.env.*
+!.env.example
+deploy/env/*.env
+
+# --- Doimiy ma'lumot — konteynerga kirmaydi ---
+logs/
+backups/
+*.dump
+*.dump.sha256
+uploads/
+var/
+
+# --- Mahalliy chiqindi ---
+*.log
+.DS_Store
+.idea/
+.vscode/
+_olchov/

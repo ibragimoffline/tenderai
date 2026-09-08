@@ -1,0 +1,87 @@
+# =============================================================================
+# RELIZ DARVOZASI — TAKRORLANADIGAN IJRO MUHITI
+# =============================================================================
+# Faqat SINOV uchun. Ishlab chiqarishga joylashtirilmaydi.
+#
+# NEGA BU IMIJ BOR
+# ----------------
+# Darvoza hozir HOST muhitida yuradi va o'sha muhit uch marta yolg'on
+# natija berdi (hammasi o'lchangan, 2026-09-08):
+#
+#   1. `run_tests.py` bolani `sys.executable` bilan yurgizardi va u
+#      venv ga yechilmasdi -> beshta to'plam "dotenv yo'q" deb yiqilardi.
+#   2. `pricing_test` PATH dagi BIRINCHI `node` ni olardi:
+#      `/usr/bin/node` (Debian, TS SIZ) yoki nvm dagisi (TS bilan) —
+#      natija mashinaga qarab o'zgarardi.
+#   3. `requirements-api.txt` da BITTA HAM `==` yo'q, ya'ni har
+#      o'rnatish boshqa versiyalarni yechishi mumkin.
+#
+# Bu imij uchalasini ham qat'iylashtiradi: python versiyasi, node
+# qurilmasi va bog'liqlik ro'yxati IMIJDA qotirilgan.
+#
+# NEGA DEBIAN NODE EMAS
+# ---------------------
+# Debian/Ubuntu `nodejs` paketi TypeScript qo'llab-quvvatlashisiz
+# (`amaro` siz) quriladi va `pricing.ts` importi `ERR_NO_TYPESCRIPT`
+# beradi — versiya qanchalik yangi bo'lmasin. Rasmiy `node` imiji
+# esa uni o'z ichiga oladi. Shuning uchun node RASMIY IMIJDAN
+# ko'chiriladi, paket menejeridan emas.
+# =============================================================================
+
+# --- Node: RASMIY imij (TypeScript qo'llab-quvvatlashi bilan) ---------------
+FROM node:22.23.2-trixie-slim AS node_manba
+
+# --- Asosiy: Python -----------------------------------------------------
+FROM python:3.14.4-slim-trixie
+
+# Tizim paketlari:
+#   postgresql-client — `migratsiya.sh`/darvoza `psql` chaqiradi
+#   git               — `deploy_test` git rejimini tekshiradi
+#   bash              — deploy skriptlari `bash` ga tayanadi
+#   curl              — sog'liq tekshiruvlari
+# `--no-install-recommends`: imij kichik qolsin.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash git curl postgresql-client ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node RASMIY imijdan — paket menejeridan EMAS (yuqoridagi izoh).
+COPY --from=node_manba /usr/local/bin/node /usr/local/bin/node
+COPY --from=node_manba /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+
+# --- Bog'liqliklar: QULF BO'YICHA ---------------------------------------
+# `requirements-api.lock` — ishlab turgan relizdan olingan 70 ta pin.
+# `torch==...+cpu` PyTorch indeksini talab qiladi; GPU g'ildiragi
+# ATAYLAB olinmaydi (server CPU va imij ~2 GB ga o'sib ketardi).
+WORKDIR /app
+COPY requirements-api.lock ./
+RUN pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements-api.lock
+
+# --- Kod ----------------------------------------------------------------
+COPY . .
+
+# --- ROOT EMAS ----------------------------------------------------------
+# Darvoza hech narsa o'rnatmaydi va hech qayerga yozmaydi (natijalar
+# `_test_natija` ga tushadi — u konteyner ichida va bir martalik).
+RUN useradd --system --create-home --uid 10001 darvoza \
+    && chown -R darvoza:darvoza /app
+USER darvoza
+
+# --- Muhit: TAKRORLANADIGAN ---------------------------------------------
+# `TENDERAI_PY`/`TENDERAI_NODE` — bola jarayonlar AYNAN shu ijrochilarni
+# olsin, PATH dagi tasodifiy birinchisini emas.
+# `HF_HUB_OFFLINE` — darvoza tarmoqqa chiqmaydi; model keshi TASHQARIDAN
+# ulanadi (imijga BOKILMAYDI: u 471 MB va reviziyaga bog'liq).
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TENDERAI_PY=/usr/local/bin/python \
+    TENDERAI_NODE=/usr/local/bin/node \
+    HF_HUB_OFFLINE=1 \
+    HF_HOME=/model-kesh \
+    APP_ENV=staging
+
+# SIR YO'Q: DSN va kalitlar FAQAT ish vaqtida `--env-file` bilan
+# beriladi. Imij qatlamiga hech qachon yozilmaydi.
+ENTRYPOINT ["python", "run_tests.py"]
