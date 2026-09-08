@@ -1600,12 +1600,38 @@ def test_darvoza_dsn():
         # yetmaydi. Shuning uchun AYNAN 3-bo'limni tekshirish uchun
         # skriptni matndan emas, o'z ildizida yurgizamiz va faqat
         # DSN o'zgaruvchilarini olib tashlaymiz.
+        # MASHQ O'Z ILDIZIDA YURADI — HAQIQIY REPOZITORIYADA EMAS.
+        #
+        # O'LCHANGAN NUQSON (2026-09-08): ilgari bu yerda `ROOT`
+        # berilardi va darvoza HAQIQIY `run_tests.py` ni chaqirardi.
+        # `TENDERAI_PY` buzuq bo'lgan paytda u tez yiqilardi va nuqson
+        # ko'rinmasdi. Interpretator tuzatilgach esa darvoza 44 ta
+        # to'plamni ICHMA-ICH yurgizib yubordi: yurish 260s dan 1162s
+        # ga chiqdi va `deploy_test` ning o'zi "o'lchanmadi" bo'lib
+        # qoldi.
+        #
+        # Bu sinovning savoli — 3-BO'LIM: DSN yo'q bo'lsa darvoza
+        # to'xtaydimi. Backend to'plamlari bunga aloqasiz. Shuning
+        # uchun mashq ildizida `run_tests.py` ning O'RNIGA to'g'ri
+        # xulosa qatorini beradigan qisqa dublyor turadi: darvoza
+        # 1-bo'limdan o'tadi va 3-bo'limga YETADI.
+        mashq_ildiz = os.path.join(tmp, "ildiz")
+        os.makedirs(os.path.join(mashq_ildiz, "frontend"), exist_ok=True)
+        N2 = chr(10)
+        io.open(os.path.join(mashq_ildiz, "run_tests.py"), "w",
+                encoding="utf-8", newline=N2).write(
+            "print(\"JAMI: 44/44 to'plam yurdi, 44 o'tdi, 0 yiqildi\")" + N2)
+        io.open(os.path.join(mashq_ildiz, "migratsiya.py"), "w",
+                encoding="utf-8", newline=N2).write("raise SystemExit(0)" + N2)
+        io.open(os.path.join(mashq_ildiz, "frontend", "package.json"), "w",
+                encoding="utf-8", newline=N2).write("{}" + N2)
+
         e = dict(os.environ)
         e.pop("XT_DB_DSN", None)
         e.pop("XT_DB_DSN_OWNER", None)
-        e["TENDERAI_KUTILGAN_TOPLAM"] = "999999"   # 1-bo'limda to'xtasin
+        e["TENDERAI_DARVOZA_FRONTEND"] = "0"       # frontend qurilmasin
         r = subprocess.run([bash, os.path.join(D, "bin", "relis-darvoza.sh"),
-                            _posix_yol(bash, ROOT)],
+                            _posix_yol(bash, mashq_ildiz)],
                            capture_output=True, text=True, env=e, cwd=tmp)
         # 1-bo'lim to'xtatgani ham, 3-bo'lim to'xtatgani ham MAYLI —
         # muhimi: darvoza "o'tdi" DEMAYDI.
