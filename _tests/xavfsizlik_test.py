@@ -456,7 +456,11 @@ def test_sirlar():
         "dsn_parol": re.compile(r"postgres(?:ql)?://[^\s:]+:[^\s@]+@"),
     }
     topildi = []
-    for f in sorted(kuzatilgan):
+    # MAZMUN SIYOSATI — manifestdagi fayllar ustida.
+    # Yo'l siyosati "qaysi fayl kuzatilgan" ni, bu esa "ular ichida
+    # nima bor" ni tekshiradi. Ikkalasi ham kerak: ruxsat etilgan
+    # shablon ham haqiqiy kalit saqlab qolishi mumkin.
+    for f in sorted(yollar):
         p = os.path.join(ROOT, f)
         if not os.path.isfile(p) or os.path.getsize(p) > 2_000_000:
             continue
@@ -467,7 +471,7 @@ def test_sirlar():
         for nom, rx in pats.items():
             if rx.search(t):
                 topildi.append(f"{f} [{nom}]")
-    check(f"kuzatilgan {len(kuzatilgan)} faylda sir naqshi YO'Q",
+    check(f"manifestdagi {len(yollar)} faylda sir naqshi YO'Q",
           not topildi, str(topildi[:3]))
 
 
