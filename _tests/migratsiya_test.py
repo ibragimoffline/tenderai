@@ -571,7 +571,15 @@ def test_1_bosh_bazadan_qurish():
                     "password_hash,active) VALUES('sinov_uruq','Sinov uruq',"
                     "'!yaroqsiz',true) ON CONFLICT (username) DO NOTHING")
     kod, chiqish = _yurgiz("--qolla")
-    check("urug'dan keyin qurish TUGADI", kod == 0, f"chiqish kodi {kod}")
+    # SABAB TAFSILOTGA QO'SHILADI — "chiqish kodi 1" o'zi hech nima
+    # tushuntirmaydi va vaqtinchalik daraxt yurish oxirida o'chadi,
+    # ya'ni sababni topish uchun butun darvozani qayta yurgizish
+    # kerak bo'lardi. (Xuddi shu tuzatish yuqoridagi birinchi
+    # bosqichda 26-migratsiya kengaytma talab qilishini ochgan edi.)
+    check("urug'dan keyin qurish TUGADI", kod == 0,
+          f"chiqish kodi {kod}" if kod == 0
+          else f"chiqish kodi {kod}; oxirgi qatorlar: "
+               + " / ".join(chiqish.strip().splitlines()[-6:]))
 
     kod, chiqish = _yurgiz("--holat")
     check("hamma migratsiya qo'llangan", "Qo'llanmagan: 0" in chiqish,
