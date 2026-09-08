@@ -343,9 +343,14 @@ TAQIQ_NAQSH = [
 #: kabi faylni ham jimgina o'tkazardi.
 RUXSAT_SHABLON = {
     ".env.example",
+    "frontend/.env.example",
     "deploy/env/staging.env.example",
     "deploy/env/production.env.example",
 }
+# `frontend/.env.example` MAZMUNI TEKSHIRILGANDAN KEYIN qo'shildi
+# (2026-09-09): 542 bayt, sir naqshi yo'q, ikkala kalit ham o'rin-egasi
+# yoki `/api` kabi qisqa yo'l. Uni "nomi `.example` ekan" degan sabab
+# bilan o'tkazish YETARLI EMAS -- mazmun siyosati baribir yuradi.
 
 MANIFEST_SARLAVHA = "# tenderai-kuzatilgan-manifest v1"
 
