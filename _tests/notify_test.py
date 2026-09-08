@@ -360,20 +360,43 @@ def test_chegaradan_past_tanlanmaydi():
 
     eng_yuqori = max(t["score"] for t in hammasi)
     past_ballar = [t for t in hammasi if t["score"] < eng_yuqori]
-    ok(len(past_ballar) > 0,
-       "sinov uchun chegaradan PAST ballli tender kerak (hammasi bir xil ball)")
 
-    # Chegara = eng yuqori ball -> pastdagilar BITTA HAM tushmasligi kerak
-    natija = notify.find_candidates(min_score=eng_yuqori, since=since, limit=0)
-    chiqqan = {t["id"] for t in natija}
-    for t in natija:
-        ok(t["score"] >= eng_yuqori, f"chegaradan past ball o'tib ketdi: {t['score']}")
-    for t in past_ballar:
-        ok(t["id"] not in chiqqan,
-           f"past ballli tender ({t['score']} < {eng_yuqori}) tanlandi")
+    # BALL XILMA-XILLIGI KORPUSDAN TALAB QILINMAYDI.
+    #
+    # O'LCHANGAN NUQSON (2026-09-08, darvoza): bu yerda
+    #
+    #     ok(len(past_ballar) > 0, "... hammasi bir xil ball")
+    #
+    # turardi va darvoza bazasida hamma nomzodning bali bir xil
+    # bo'lgani uchun BUTUN TO'PLAM yiqilardi. Ya'ni sinov kodni emas,
+    # KORPUS TARKIBINI o'lchardi -- va tuzatish uchun korpusga
+    # ma'lumot qo'shish kerakdek ko'rinardi.
+    #
+    # Aslida kerak emas: pastki halqa ayni shu xossani ma'lumotdan
+    # MUSTAQIL ravishda to'liq tekshiradi -- har chegara uchun qaytgan
+    # to'plam kutilganiga TENG bo'lishi shart.
+    #
+    # Xilma-xillik bo'lsa quyidagi qat'iy blok ham yuradi; bo'lmasa u
+    # o'tkazib yuboriladi va buni jurnal AYTADI. Chiqarib tashlash
+    # esa baribir o'lchanadi: halqaga `eng_yuqori + 1` qo'shilgan va
+    # unda HECH BIR tender o'tmasligi kerak.
+    if past_ballar:
+        natija = notify.find_candidates(min_score=eng_yuqori, since=since,
+                                        limit=0)
+        chiqqan = {t["id"] for t in natija}
+        for t in natija:
+            ok(t["score"] >= eng_yuqori,
+               f"chegaradan past ball o'tib ketdi: {t['score']}")
+        for t in past_ballar:
+            ok(t["id"] not in chiqqan,
+               f"past ballli tender ({t['score']} < {eng_yuqori}) tanlandi")
+    else:
+        print(f"  [i] korpusda ball xilma-xilligi yo'q (hammasi {eng_yuqori})"
+              f" — qat'iy blok o'tkazildi, chegara halqasi o'lchaydi")
 
-    # Filtr AYNAN ball bo'yicha ishlaydi (ortiqcha/kam tender yo'q)
-    for chegara in (0, 50, 70, 100):
+    # Filtr AYNAN ball bo'yicha ishlaydi (ortiqcha/kam tender yo'q).
+    # `eng_yuqori + 1` — CHIQARIB TASHLASH kafolatli o'lchansin.
+    for chegara in (0, 50, 70, 100, eng_yuqori + 1):
         kutilgan = {t["id"] for t in hammasi if t["score"] >= chegara}
         olingan = {t["id"] for t in
                    notify.find_candidates(min_score=chegara, since=since, limit=0)}
