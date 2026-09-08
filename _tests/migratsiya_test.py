@@ -348,20 +348,46 @@ def _admin_kon():
 
 
 def _sinov_rol():
-    """Migratsiyani YURGIZADIGAN rol nomi.
-
-    Baza SHU rol nomiga yaratiladi. O'LCHANGAN NUQSON (2026-09-08):
-    bazani `tai_test_admin` yaratardi, migratsiyani esa `tai_service`
-    yurgizardi. PostgreSQL 15 dan boshlab `public` sxemasiga standart
-    `CREATE` huquqi YO'Q (bu xostda 18-versiya), shuning uchun
-    migratsiya kutilgan "ma'lumot shartida to'xtash" (kod 2) holatiga
-    YETMASDAN, huquq xatosi bilan (kod 1) yiqilardi.
-
-    Egalikni berish IMTIYOZ QO'SHISH EMAS: rol faqat O'ZI uchun
-    yaratilgan bir martalik sinov bazasining egasi bo'ladi, boshqa
-    hech qayerda hech narsa o'zgarmaydi.
-    """
+    """Migratsiyani YURGIZADIGAN rol nomi."""
     return _dsn_qism().get("user") or "postgres"
+
+
+def _sxema_yoli_ochilsin():
+    """Sinov bazasining `public` sxemasida migratsiyaga yo'l ochadi.
+
+    O'LCHANGAN NUQSON (2026-09-08): sinov bazasini `tai_test_admin`
+    yaratardi, migratsiyani esa `tai_service` yurgizardi. PostgreSQL
+    15 dan boshlab `public` sxemasiga standart yaratish huquqi YO'Q
+    (bu xostda 18-versiya), shuning uchun migratsiya kutilgan
+    "ma'lumot shartida to'xtash" (kod 2) holatiga YETMASDAN, huquq
+    xatosi bilan (kod 1) yiqilardi.
+
+    NEGA BAZA EGASINI ALMASHTIRISH EMAS: `CREATE DATABASE ... OWNER`
+    yaratuvchi roldan o'sha rolga `SET ROLE` qila olishni talab
+    qiladi. O'lchandi:
+
+        must be able to SET ROLE "tai_service"
+
+    Ya'ni buning uchun rollarni bir-biriga A'ZO qilish kerak bo'lardi
+    va bu HAQIQIY, DOIMIY imtiyoz o'zgarishi bo'lardi.
+
+    BU YO'L IMTIYOZ KENGAYTIRMAYDI: huquq FAQAT shu bir martalik
+    sinov bazasida beriladi. Baza yurish oxirida tashlanadi va u
+    bilan birga huquq ham yo'qoladi. Ishlab chiqarish bazasidagi
+    `tai_service` ayni o'sha imtiyozda qoladi.
+    """
+    admin = os.environ.get("XT_DB_DSN_TEST_ADMIN", "").strip()
+    q = dict(M.dsn_qismlari(admin)) if admin else dict(_dsn_qism())
+    q["dbname"] = SINOV_BAZA
+    c = psycopg2.connect(" ".join(f"{k}={v}" for k, v in q.items()),
+                         connect_timeout=8)
+    c.autocommit = True
+    try:
+        with c.cursor() as cur:
+            cur.execute('GRANT CREATE, USAGE ON SCHEMA public TO "%s"'
+                        % _sinov_rol())
+    finally:
+        c.close()
 
 
 def _baza_amal(sqllar):
@@ -404,8 +430,9 @@ def _baza_qayta_yarat():
     _majburan_uz()
     _baza_amal([
         f'DROP DATABASE IF EXISTS "{SINOV_BAZA}"',
-        f'CREATE DATABASE "{SINOV_BAZA}" OWNER "{_sinov_rol()}"',
+        f'CREATE DATABASE "{SINOV_BAZA}"',
     ])
+    _sxema_yoli_ochilsin()
 
 
 def _baza_tashla():
