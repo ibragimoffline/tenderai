@@ -139,10 +139,32 @@ log "xulosa: $XULOSA"
     tail -30 "$LOG" >&2
     xato "faqat $JAMI to'plam yurdi, kutilgan >= $KUTILGAN — qolgani BAJARILMADI"
 }
-[ "$YIQILGAN" -eq 0 ] || {
+# --- RELIZ QARORI — TOIFA BO'YICHA, SANOQ BO'YICHA EMAS ---------------------
+# ILGARI shu yerda `[ "$YIQILGAN" -eq 0 ]` turardi. U ikkita butunlay
+# boshqa narsani BIR XIL ko'rsatardi:
+#
+#     xavfsizlik regressiyasi   -> to'xtashi KERAK
+#     korpusda hujjat yo'qligi  -> to'xtatish MA'NOSIZ
+#
+# Natijada darvoza doim qizil bo'lib qolardi, va doim qizil
+# darvozaning yagona oqibati -- undan chetlab o'tishni o'rganish.
+#
+# QAROR JURNAL MATNIDAN CHIQARILMAYDI: `xulosa.json` (mashina o'qiydi)
+# va `deploy/relis-tasnif.tsv` (ko'rib chiqilgan artefakt).
+#
+# FAIL CLOSED: tasnifi yo'q yiqilish, buzuq artefakt, yo'qolgan
+# to'plam, takroriy natija yoki KRITIK to'plamning qizilligi -- har
+# biri relizni TO'XTATADI. Kritik to'plamlar yorlig'idan qat'i nazar
+# to'xtatadi: tasnif faylini inson yozadi.
+if [ "$YIQILGAN" -ne 0 ]; then
     grep -E '^\s*\[XATO\]|^YIQILGAN:' "$LOG" >&2 || true
-    xato "$YIQILGAN ta to'plam yiqildi"
-}
+fi
+_XULOSA_JSON="${ILDIZ}/_test_natija/xulosa.json"
+_TASNIF="${ILDIZ}/deploy/relis-tasnif.tsv"
+if ! "${PY:-python3}" "${ILDIZ}/deploy/bin/relis-qaror.py" \
+        --xulosa "$_XULOSA_JSON" --tasnif "$_TASNIF" >&2; then
+    xato "reliz qarori: TO'XTATILDI (yuqoridagi toifalarga qarang)"
+fi
 [ "$KOD" -eq 0 ] || {
     tail -30 "$LOG" >&2
     xato "run_tests.py chiqish kodi $KOD"

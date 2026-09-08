@@ -956,6 +956,17 @@ PROBE2
     SINOV_KOD=$?
     set -e
 
+    # --- RELIZ QARORI — MA'LUMOT UCHUN -----------------------------------
+    # `sinov` TASHXIS amali: uning chiqish kodi o'zgarmaydi. Lekin
+    # operator "bu yurish relizni o'tkazadimi" degan savolga javobni
+    # SHU YERDA ko'rishi kerak -- aks holda u faqat haqiqiy reliz
+    # paytida ma'lum bo'lardi.
+    if [ -f "${ILDIZ_TOLIQ}/_test_natija/xulosa.json" ]; then
+        "${PY:-python3}" "${ILDIZ_TOLIQ}/deploy/bin/relis-qaror.py" \
+            --xulosa "${ILDIZ_TOLIQ}/_test_natija/xulosa.json" \
+            --tasnif "${ILDIZ_TOLIQ}/deploy/relis-tasnif.tsv" >&2 || true
+    fi
+
     # --- YIQILGAN TO'PLAMLAR TAFSILOTI -----------------------------------
     # `run_tests.py` har to'plam chiqishini `_test_natija/<nom>.log` ga
     # yozadi, lekin darvoza jurnaliga faqat BITTA KESILGAN qator
