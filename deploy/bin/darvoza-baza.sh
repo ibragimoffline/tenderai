@@ -540,8 +540,10 @@ tekshir)
              GROUP BY 1 HAVING count(*) > 1) q" 2>&1 | sed 's/^/  /'
     echo "  --- bog'liqliklar ---"
     psql "$XT_DB_DSN" -qtA -c \
-        "SELECT '  FK -> app_user: ' || count(*)::text
-           FROM pg_constraint c JOIN pg_class t ON t.oid = c.confrelid
+        "SELECT '  FK: ' || src.relname || '.' || c.conname
+           FROM pg_constraint c
+           JOIN pg_class t ON t.oid = c.confrelid
+           JOIN pg_class src ON src.oid = c.conrelid
            JOIN pg_namespace n ON n.oid = t.relnamespace
           WHERE c.contype = 'f' AND n.nspname='public' AND t.relname='app_user'" 2>&1 | sed 's/^/  /'
     psql "$XT_DB_DSN" -qtA -c \
