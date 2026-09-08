@@ -73,15 +73,83 @@ qur)
     ;;
 
 sinov)
-    # $1 = darvoza bazasi (`tender-darvoza yarat` beradi), qolgani
-    # `run_tests.py` ga uzatiladi.
+    # TO'LIQ HAYOT SIKLI. Chaqiruvchi baza nomini BILMAYDI va
+    # BERMAYDI — u o'rama ichida yasaladi.
+    #
+    # NUQSON EDI (o'lchandi 2026-09-08): bu yerda `"$@"` uzatilardi,
+    # ya'ni `sinov` uchun yordamchiga FAQAT "sinov" so'zi borardi,
+    # holbuki uning shartnomasi `<baza> [args...]`. Natijada:
+    #
+    #     foydalanish: darvoza-docker.sh <tenderai_gate_...> [args...]
+    #
+    # BAZA HAYOT SIKLINI TAKRORLAMAYMIZ. `darvoza-docker.sh` faqat
+    # konteynerni ko'taradi (baza yaratmaydi, migratsiya qilmaydi,
+    # tashlamaydi) — hayot sikli `darvoza-baza.sh` da va u HOST
+    # darvozasida allaqachon isbotlangan: nusxa, migratsiya, `0071`
+    # tasdig'i, qoldiq hisoblarni tozalash.
+    #
+    # NOMNI HAM O'ZIMIZ YASAMAYMIZ: `yarat` uni yasaydi va qaytaradi
+    # (`tenderai_gate_<sana>_<vaqt>`). Ikkinchi nomlash sxemasi
+    # ikkinchi haqiqat manbai bo'lardi — bu loyihada takror qimmatga
+    # tushgan naqsh.
     SHA="$(sha_ol)"
     docker image inspect "tenderai-gate:$SHA" >/dev/null 2>&1 \
         || { echo "imij yo'q — avval: $0 qur" >&2; exit 1; }
-    VAQT="$(mktemp -d)"; trap 'rm -rf "$VAQT"' EXIT
+    VAQT="$(mktemp -d)"
     daraxt_ol "$SHA" "$VAQT"
     echo "darvoza SHA: $SHA" >&2
-    IMIJ="tenderai-gate:$SHA" exec "$VAQT/deploy/bin/darvoza-docker.sh" "$@"
+
+    GATE_DB=""
+    KOD=0
+    # TOZALASH TUZOG'I — SINOV YIQILSA HAM, KONTEYNER O'LSA HAM.
+    # Chaqiruvchining intizomiga tayanmaydi.
+    tozalash() {
+        local k=$?
+        if [ -n "$GATE_DB" ]; then
+            echo "[o'rama] tozalash: $GATE_DB" >&2
+            sudo -u tenderai -H \
+                env XT_DB_DSN_TEST_ADMIN="${XT_DB_DSN_TEST_ADMIN:-}" \
+                    XT_DB_DSN="${XT_DB_DSN:-}" \
+                    XT_DB_DSN_OWNER="${XT_DB_DSN_OWNER:-}" \
+                    APP_ENV=staging RELEASE_SHA="$SHA" \
+                "$VAQT/deploy/bin/darvoza-baza.sh" tozala "$GATE_DB" >&2 || true
+        fi
+        # Qoldiq konteynerlar — FAQAT darvoza imijiniki.
+        docker ps -aq --filter "ancestor=tenderai-gate:$SHA" 2>/dev/null \
+            | xargs -r docker rm -f >/dev/null 2>&1 || true
+        rm -rf "$VAQT"
+        exit "$k"
+    }
+    trap tozalash EXIT
+
+    # 1) Baza + migratsiya + 0071 tasdig'i — ISBOTLANGAN yo'l bilan.
+    GATE_DB="$(sudo -u tenderai -H \
+        env XT_DB_DSN_TEST_ADMIN="${XT_DB_DSN_TEST_ADMIN:-}" \
+            XT_DB_DSN="${XT_DB_DSN:-}" \
+            XT_DB_DSN_OWNER="${XT_DB_DSN_OWNER:-}" \
+            APP_ENV=staging RELEASE_SHA="$SHA" \
+        "$VAQT/deploy/bin/darvoza-baza.sh" yarat)"
+
+    # 2) NOM QO'RIQCHASI — o'rama darajasida ham. `yarat` allaqachon
+    #    tekshiradi, lekin qaytgan qiymatga KO'R-KO'RONA ishonmaymiz.
+    case "$GATE_DB" in
+        tenderai_gate_[0-9a-z_]*) ;;
+        *) echo "XATO: yaroqsiz darvoza bazasi: '$GATE_DB'" >&2; exit 1 ;;
+    esac
+    case "$GATE_DB" in *[!0-9a-z_]*)
+        echo "XATO: nomda begona belgi bor." >&2; exit 1 ;;
+    esac
+    echo "[o'rama] darvoza bazasi: $GATE_DB" >&2
+
+    # 3) Sinovlar KONTEYNERDA. Chiqish kodi SAQLANADI: tuzoq uni
+    #    yutib yubormasin, aks holda yiqilgan darvoza "o'tdi" bo'lardi.
+    set +e
+    IMIJ="tenderai-gate:$SHA" \
+        "$VAQT/deploy/bin/darvoza-docker.sh" "$GATE_DB" "$@"
+    KOD=$?
+    set -e
+    echo "[o'rama] sinov chiqish kodi: $KOD" >&2
+    exit "$KOD"
     ;;
 
 tozala)

@@ -53,14 +53,48 @@ if [ "$ROL" = "tai_test_admin" ]; then
     exit 2
 fi
 
+# --- SIZISH QO'RIQCHASI: OLDIN --------------------------------------------
+# HOST yo'lida bu tekshiruv `darvoza-baza.sh sinov` ichida bor, Docker
+# yo'li esa uni CHETLAB O'TADI — o'lchandi (2026-09-08): birinchi to'liq
+# 44 to'plamli Docker yurishida `OLDIN/KEYIN faol zz*` qatorlari
+# jurnalda UMUMAN chiqmadi.
+#
+# Ya'ni ikki yo'lning NATIJASI bir xil bo'lsa ham, XAVFSIZLIK QATLAMI
+# bir xil emas edi. Paritet faqat PASS/FAIL da emas, qo'riqchalarda ham
+# bo'lishi kerak.
+#
+# Tekshiruv HOSTDA yuradi (bu skript konteynerdan tashqarida) va
+# ILOVA roli bilan — u faqat SELECT qiladi.
+zz_sana() {
+    psql "$SINOV_DSN" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT count(*) FROM company_account
+          WHERE username LIKE 'zz%' AND active"
+}
+zz_nom() {
+    psql "$SINOV_DSN" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT COALESCE(string_agg(username, ', ' ORDER BY id), '-')
+           FROM company_account WHERE username LIKE 'zz%' AND active"
+}
+
 echo "[darvoza-docker] imij : $IMIJ"
 echo "[darvoza-docker] baza : $BAZA   rol: ${ROL:-ANIQLANMADI}"
 echo "[darvoza-docker] kesh : $HF_KESH (faqat o'qish, oflayn)"
 
+OLDIN="$(zz_sana)"
+echo "[darvoza-docker] sinovdan OLDIN faol zz*: $OLDIN"
+if [ "$OLDIN" != "0" ]; then
+    echo "XATO: sinovdan oldin faol qoldiq bor ($OLDIN: $(zz_nom))." >&2
+    echo "      Nusxa tozalanmagan — natija ishonchsiz." >&2
+    exit 1
+fi
+
 # `--rm`: konteyner qolmaydi. `--network host`: yuqoridagi izoh.
 # `cap-drop ALL` + `no-new-privileges`: imtiyoz oshmasin.
 # Docker soketi ULANMAYDI.
-exec docker run --rm \
+#
+# `exec` EMAS: sinovdan KEYIN ham o'lchashimiz kerak.
+set +e
+docker run --rm \
     --network host \
     --cap-drop ALL \
     --security-opt no-new-privileges:true \
@@ -71,3 +105,17 @@ exec docker run --rm \
     -e APP_PUBLIC_URL="${APP_PUBLIC_URL:-}" \
     -e AUTH_COOKIE_SECURE="${AUTH_COOKIE_SECURE:-1}" \
     "$IMIJ" "$@"
+KOD=$?
+set -e
+
+# --- SIZISH QO'RIQCHASI: KEYIN --------------------------------------------
+# Sinov yiqilgan bo'lsa ham o'lchanadi: sizish AYRIM nosozlik va u
+# yiqilish bilan birga yashirinib qolmasin.
+KEYIN="$(zz_sana)"
+echo "[darvoza-docker] sinovdan KEYIN faol zz*: $KEYIN"
+if [ "$KEYIN" != "0" ]; then
+    echo "XATO: sinov FAOL qoldiq qoldirdi ($KEYIN): $(zz_nom)" >&2
+    echo "      Odatda bu to'plam O'LDIRILGANINI bildiradi." >&2
+    exit 1
+fi
+exit "$KOD"
