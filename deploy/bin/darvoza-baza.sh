@@ -788,8 +788,13 @@ for nom in x.get("yiqilgan") or []:
     # NAQSH BO'YICHA + KONTEKST. Oxirgi N qator YETARLI EMAS: ko'p
     # to'plam yiqilishni O'RTADA chop etadi va oxirida faqat xulosa
     # qoladi — shuning uchun oltita to'plam tasniflanmay qolgandi.
-    RX = re.compile(r"\[FAIL\]|\[XATO\]|YIQILDI:|Traceback|AssertionError"
-                    r"|Error:|error:|Exception|kutilgan|expected|actual")
+    # `[tashxis]` — ATAYLAB ro'yxatda. Sinov ichidagi tashxis qatorlari
+    # naqshga tushmasa, ular yozilgani bilan darvoza jurnaliga
+    # YETIB BORMAYDI: aynan shu bo'ldi va `dotenv` sababi yana bir
+    # yurishga cho'zildi.
+    RX = re.compile(r"\[FAIL\]|\[XATO\]|\[tashxis\]|YIQILDI:|Traceback"
+                    r"|AssertionError|Error:|error:|Exception"
+                    r"|kutilgan|expected|actual")
     tanlangan = set()
     for i, q in enumerate(qatorlar):
         if RX.search(q):
