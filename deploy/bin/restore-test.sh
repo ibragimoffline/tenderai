@@ -69,6 +69,13 @@ ZAXIRA="$(find "$KATALOG" -maxdepth 1 -name '*.dump' -printf '%T@ %p\n' 2>/dev/n
 [ -n "$ZAXIRA" ] || xato "zaxira topilmadi: $KATALOG"
 log "zaxira: $(basename "$ZAXIRA")  ($(du -h "$ZAXIRA" | cut -f1))"
 
+# BO'SH DUMP -- ZAXIRA EMAS.
+# O'LCHANGAN (2026-09-08): yiqilgan `pg_dump` katalogda 0 baytli fayl
+# qoldirdi va u ENG YANGI bo'lgani uchun aynan shu tanlanardi.
+[ -s "$ZAXIRA" ] || xato "zaxira BO'SH (0 bayt): $ZAXIRA
+   Bu yiqilgan \`pg_dump\` dan qolgan yarim fayl. Uni o'chiring va
+   zaxirani qayta oling; undan TIKLAB BO'LMAYDI."
+
 # --- 2) SHA-256 tekshiruvi ---------------------------------------------------
 if [ -f "${ZAXIRA}.sha256" ]; then
     if sha256sum -c "${ZAXIRA}.sha256" >/dev/null 2>&1; then
@@ -77,7 +84,19 @@ if [ -f "${ZAXIRA}.sha256" ]; then
         xato "sha256 MOS KELMADI — zaxira ozgargan yoki buzilgan"
     fi
 else
-    log "OGOH: sha256 fayli yoq — butunlik tekshirilmadi"
+    # CHECKSUMSIZ DUMP RAD ETILADI.
+    #
+    # Ilgari bu faqat OGOHLANTIRISH edi va tiklash davom etardi.
+    # Lekin `backup.sh` sha256 ni dump MUVAFFAQIYATLI olingandan
+    # KEYIN yozadi -- ya'ni `.sha256` ning yo'qligi "tekshirilmadi"
+    # degani emas, "bu dump tugallanmagan" degani.
+    #
+    # O'LCHANGAN (2026-09-08): aynan shunday fayl (0 bayt, checksumsiz)
+    # katalogda eng yangi bo'lib turardi.
+    xato "sha256 fayli YO'Q: ${ZAXIRA}.sha256
+   \`backup.sh\` checksumni dump TUGAGACH yozadi, ya'ni uning yo'qligi
+   zaxira TUGALLANMAGANINI bildiradi. Bunday fayldan tiklash
+   'zaxira bor' degan YOLG'ON ishonch berardi."
 fi
 
 # --- 3) Vaqtinchalik bazaga tiklash -----------------------------------------
