@@ -2443,6 +2443,28 @@ def test_faza2_staging_konteyneri():
     finally:
         shutil.rmtree(_d, ignore_errors=True)
 
+    # --- SINOVLAR VAQTINCHALIK KATALOGNI QOLDIRMASIN ---
+    # Bu xostda `/tmp` — `tmpfs`, ya'ni RAM. Tozalanmagan sinov
+    # katalogi diskni emas, XOTIRANI yeydi.
+    #
+    # O'LCHANGAN (2026-09-08): `pricing_test` tozalamasdi va darvoza
+    # yurishlari davomida `/tmp` da 1724 ta katalog yig'ildi. O'sha
+    # xotira ishlab chiqarish API siga kerak edi va
+    # `tenderai-api@production` `oom-kill` bilan yiqildi.
+    #
+    # Ya'ni bu "ozodalik" masalasi emas: sinov ishlab chiqarishni
+    # o'chirdi. Shuning uchun statik muvozanat tekshiruvi.
+    import glob as _glob
+    nomuvozanat = []
+    for yol in sorted(_glob.glob(os.path.join(ROOT, "_tests", "*.py"))):
+        matn = io.open(yol, encoding="utf-8").read()
+        mk = matn.count("mkdtemp(")
+        rm = matn.count("rmtree(") + matn.count("TemporaryDirectory(")
+        if mk > rm:
+            nomuvozanat.append(f"{os.path.basename(yol)} (mkdtemp={mk} tozalash={rm})")
+    check("sinovlar vaqtinchalik katalogni tozalaydi", not nomuvozanat,
+          "; ".join(nomuvozanat))
+
     # --- hujjat ---
     h = _oqi_ildiz("docs/docker.md")
     check("hujjatda qaytarish tartibi bor", "8012" in h)
