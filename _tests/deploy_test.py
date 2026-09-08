@@ -2443,6 +2443,42 @@ def test_faza2_staging_konteyneri():
     finally:
         shutil.rmtree(_d, ignore_errors=True)
 
+    # --- DARVOZA JONLI BAZADA YURMASIN ---
+    # Darvoza migratsiyadan OLDIN turadi (to'g'ri: migratsiya bazani
+    # o'zgartiradi). Demak u joylashtirilayotgan kodni undan orqada
+    # qolgan baza ustida sinardi -- 2026-09-08 da 31 to'plam yiqildi,
+    # izolyatsiyalangan bazada esa 22 ta; 9 tasi SOXTA edi.
+    #
+    # Production da bundan ham yomon: `APP_ENV="$MUHIT"` bo'lgani
+    # uchun 44 to'plam JONLI ISHLAB CHIQARISH bazasida yurardi va
+    # sinovlar u yerga yozardi.
+    d = _oqi_ildiz("deploy/bin/deploy.sh")
+    d_amaliy = [q for q in d.splitlines()
+                if q.strip() and not q.lstrip().startswith("#")]
+
+    check("darvoza izolyatsiyalangan bazada yuradi",
+          "darvoza-baza.sh\" yarat" in d or "darvoza-baza.sh yarat" in d)
+    check("darvoza chaqiruvi DSN ni almashtiradi",
+          any('XT_DB_DSN="$DARVOZA_DSN"' in q for q in d_amaliy))
+    check("egasi DSN si ham almashtiriladi",
+          any('XT_DB_DSN_OWNER="$DARVOZA_DSN_OWNER"' in q for q in d_amaliy))
+    check("darvoza bazasi nomi qayta tekshiriladi",
+          "tenderai_gate_[0-9]*)" in d)
+    check("darvoza bazasi har holda tashlanadi (tozalash ichida)",
+          "tozalash()" in d
+          and d.index("tozalash()") < d.index("darvoza-baza.sh\" tashla")
+          if 'darvoza-baza.sh" tashla' in d else False)
+    check("production da darvoza qayta yuritilmaydi",
+          'MUHIT" = "production"' in d
+          and "production bazasida YURITILMAYDI" in d)
+
+    # Production shoxida `relis-darvoza.sh` CHAQIRILMASLIGI shart.
+    prod_bolim = d[d.index('log "reliz darvozasi: staging tasdigi'):] \
+        if 'log "reliz darvozasi: staging tasdigi' in d else ""
+    prod_bolim = prod_bolim.split("else", 1)[0] if prod_bolim else ""
+    check("production shoxi relis-darvoza.sh ni chaqirmaydi",
+          "relis-darvoza.sh" not in prod_bolim, prod_bolim[:80])
+
     # --- SINOVLAR VAQTINCHALIK KATALOGNI QOLDIRMASIN ---
     # Bu xostda `/tmp` — `tmpfs`, ya'ni RAM. Tozalanmagan sinov
     # katalogi diskni emas, XOTIRANI yeydi.

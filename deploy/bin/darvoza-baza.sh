@@ -2,7 +2,8 @@
 # =============================================================================
 # Tender-AI — IZOLYATSIYALANGAN DARVOZA BAZASI
 # =============================================================================
-#     darvoza-baza.sh yarat   <manba-baza>    # nusxa + migratsiya
+#     MANBA_BAZA=<baza> darvoza-baza.sh yarat  # nusxa + migratsiya
+#         (manba MUHIT O'ZGARUVCHISIDAN olinadi, $2 dan EMAS)
 #     darvoza-baza.sh tashla  <darvoza-baza>
 #     darvoza-baza.sh nom                     # yangi nom chop etadi
 #     darvoza-baza.sh tekshir                 # ulanish + rol (sirsiz)
