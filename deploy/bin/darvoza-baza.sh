@@ -935,15 +935,33 @@ for nom in x.get("yiqilgan") or []:
     # `[XATO] nom` va `XATO  nom: sabab` (masalan `pricing_test`,
     # `notify_test`). Faqat qavslisini qidirish `pricing_test` ning
     # yagona yiqilgan tekshiruvini KO'RINMAS qilgan edi.
-    RX = re.compile(r"\[FAIL\]|\[XATO\]|\[tashxis\]|^\s*XATO\s|^\s*FAIL\s"
-                    r"|YIQILDI:|Traceback"
-                    r"|AssertionError|Error:|error:|Exception"
-                    r"|kutilgan|expected|actual")
-    tanlangan = set()
-    for i, q in enumerate(qatorlar):
-        if RX.search(q):
-            for j in range(max(0, i - 2), min(len(qatorlar), i + 3)):
-                tanlangan.add(j)
+    # IKKI BOSQICHLI TANLOV.
+    #
+    # O'LCHANGAN NUQSON (2026-09-09): naqshda `kutilgan|expected|actual`
+    # bor edi va ular O'TGAN tekshiruvlarda ham uchraydi. 422
+    # tekshiruvli `deploy_test` da 120 qatorlik byudjet o'sha PASS
+    # qatorlari bilan to'lib ketdi va YAGONA yiqilgan tekshiruv
+    # kesilib qoldi -- ya'ni tafsilot bor edi, lekin javob yo'q edi.
+    #
+    # Endi avval FAQAT yiqilish belgilari qidiriladi; "kutilgan/actual"
+    # kabi yumshoq naqshlar ularning ATROFIDA kontekst sifatida
+    # keladi, o'zi mustaqil sabab bo'lmaydi.
+    RX_YIQ = re.compile(r"\[FAIL\]|\[XATO\]|\[tashxis\]|^\s*XATO\s|^\s*FAIL\s"
+                        r"|YIQILDI:|Traceback"
+                        r"|AssertionError|Error:|error:|Exception")
+    RX_YUMSHOQ = re.compile(r"kutilgan|expected|actual")
+
+    def _tanla(rx, atrof):
+        t = set()
+        for i, q in enumerate(qatorlar):
+            if rx.search(q):
+                for j in range(max(0, i - atrof), min(len(qatorlar), i + atrof + 1)):
+                    t.add(j)
+        return t
+
+    tanlangan = _tanla(RX_YIQ, 3)
+    if not tanlangan:                      # yiqilish belgisi yo'q -> yumshoq
+        tanlangan = _tanla(RX_YUMSHOQ, 2)
     if not tanlangan:                      # hech narsa mos kelmasa — oxiri
         tanlangan = set(range(max(0, len(qatorlar) - 25), len(qatorlar)))
 
