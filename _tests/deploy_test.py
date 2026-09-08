@@ -2479,6 +2479,30 @@ def test_faza2_staging_konteyneri():
     check("production shoxi relis-darvoza.sh ni chaqirmaydi",
           "relis-darvoza.sh" not in prod_bolim, prod_bolim[:80])
 
+    # --- VAQTINCHALIK KATALOG RAM DA BO'LMASIN ---
+    # Bu xostda `/tmp` -- `tmpfs`, ya'ni RAM.
+    #
+    # O'LCHANGAN (2026-09-08): darvoza yurishlaridan `/tmp` da 144 ta
+    # `tender-darvoza.*` katalogi qolgan, har birida ajratilgan git
+    # daraxti -- jami ~787 MB RAM. `tenderai-api@production`
+    # `oom-kill` bilan yiqilgan, `zynq.uz/api` 502 qaytargan.
+    #
+    # TOZALASH MANTIG'I TO'G'RI EDI: `trap` bor va odatdagi chiqishda
+    # ishlaydi. Lekin OOM `SIGKILL` yuboradi va uni USHLAB BO'LMAYDI --
+    # ya'ni xotira tugaganda tozalash AYNAN ISHLAMAY QOLADI va qoldiq
+    # keyingi OOM ni yaqinlashtiradi. Shuning uchun yechim `trap` ni
+    # tuzatish emas, katalogni RAM dan CHIQARISH.
+    for nom in ("tender-staging-docker.namuna", "tender-darvoza-docker.namuna"):
+        w = _oqi_ildiz(f"deploy/bin/{nom}")
+        w_amaliy = [q for q in w.splitlines()
+                    if q.strip() and not q.lstrip().startswith("#")]
+        check(f"{nom}: TMPDIR diskka qaratilgan",
+              any("TMPDIR=" in q and "/var/tmp" in q for q in w_amaliy))
+        qattiq = [q for q in w_amaliy if "mktemp" in q and "/tmp/" in q
+                  and "/var/tmp/" not in q]
+        check(f"{nom}: mktemp /tmp ga qotirilmagan", not qattiq,
+              "; ".join(x.strip() for x in qattiq))
+
     # --- SINOVLAR VAQTINCHALIK KATALOGNI QOLDIRMASIN ---
     # Bu xostda `/tmp` — `tmpfs`, ya'ni RAM. Tozalanmagan sinov
     # katalogi diskni emas, XOTIRANI yeydi.

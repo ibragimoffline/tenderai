@@ -36,6 +36,25 @@
 # =============================================================================
 set -euo pipefail
 
+# --- VAQTINCHALIK KATALOG DISKDA, RAM DA EMAS -------------------------------
+# BU XOSTDA `/tmp` -- `tmpfs`, ya'ni RAM. Bu yerda yasalgan katalog
+# xotirani yeydi, diskni emas.
+#
+# O'LCHANGAN (2026-09-08): darvoza yurishlaridan `/tmp` da 144 ta
+# `tender-darvoza.*` katalogi qolgan edi, har birida ajratilgan git
+# daraxti -- jami ~787 MB RAM. Xostda 7746 MB dan atigi 515 MB bo'sh
+# qolgan va `tenderai-api@production` `oom-kill` bilan yiqilgan;
+# `zynq.uz/api` 502 qaytargan.
+#
+# `trap` BOR va odatdagi chiqishda ishlaydi. Lekin OOM `SIGKILL`
+# yuboradi va `SIGKILL` ni USHLAB BO'LMAYDI -- ya'ni xotira
+# tugaganda tozalash AYNAN ISHLAMAY QOLADI va qoldiq keyingi OOM ni
+# yaqinlashtiradi. O'zini-o'zi kuchaytiruvchi halqa.
+#
+# `/var/tmp` diskda. Qoldiq baribir yomon, lekin u endi ishlab
+# chiqarishni o'chirmaydi.
+export TMPDIR="${TMPDIR:-/var/tmp}"
+
 ENV_FILE=/etc/tenderai/staging.env
 REPO=/opt/tenderai/repo.git
 PORT=8012                       # QOTIRILGAN. 8011 — systemd relizi.
@@ -96,7 +115,7 @@ tekshir)
     echo "systemd 8011 : $(systemctl is-active tenderai-api@staging 2>&1)"
     # MUHIT FILTRI QURUQ YURGIZILADI: qaysi kalit tushayotganini
     # o'zgartirishdan OLDIN ko'rsatadi. Qiymatlar chop etilmaydi.
-    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    TMP="$(mktemp -d "${TMPDIR}/tenderai-staging-docker.XXXXXX")"
     trap 'rm -rf "$TMP"' EXIT
     daraxt_ol "$SHA" "$TMP"
     echo "--- muhit filtri ---"
@@ -108,7 +127,7 @@ tekshir)
 
 qur)
     SHA="$(sha_ol)"; QISQA="${SHA:0:12}"
-    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    TMP="$(mktemp -d "${TMPDIR}/tenderai-staging-docker.XXXXXX")"
     trap 'rm -rf "$TMP"' EXIT
     daraxt_ol "$SHA" "$TMP"
     docker build -f "$TMP/Dockerfile.backend" \
@@ -120,7 +139,7 @@ ishga)
     SHA="$(sha_ol)"; QISQA="${SHA:0:12}"
     docker image inspect "tenderai-backend:$QISQA" >/dev/null 2>&1 \
         || { echo "imij yo'q, avval: sudo $0 qur" >&2; exit 1; }
-    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    TMP="$(mktemp -d "${TMPDIR}/tenderai-staging-docker.XXXXXX")"
     trap 'rm -rf "$TMP"' EXIT
     daraxt_ol "$SHA" "$TMP"
     # FILTRLANGAN muhit. 0600, root niki, `trap` bilan o'chadi.
@@ -134,7 +153,7 @@ ishga)
     ;;
 
 sogliq)
-    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    TMP="$(mktemp -d "${TMPDIR}/tenderai-staging-docker.XXXXXX")"
     trap 'rm -rf "$TMP"' EXIT
     daraxt_ol "$(sha_ol)" "$TMP"
     STAGING_DOCKER_PORT="$PORT" "$TMP/deploy/bin/staging-docker.sh" sogliq
