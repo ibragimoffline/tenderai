@@ -363,6 +363,83 @@ def test_sirlar():
 # =====================================================================
 # 12. Baza huquqlari (bazali)
 # =====================================================================
+#: ERP shartnomasi — YAGONA MANBA. `schema_patch_erp_chegara.sql` va
+#: `schema_patch_erp_19.sql` (ERP tomoni) bilan bir xil.
+ERP_RUXSAT = {"v_tai_actor", "v_tender_status", "v_stock",
+              "v_stock_balance", "v_client_document"}
+
+
+def test_erp_chegarasi(db):
+    """ERP chegarasi — NOMLAR bo'yicha emas, TO'PLAMLAR FARQI bo'yicha.
+
+    O'LCHANGAN SILJISH (2026-09-09): `tai_app` ga `erp` da 41 obyektga
+    SELECT berilgan edi (34 jadval + 7 ko'rinish), ruxsat etilgani esa
+    BESHTA ko'rinish. Ortiqchalar ichida `app_user` (parol xeshlari),
+    `app_session` (sessiya tokenlari), `invoice_payment`,
+    `chat_message_history` bor edi.
+
+    ESKI TEKSHIRUV BUNI KO'RMADI: u `v_huquq_tekshiruv` dagi NOMMA-NOM
+    tekshiruvlarni o'qirdi va ro'yxatda faqat `erp.app_user` bor edi.
+    Ya'ni 35 ta ortiqcha obyekt JIM QOLDI.
+
+    Endi shartnoma ikki tomonlama va NOMLARGA bog'liq emas:
+
+        haqiqiy - ruxsat  = bo'sh   (ortiqcha yo'q)
+        ruxsat  - haqiqiy = bo'sh   (shartnoma buzilmagan)
+
+    Yangi ERP jadvali qo'shilsa va u ochiq qolsa — birinchi shart
+    darhol yiqiladi. Naqsh (`v_*`) ISHLATILMAYDI: `v_hodim_yuklama`
+    va `v_notification_health` ham `v_` bilan boshlanadi, lekin
+    shartnomaga kirmaydi va aynan ular ortiqcha edi.
+    """
+    bolim("12b. ERP chegarasi — to'plamlar farqi")
+
+    bor = db.scalar("SELECT count(*) FROM information_schema.schemata "
+                    "WHERE schema_name='erp'")
+    if not bor:
+        check("`erp` sxemasi yo'q — chegara O'LCHANMADI", False,
+              "bu SKIP emas: chegara tasdiqlanmadi")
+        return
+
+    oqiladi = {r["nom"] for r in db.query(
+        "SELECT c.relname AS nom FROM pg_class c "
+        "  JOIN pg_namespace n ON n.oid = c.relnamespace "
+        " WHERE n.nspname = 'erp' AND c.relkind IN ('r','v','m','p','f') "
+        "   AND has_table_privilege('tai_app', c.oid, 'SELECT')")}
+    mavjud = {r["nom"] for r in db.query(
+        "SELECT c.relname AS nom FROM pg_class c "
+        "  JOIN pg_namespace n ON n.oid = c.relnamespace "
+        " WHERE n.nspname = 'erp' AND c.relkind IN ('r','v','m','p','f')")}
+
+    ortiqcha = sorted(oqiladi - ERP_RUXSAT)
+    check("ortiqcha ERP huquqi YO'Q", not ortiqcha,
+          f"{len(ortiqcha)} ta: " + ", ".join(ortiqcha[:8]))
+
+    # Shartnoma ko'rinishi MAVJUD bo'lsa, u O'QILISHI kerak.
+    kutilgan = ERP_RUXSAT & mavjud
+    yetishmaydi = sorted(kutilgan - oqiladi)
+    check("shartnoma ko'rinishlari o'qiladi", not yetishmaydi,
+          ", ".join(yetishmaydi))
+
+    # NOMMA-NOM: eng nozik jadvallar ALOHIDA aytiladi -- hisobotda
+    # "36 ta obyekt" degan raqam nimani anglatishini ko'rsatish uchun.
+    for nozik in ("app_user", "app_session", "login_attempt",
+                  "invoice_payment", "chat_message_history", "contract"):
+        if nozik in mavjud:
+            check(f"`tai_app` `erp.{nozik}` ni O'QIY OLMAYDI",
+                  nozik not in oqiladi)
+
+    # SUKUT HUQUQ — kelajakdagi siljish manbai.
+    n_defacl = db.scalar(
+        "SELECT count(*) FROM pg_default_acl d "
+        "  JOIN pg_namespace n ON n.oid = d.defaclnamespace, "
+        "       aclexplode(d.defaclacl) a "
+        " WHERE n.nspname = 'erp' "
+        "   AND a.grantee::regrole::text = 'tai_app'")
+    check("erp da `tai_app` uchun sukut huquq YO'Q", n_defacl == 0,
+          f"{n_defacl} ta — har yangi ERP jadvali avtomatik ochilardi")
+
+
 def test_huquq(db):
     bolim("12. Baza huquqlari (topilma C-1)")
     bor = db.scalar("SELECT to_regclass('public.v_huquq_tekshiruv') IS NOT NULL")
@@ -481,6 +558,7 @@ def main():
         try:
             db.init_pool()
             test_huquq(db)
+            test_erp_chegarasi(db)
         except Exception as e:                                # noqa: BLE001
             check("baza huquqlari tekshiruvi", False, str(e)[:90])
 

@@ -102,3 +102,4 @@
 830	0081_chat_tiklash	schema_patch_chat_tiklash.sql
 840	0082_chat_tiklash_2	schema_patch_chat_tiklash_2.sql
 850	0083_yuklama	schema_patch_yuklama.sql
+860	0084_erp_chegara	schema_patch_erp_chegara.sql
