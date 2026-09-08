@@ -2284,7 +2284,8 @@ def test_faza2_staging_konteyneri():
     gavda = o[o.index("case \"$AMAL\" in"):]
     yorliqlar = set(_re.findall(r"^([a-z]+)\)", gavda, _re.M))
     check("amallar ro'yxati kutilganidek",
-          yorliqlar == {"tekshir", "qur", "ishga", "sogliq", "toxtat", "holat"},
+          yorliqlar == {"yangila", "tekshir", "qur", "ishga", "sogliq",
+                        "toxtat", "holat"},
           f"topildi: {sorted(yorliqlar)}")
 
     # --- qaytarilishi: o'ram nginx va systemd ga TEGMAYDI ---
@@ -2303,6 +2304,12 @@ def test_faza2_staging_konteyneri():
               for q in _amaliy(o) if "/etc/nginx" in q))
     check("o'ram systemd relizini to'xtatmaydi",
           "systemctl stop" not in o and "systemctl disable" not in o)
+    # `yangila` FAQAT oynani yangilaydi. `deploy.sh` ni chaqirsa,
+    # u reliz yasab systemd xizmatini qayta ko'tarardi -- Faza 2 ning
+    # butun ma'nosi shuni QILMASLIKDA.
+    check("o'ram deploy.sh ni chaqirmaydi", "deploy.sh" not in o)
+    check("yangila faqat fetch qiladi",
+          "fetch --prune --tags origin" in o)
     check("o'ram migratsiya qo'llamaydi",
           "migratsiya.sh" not in o and "schema_patch" not in o)
 
