@@ -588,6 +588,24 @@ sinov)
     # agar u boshqa python bo'lsa, bog'liqlik tekshiruvi BOSHQA
     # muhitni o'lchagan bo'lardi. Shuning uchun `sys.executable` va
     # `dotenv` ning JOYI aynan o'sha interpretatordan so'raladi.
+    # --- EMBEDDING MODELI KESHI ------------------------------------------
+    # `HF_HOME` FAQAT systemd birligida bor
+    # (`Environment=HF_HOME=/opt/tenderai/%i/var/hf`), ya'ni darvoza
+    # jarayoniga YETIB KELMAYDI.
+    #
+    # O'LCHANGAN OQIBAT (2026-09-08): `yuklama_test` modelni HAR
+    # YURISHDA huggingface.co dan yuklab olishga urinardi — jurnal
+    # o'nlab HTTP so'rov bilan to'lardi, to'plam sekinlashardi va
+    # o'ldirilganda `zzyuklama_*` fiksturasi FAOL qolib ketardi.
+    # Sizish qo'riqchisi buni to'g'ri ushladi ("KEYIN faol zz*: 2"),
+    # lekin sabab tarmoqda edi.
+    #
+    # Reliz keshida model ALLAQACHON bor (~471 MB) — xizmat uni
+    # o'sha yerdan o'qiydi. Darvoza ham AYNI keshni ishlatsa:
+    # tarmoq kerak emas, yurish tez va TAKRORLANADIGAN bo'ladi.
+    HF_KESH="${HF_HOME:-/opt/tenderai/${APP_ENV:-staging}/var/hf}"
+    log "HF_HOME: $HF_KESH"
+
     log "python: $PY"
     log "sys.executable: $("$PY" -c 'import sys;print(sys.executable)' 2>&1 | tail -1)"
     log "dotenv: $("$PY" -c 'import dotenv;print(dotenv.__file__)' 2>&1 | tail -1)"
@@ -719,6 +737,7 @@ PROBE2
     set +e
     TENDERAI_DEBUG_LAUNCH=1 \
     TENDERAI_PY="$PY" \
+    HF_HOME="$HF_KESH" \
     XT_DB_DSN="$SINOV_DSN" \
     XT_DB_DSN_TEST_ADMIN="$ADMIN_DSN" \
     APP_ENV=staging \
