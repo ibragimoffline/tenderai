@@ -2540,6 +2540,53 @@ def test_faza2_staging_konteyneri():
                   not os.path.isdir(qoldiq) or not os.listdir(qoldiq),
                   str(os.listdir(qoldiq)) if os.path.isdir(qoldiq) else "")
 
+            # 1b) ZAXIRA EGASI ROLI BILAN OLINSIN.
+            #
+            # O'LCHANGAN NUQSON (2026-09-05..08, TO'RT KUN):
+            #     pg_dump: error: failed to get data for sequence
+            #     "act_id_seq"; user may lack SELECT privilege
+            #
+            # `pg_dump` ILOVA roli bilan yurardi. Bu rol ataylab
+            # minimal, `pg_dump` esa BUTUN bazani o'qishi kerak --
+            # ya'ni har yangi jadval va ketma-ketlik uchun grant
+            # talab qilinardi. Bittasi unutilsa zaxira JIMGINA
+            # to'xtaydi va aynan shunday to'rt kun davom etdi.
+            #
+            # Ilova roliga grant qo'shish uni SEMIRTIRARDI; zaxira
+            # esa tabiatan hamma narsani o'qiydi, ya'ni bu EGASI
+            # rolining ishi. `restore-test.sh` allaqachon shunday.
+            bk = _oqi_ildiz("deploy/bin/backup.sh")
+            check("zaxira egasi roli bilan olinadi",
+                  'pg_dump "$XT_DB_DSN_OWNER"' in bk
+                  and 'pg_dump "$XT_DB_DSN"' not in bk)
+            e1b = dict(e_z); e1b["BACKUP_DIR"] = os.path.join(tz, "b1b")
+            io.open(env_z, "w", encoding="utf-8", newline=chr(10)).write(
+                f"XT_DB_DSN={dsn}\n")          # EGASI ATAYLAB YO'Q
+            r1b = subprocess.run(
+                [bash_z, os.path.join(D, "bin", "backup.sh"), "staging"],
+                capture_output=True, text=True, env=e1b, timeout=90,
+                stdin=subprocess.DEVNULL)
+            check("egasi DSN siz zaxira RAD ETILADI",
+                  r1b.returncode != 0
+                  and "XT_DB_DSN_OWNER" in (r1b.stdout + r1b.stderr),
+                  f"kod={r1b.returncode}")
+            io.open(env_z, "w", encoding="utf-8", newline=chr(10)).write(
+                f"XT_DB_DSN={dsn}\nXT_DB_DSN_OWNER={dsn}\n")
+
+            # 1c) NUSXA HAMMAGA O'QILADIGAN BO'LMASIN.
+            # O'LCHANGAN (2026-09-08): production nusxalari
+            # `-rw-r--r--` edi -- xostdagi har qanday foydalanuvchi
+            # butun ishlab chiqarish bazasini o'qiy olardi. Baza
+            # ustidagi barcha rol ajratishlari shu bitta fayl orqali
+            # chetlab o'tilardi.
+            check("zaxira katalogi 700 ga qo'yiladi",
+                  "chmod 700" in bk and "umask 077" in bk)
+            kat = os.path.join(tz, "b1", "staging")
+            if os.path.isdir(kat):
+                check("zaxira katalogi amalda 700",
+                      oct(os.stat(kat).st_mode & 0o777) == "0o700",
+                      oct(os.stat(kat).st_mode & 0o777))
+
             # 2) BO'SH dump RAD ETILSIN.
             b2 = os.path.join(tz, "b2", "staging")
             os.makedirs(b2)
