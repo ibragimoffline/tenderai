@@ -34,6 +34,7 @@ import argparse
 import io
 import os
 import subprocess
+import time
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -58,7 +59,21 @@ except ImportError:                                           # pragma: no cover
 
 #: Sinov bazasi. Nomi ATAYLAB o'ziga xos — ishlab chiqarish bazasi
 #: bilan adashib ketmasin.
-SINOV_BAZA = "xt_migratsiya_sinov"
+# NOM HAR YURISHDA YANGI.
+#
+# O'LCHANGAN NUQSON (2026-09-08, darvoza): nom QAT'IY edi
+# (`xt_migratsiya_sinov`). Bosqich o'rtada yiqilsa ulanish ochiq
+# qolardi va keyingi yurish bazani tashlash uchun o'sha ulanishni
+# MAJBURAN UZISHGA urinardi:
+#
+#     permission denied to terminate process
+#     Only roles with privileges of the "pg_signal_backend" role...
+#
+# Ya'ni qat'iy nom `pg_signal_backend` imtiyozini TALAB QILARDI.
+# Unikal nom bilan bunday to'qnashuv BO'LMAYDI va imtiyoz KERAK EMAS.
+# Eski yurishdan qolgan baza qolsa ham u yangi yurishga XALAQIT
+# BERMAYDI (uni alohida tozalash mumkin).
+SINOV_BAZA = "xt_migratsiya_sinov_%d_%d" % (os.getpid(), int(time.time()))
 
 _natija = []
 
@@ -332,6 +347,23 @@ def _admin_kon():
     return c
 
 
+def _sinov_rol():
+    """Migratsiyani YURGIZADIGAN rol nomi.
+
+    Baza SHU rol nomiga yaratiladi. O'LCHANGAN NUQSON (2026-09-08):
+    bazani `tai_test_admin` yaratardi, migratsiyani esa `tai_service`
+    yurgizardi. PostgreSQL 15 dan boshlab `public` sxemasiga standart
+    `CREATE` huquqi YO'Q (bu xostda 18-versiya), shuning uchun
+    migratsiya kutilgan "ma'lumot shartida to'xtash" (kod 2) holatiga
+    YETMASDAN, huquq xatosi bilan (kod 1) yiqilardi.
+
+    Egalikni berish IMTIYOZ QO'SHISH EMAS: rol faqat O'ZI uchun
+    yaratilgan bir martalik sinov bazasining egasi bo'ladi, boshqa
+    hech qayerda hech narsa o'zgarmaydi.
+    """
+    return _dsn_qism().get("user") or "postgres"
+
+
 def _baza_amal(sqllar):
     """`CREATE`/`DROP DATABASE` ni yurgizadi.
 
@@ -350,22 +382,37 @@ def _baza_amal(sqllar):
         c.close()
 
 
+def _majburan_uz():
+    """Qolgan ulanishlarni uzishga URINADI. Yiqilsa — MAYLI.
+
+    `pg_terminate_backend` `pg_signal_backend` imtiyozini talab
+    qiladi va u ilova roliga BERILMAGAN (ataylab). Unikal baza nomi
+    va `_ulanishlarni_yop()` dan keyin uzadigan hech narsa qolmasligi
+    KERAK, ya'ni bu faqat oxirgi chora. Shuning uchun uning yiqilishi
+    butun tashlashni to'xtatmasligi kerak edi -- ilgari to'xtatardi.
+    """
+    try:
+        _baza_amal([
+            f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            f"WHERE datname='{SINOV_BAZA}' AND pid<>pg_backend_pid()"])
+    except Exception:                                         # noqa: BLE001
+        pass
+
+
 def _baza_qayta_yarat():
+    _ulanishlarni_yop()
+    _majburan_uz()
     _baza_amal([
-        f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-        f"WHERE datname='{SINOV_BAZA}' AND pid<>pg_backend_pid()",
         f'DROP DATABASE IF EXISTS "{SINOV_BAZA}"',
-        f'CREATE DATABASE "{SINOV_BAZA}"',
+        f'CREATE DATABASE "{SINOV_BAZA}" OWNER "{_sinov_rol()}"',
     ])
 
 
 def _baza_tashla():
+    _ulanishlarni_yop()
+    _majburan_uz()
     try:
-        _baza_amal([
-            f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            f"WHERE datname='{SINOV_BAZA}' AND pid<>pg_backend_pid()",
-            f'DROP DATABASE IF EXISTS "{SINOV_BAZA}"',
-        ])
+        _baza_amal([f'DROP DATABASE IF EXISTS "{SINOV_BAZA}"'])
     except Exception as e:                                    # noqa: BLE001
         print(f"  [i] sinov bazasini tashlab bo'lmadi: {str(e)[:70]}")
 
@@ -378,10 +425,34 @@ def _yurgiz(*args, dsn=None):
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
+#: Sinov bazasiga OCHILGAN ulanishlar. Baza tashlanishidan oldin
+#: ular O'ZIMIZ tomonidan yopiladi.
+_OCHIQ = []
+
+
 def _sinov_kon():
     c = psycopg2.connect(_sinov_dsn(), connect_timeout=8)
     c.autocommit = True
+    _OCHIQ.append(c)
     return c
+
+
+def _ulanishlarni_yop():
+    """Sinov bazasiga o'z ulanishlarimizni yopadi.
+
+    NEGA RO'YXAT: bosqichlar `c = _sinov_kon() ... c.close()` naqshini
+    ishlatadi, `try/finally` siz. Bosqich O'RTADA yiqilsa ulanish
+    OCHIQ QOLARDI va keyingi `DROP DATABASE` uni majburan uzishga
+    urinardi -- ya'ni `pg_signal_backend` imtiyozini talab qilardi.
+    Ulanish BIZNIKI, demak uni uzish uchun imtiyoz emas, tartib
+    kerak edi.
+    """
+    while _OCHIQ:
+        c = _OCHIQ.pop()
+        try:
+            c.close()
+        except Exception:                                     # noqa: BLE001
+            pass
 
 
 def _obyektlar(c):
