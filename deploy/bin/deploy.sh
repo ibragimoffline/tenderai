@@ -124,8 +124,19 @@ log "reliz: $YANGI"
 # `trap` faqat ALMASHTIRISHGACHA amal qiladi: `current` yangi
 # relizga o'tgach uni o'chirish tirik xizmatni o'ldirardi.
 TOZALA="$YANGI"
+DARVOZA_BAZA=""          # 5b da to'ldiriladi
+
 tozalash() {
     kod=$?
+    # DARVOZA BAZASI HAR HOLDA TASHLANADI -- yiqilganda ham, o'tganda
+    # ham. U `tenderai_gate_<sana>` nomli bir martalik nusxa; qolib
+    # ketsa har joylashtiruvda bittadan yig'ilib, diskni va
+    # `pg_stat_activity` ni ifloslantirardi.
+    if [ -n "$DARVOZA_BAZA" ]; then
+        "${YANGI}/deploy/bin/darvoza-baza.sh" tashla "$DARVOZA_BAZA" \
+            >/dev/null 2>&1 || xato_izoh "OGOH: darvoza bazasi tashlanmadi: $DARVOZA_BAZA"
+        DARVOZA_BAZA=""
+    fi
     if [ "$kod" -ne 0 ] && [ -n "$TOZALA" ] && [ -d "$TOZALA" ]; then
         xato_izoh "yiqildi -> yarim reliz olib tashlanmoqda: $TOZALA"
         rm -rf "$TOZALA"
@@ -220,10 +231,73 @@ log "qurilma toza: mahalliy manzil yo'q"
 #
 # Frontend allaqachon qurilgan va `dist/` tekshirilgan, shuning uchun
 # darvoza uni QAYTA qurmaydi (tip tekshiruvi va sinovlar YURADI).
-log "reliz darvozasi"
-TENDERAI_DARVOZA_FRONTEND=0 TENDERAI_PY="${YANGI}/.venv/bin/python" \
-    "${YANGI}/deploy/bin/relis-darvoza.sh" "$YANGI" \
-    || xato "reliz darvozasi yiqildi — joylashtirish TO'XTATILDI"
+# --- DARVOZA JONLI BAZADA YURMAYDI -----------------------------------
+# O'LCHANGAN NUQSON (2026-09-08): darvoza `XT_DB_DSN` ni muhit
+# faylidan olardi, ya'ni AYNI O'SHA muhitning ishlayotgan bazasida
+# yurardi. Ikki xil zarar:
+#
+#   1. STAGING DA — YOLG'ON QIZIL. Darvoza migratsiyadan OLDIN
+#      turadi (va bu to'g'ri: migratsiya bazani o'zgartiradi).
+#      Demak u joylashtirilayotgan kodni undan 15 migratsiya ORQADA
+#      qolgan baza ustida sinardi. 2026-09-08 da shu sababdan 31
+#      to'plam yiqildi; izolyatsiyalangan bazada esa 22 ta. Farqning
+#      9 tasi SOXTA edi (`SCHEMA_PATCH_MISSING`, `TENDER_NOT_FOUND`).
+#
+#   2. PRODUCTION DA — ANCHA YOMONROQ. `APP_ENV="$MUHIT"` bo'lgani
+#      uchun `deploy.sh production` 44 to'plamni JONLI ISHLAB
+#      CHIQARISH BAZASI ustida yurgizardi. Sinovlar yozadi (`zz%`
+#      hisoblari shundan). Bu yo'l 2026-09-05 da o'tgan edi, chunki
+#      darvoza o'shanda ko'r edi (xulosa regexi eskirgan).
+#
+# Yechim muhitga qarab boshqacha, chunki savol ham boshqacha.
+if [ "$MUHIT" = "production" ]; then
+    # PRODUCTION: darvoza QAYTA YURITILMAYDI.
+    #
+    # Bu "o'lchanmadi" EMAS. 1-bo'lim AYNI SHU SHA staging da
+    # tekshirilganini talab qiladi (`.verified`), staging esa uni
+    # migratsiyalangan izolyatsiyalangan nusxada o'lchagan. Ya'ni
+    # natija BOR va u yozib qo'yilgan.
+    #
+    # Uni production bazasida QAYTALASH yangi ma'lumot bermaydi,
+    # lekin ishlab chiqarish ma'lumotiga sinov yozuvlarini
+    # kiritardi. Production nusxasini olish esa ishlab chiqarish
+    # ma'lumotini yana bir bazaga ko'chirardi -- bu alohida qaror,
+    # jimgina qilinadigan ish emas.
+    log "reliz darvozasi: staging tasdigi ($SHA) — production bazasida YURITILMAYDI"
+else
+    MANBA="$(printf '%s' "$XT_DB_DSN" | sed -nE 's/.*dbname=([A-Za-z0-9_]+).*/\1/p')"
+    [ -n "$MANBA" ] || xato "XT_DB_DSN dan dbname ajratilmadi — darvoza bazasi yasab bo'lmaydi"
+
+    log "darvoza bazasi yasalmoqda (manba: $MANBA)"
+    # `yarat` STDOUT ga BITTA qator -- baza nomini beradi; jurnal
+    # stderr ga ketadi. Manba `MANBA_BAZA` orqali beriladi.
+    DARVOZA_BAZA="$(MANBA_BAZA="$MANBA" "${YANGI}/deploy/bin/darvoza-baza.sh" yarat)"
+
+    # NOMNI QAYTA TEKSHIRAMIZ. Quyida `sed` bilan DSN ga qo'yiladi;
+    # kutilmagan qiymat kelsa u jonli bazaga qaytib ketishi mumkin.
+    case "$DARVOZA_BAZA" in
+        tenderai_gate_[0-9]*) ;;
+        *) xato "darvoza bazasi nomi kutilmagan: '$DARVOZA_BAZA'" ;;
+    esac
+
+    # ILOVA ROLI ham, EGASI roli ham darvoza bazasiga qaratiladi.
+    # Faqat `XT_DB_DSN` almashtirilsa, migratsiya butunligi tekshiruvi
+    # (`XT_DB_DSN_OWNER`) hamon JONLI bazani o'lchardi -- ya'ni
+    # darvozaning yarmi eski nuqson bilan qolardi.
+    DARVOZA_DSN="$(printf '%s' "$XT_DB_DSN" | sed -E "s/dbname=[A-Za-z0-9_]+/dbname=${DARVOZA_BAZA}/")"
+    DARVOZA_DSN_OWNER="$(printf '%s' "${XT_DB_DSN_OWNER:-}" | sed -E "s/dbname=[A-Za-z0-9_]+/dbname=${DARVOZA_BAZA}/")"
+
+    log "reliz darvozasi (izolyatsiyalangan baza: $DARVOZA_BAZA)"
+    TENDERAI_DARVOZA_FRONTEND=0 TENDERAI_PY="${YANGI}/.venv/bin/python" \
+    XT_DB_DSN="$DARVOZA_DSN" XT_DB_DSN_OWNER="$DARVOZA_DSN_OWNER" \
+        "${YANGI}/deploy/bin/relis-darvoza.sh" "$YANGI" \
+        || xato "reliz darvozasi yiqildi — joylashtirish TO'XTATILDI"
+
+    # O'tdi: bazani DARHOL tashlaymiz (`tozalash` ham urinadi, lekin
+    # muvaffaqiyatli yo'lda uni uzoq ushlab turishning ma'nosi yo'q).
+    "${YANGI}/deploy/bin/darvoza-baza.sh" tashla "$DARVOZA_BAZA" >/dev/null 2>&1 || true
+    DARVOZA_BAZA=""
+fi
 
 # --- 6) MIGRATSIYA — EGASI roli bilan ---------------------------------------
 # Ilova roli (tai_app) da DDL huquqi ATAYLAB yoq.
