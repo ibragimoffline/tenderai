@@ -178,6 +178,35 @@ qadam — 5.
 Baza, nginx sertifikati, zaxira nusxa tartibi — **hech biri
 o'zgarmaydi**. Konteynerga faqat ilova ijrosi ko'chadi.
 
+### Muhit — qat'iy ruxsat ro'yxati
+
+`staging.env` da konteynerga **kerak bo'lmagan** sirlar bor:
+
+| kalit | nega konteynerga berilmaydi |
+|---|---|
+| `XT_DB_DSN_OWNER` | migratsiya roli — sxemani o'zgartira oladi |
+| `XT_DB_DSN_TEST_ADMIN` | `CREATEDB` huquqli sinov roli |
+| `E2E_PAROL`, `E2E_LOGIN` | sinov hisobi |
+| `BACKUP_REMOTE_CMD`, `BACKUP_DIR` | zaxira nusxa sirti |
+
+Butun faylni uzatish bularning hammasini berardi va ilova jarayoni
+buzilganda hujumchi migratsiya rolini qo'lga kiritardi — `tai_service`
+ga `CREATEDB` bermaslik qoidasi shu bilan **ma'nosiz** bo'lardi.
+
+Ro'yxat **qo'lda yozilmaydi**: `deploy/bin/muhit-ruxsat.py` uni shu SHA
+dagi koddan hisoblaydi. Qo'lda ro'yxat surilib ketardi — kodga sozlama
+qo'shilar, ro'yxat unutilar va ilova sukut qiymat bilan **jimgina**
+noto'g'ri ishlardi.
+
+Ro'yxat `ast` bilan quriladi, regex bilan emas: `APP_PUBLIC_URL`,
+`PUBLIC_BASE_URL` va `AI_PAID_ENABLED` kodda o'zgaruvchi orqali
+o'qiladi va regex ularni tushirib qoldirardi.
+
+Filtr tirnoqni ham yechadi. `docker --env-file` tirnoqni qiymat deb
+qoldiradi, `systemd EnvironmentFile` esa yechadi — ya'ni tirnoqli DSN
+da systemd relizi **ishlab**, konteyner **yiqilardi** va sabab
+ko'rinmasdi.
+
 ### Nega host tarmog'i va nega bu xavfsiz emas deb qo'rqmaslik kerak
 
 PostgreSQL faqat `127.0.0.1` da tinglaydi va shunday **qoladi**.

@@ -2314,9 +2314,72 @@ def test_faza2_staging_konteyneri():
     check("Dockerfile ga sir kirmagan",
           "XT_DB_DSN=" not in d and "ANTHROPIC_API_KEY=" not in d)
 
+    check("o'ram eval ishlatmaydi",
+          not [q for q in _amaliy(o) if "eval " in q or "eval\t" in q])
+
+    # --- MUHIT RUXSAT RO'YXATI ---
+    # Butun `staging.env` ni uzatish konteynerga MIGRATSIYA roli DSN
+    # sini berardi. Ro'yxat koddan hisoblanadi, chunki qo'lda yozilgani
+    # surilib ketardi: kodga sozlama qo'shiladi, ro'yxat unutiladi va
+    # ilova sukut qiymat bilan JIMGINA noto'g'ri ishlaydi.
+    sys.path.insert(0, os.path.join(ROOT, "deploy", "bin"))
+    import importlib.util as _iu
+    _sp = _iu.spec_from_file_location(
+        "muhit_ruxsat", os.path.join(ROOT, "deploy", "bin", "muhit-ruxsat.py"))
+    _mr = _iu.module_from_spec(_sp)
+    _sp.loader.exec_module(_mr)
+    ruxsat = set(_mr.royxat(ROOT))
+
+    check("o'ram muhit filtridan foydalanadi",
+          "muhit_filtrla" in o and "muhit-ruxsat.py" in o)
+    check("filtrlanmagan muhit fayli konteynerga uzatilmaydi",
+          'TENDERAI_ENVFILE="$ENV_FILE"' not in o)
+
+    # Bilvosita o'qiladigan kalitlar. Regex bilan qurilgan ro'yxat
+    # bularni TUSHIRIB QOLDIRARDI va ilova ishga tushmasdi.
+    for k in ("APP_PUBLIC_URL", "PUBLIC_BASE_URL", "AI_PAID_ENABLED"):
+        check(f"ruxsatda bilvosita kalit: {k}", k in ruxsat)
+    for k in ("XT_DB_DSN", "APP_ENV", "ANTHROPIC_API_KEY"):
+        check(f"ruxsatda kerakli kalit: {k}", k in ruxsat)
+
+    # ENG MUHIMI: konteyner sxemani o'zgartira oladigan rolni OLMAYDI.
+    for k in ("XT_DB_DSN_OWNER", "XT_DB_DSN_TEST_ADMIN", "E2E_PAROL",
+              "E2E_LOGIN", "BACKUP_REMOTE_CMD", "BACKUP_DIR"):
+        check(f"ruxsatda YO'Q (to'g'ri): {k}", k not in ruxsat)
+
+    check("majburiy kalitlar e'lon qilingan",
+          set(_mr.MAJBURIY) == {"APP_ENV", "APP_PUBLIC_URL", "XT_DB_DSN"})
+
+    # `docker --env-file` tirnoqni YECHMAYDI, `systemd EnvironmentFile`
+    # yechadi. Ya'ni tirnoqli DSN da systemd relizi ISHLAB, konteyner
+    # YIQILARDI -- va sabab ko'rinmasdi.
+    check("tirnoq yechiladi", _mr._tirnoq_yech('"a=b"') == "a=b"
+          and _mr._tirnoq_yech("'a=b'") == "a=b"
+          and _mr._tirnoq_yech("a=b") == "a=b")
+
+    # Filtr HAQIQATDA sirni tashlaydimi -- soxta fayl ustida.
+    import tempfile as _tf
+    _d = _tf.mkdtemp()
+    try:
+        _m = os.path.join(_d, "m.env")
+        io.open(_m, "w", encoding="utf-8").write(
+            "APP_ENV=staging\nAPP_PUBLIC_URL=https://x.invalid\n"
+            "XT_DB_DSN=host=127.0.0.1\nXT_DB_DSN_OWNER=host=1 password=SIR\n"
+            "E2E_PAROL=SIR\n")
+        _c = os.path.join(_d, "c.env")
+        _mr.filtr(ROOT, _m, _c)
+        _matn = io.open(_c, encoding="utf-8").read()
+        check("filtr sirni tashlaydi", "SIR" not in _matn, _matn.replace("\n", " | "))
+        check("filtr natijasi 0600",
+              oct(os.stat(_c).st_mode & 0o777) == "0o600")
+    finally:
+        shutil.rmtree(_d, ignore_errors=True)
+
     # --- hujjat ---
     h = _oqi_ildiz("docs/docker.md")
     check("hujjatda qaytarish tartibi bor", "8012" in h)
+    check("hujjatda ruxsat ro'yxati tushuntirilgan",
+          "XT_DB_DSN_OWNER" in h)
 
 
 def main():

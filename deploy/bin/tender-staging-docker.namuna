@@ -58,6 +58,19 @@ daraxt_ol() {   # $1 = SHA, $2 = katalog
     chmod +x "$2"/deploy/bin/*.sh
 }
 
+# --- MUHIT FILTRI -----------------------------------------------------------
+# Butun `staging.env` ni konteynerga uzatish unga MIGRATSIYA roli DSN
+# sini (`XT_DB_DSN_OWNER`), E2E parolini va zaxira buyrug'ini ham
+# berardi. Ilova jarayoni buzilsa hujumchi sxemani o'zgartira oladigan
+# rolni qo'lga kiritardi -- `tai_service` ga CREATEDB bermaslik qoidasi
+# shu bilan ma'nosiz bo'lardi.
+#
+# Ruxsat ro'yxati QO'LDA YOZILMAYDI, shu SHA dagi KODDAN hisoblanadi
+# (`deploy/bin/muhit-ruxsat.py`) -- qo'lda ro'yxat surilib ketardi.
+muhit_filtrla() {   # $1 = daraxt, $2 = chiqish fayli
+    python3 "$1/deploy/bin/muhit-ruxsat.py" filtr "$ENV_FILE" "$2"
+}
+
 case "$AMAL" in
 tekshir)
     echo "docker       : $(docker version --format '{{.Server.Version}}' 2>/dev/null || echo YO\'Q)"
@@ -67,6 +80,13 @@ tekshir)
     echo "XT_DB_DSN    : $(grep -q '^XT_DB_DSN=' "$ENV_FILE" && echo bor || echo YO\'Q)"
     echo "APP_PUBLIC_URL: $(grep -q '^APP_PUBLIC_URL=' "$ENV_FILE" && echo bor || echo YO\'Q)"
     echo "systemd 8011 : $(systemctl is-active tenderai-api@staging 2>&1)"
+    # MUHIT FILTRI QURUQ YURGIZILADI: qaysi kalit tushayotganini
+    # o'zgartirishdan OLDIN ko'rsatadi. Qiymatlar chop etilmaydi.
+    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    trap 'rm -rf "$TMP"' EXIT
+    daraxt_ol "$SHA" "$TMP"
+    echo "--- muhit filtri ---"
+    muhit_filtrla "$TMP" "$TMP/tekshir.env" || true
     echo "konteyner    : $(docker ps -a --filter 'name=^tenderai-staging$' --format '{{.Status}}' || echo yo\'q)"
     # nginx hozir KIMGA ishora qilyapti — o'zgartirmasdan, faqat aytadi.
     echo "nginx upstream: $(grep -rhoE 'proxy_pass +http://127\.0\.0\.1:[0-9]+' /etc/nginx 2>/dev/null | grep -oE '[0-9]+$' | sort -u | tr '\n' ' ')"
@@ -89,8 +109,13 @@ ishga)
     TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
     trap 'rm -rf "$TMP"' EXIT
     daraxt_ol "$SHA" "$TMP"
+    # FILTRLANGAN muhit. 0600, root niki, `trap` bilan o'chadi.
+    FILTR="$TMP/staging.filtrlangan.env"
+    muhit_filtrla "$TMP" "$FILTR" \
+        || { echo "muhit filtri yiqildi -- konteyner KO'TARILMADI" >&2; exit 1; }
+
     # Hayot sikli YORDAMCHIDA — bu yerda TAKRORLANMAYDI.
-    TENDERAI_ENVFILE="$ENV_FILE" STAGING_DOCKER_PORT="$PORT" \
+    TENDERAI_ENVFILE="$FILTR" STAGING_DOCKER_PORT="$PORT" \
         "$TMP/deploy/bin/staging-docker.sh" ishga "$QISQA"
     ;;
 
