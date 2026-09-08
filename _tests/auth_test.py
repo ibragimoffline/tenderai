@@ -52,7 +52,41 @@ import rejim  # noqa: E402
 konsol.sozla()
 
 
-from dotenv import load_dotenv
+# IMPORT YIQILSA — SABABINI AYTADI.
+#
+# O'LCHANGAN VA HALI TUSHUNTIRILMAGAN (2026-09-08): darvozada beshta
+# to'plam shu qatorda `ModuleNotFoundError: dotenv` beradi, holbuki
+#
+#   * ota jarayonda `dotenv` BOR (`sys.executable` va `dotenv.__file__`
+#     ikkalasi ham reliz venv ini ko'rsatadi);
+#   * AYNI to'plam AYNI interpretator bilan BEVOSITA yurgizilganda
+#     91/97 gacha boradi (darvoza probe C);
+#   * `run_tests.py` chaqiruvi yiqilgan va o'tgan to'plam uchun
+#     BAYT-BAYT bir xil (argv, cwd, PATH, PYTHONPATH, PYTHONHOME);
+#   * `compliance_test` AYNAN shu qatorni yozadi va O'TADI.
+#
+# Ya'ni farq to'plamda ham, interpretatorda ham, chaqiruvda ham emas.
+# Qolgan yagona o'lchanmagan joy — BOLA JARAYONNING O'ZIDAGI holat.
+# `ModuleNotFoundError` ning o'zi uni aytmaydi, shuning uchun shu
+# yerda aytiladi.
+#
+# Bu DOIMIY: import yiqilganda "nima yo'q" emas, "qayerdan qidirildi"
+# ko'rinishi kerak — aks holda sabab yana jurnaldan tashqarida qoladi.
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    import importlib.util as _iu
+    print("[tashxis] dotenv import yiqildi", file=sys.stderr)
+    print(f"[tashxis] pid={os.getpid()} ppid={os.getppid()}", file=sys.stderr)
+    print(f"[tashxis] executable={sys.executable}", file=sys.stderr)
+    print(f"[tashxis] prefix={sys.prefix} base={sys.base_prefix}", file=sys.stderr)
+    print(f"[tashxis] cwd={os.getcwd()}", file=sys.stderr)
+    print(f"[tashxis] find_spec={_iu.find_spec('dotenv')}", file=sys.stderr)
+    for _q in sys.path:
+        _bor = os.path.isdir(os.path.join(_q, "dotenv")) if _q else False
+        print(f"[tashxis]   path: {_q or '<bosh>'}  dotenv_kat={_bor}",
+              file=sys.stderr)
+    raise
 
 load_dotenv()
 
