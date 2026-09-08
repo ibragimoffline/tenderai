@@ -932,9 +932,33 @@ def _tender_id_ol(xom: Any, company_id: int) -> Optional[int]:
         if r["holat"] == "topildi":
             return int(r["tender_id"])
 
-    # Hal qilgich ko'rmagan sof son -- naqsh diapazonidan tashqarida
-    # bo'lishi mumkin (korpusda 3 va 5 xonali ID lar ham bor).
-    # Chaqiruvchiga beramiz: "topilmadi" javobini baza aytsin.
+    # BAZADA YO'Q BO'LSA HAM PREFIKS TOZALANADI.
+    #
+    # NUQSON EDI (o'lchandi 2026-09-08, izolyatsiyalangan darvoza):
+    # yuqoridagi `hal_qil()` FAQAT bazada MAVJUD tenderni `topildi`
+    # deydi. Tender korpusda bo'lmasa halqa hech nima qaytarmaydi va
+    # quyidagi zaxira yo'l `matn.isdigit()` ga tayanardi:
+    #
+    #     "20000508544"   -> 20000508544   (isdigit -> True)
+    #     "#20000508544"  -> None          (isdigit -> False)  <-- XATO
+    #     "t8440527"      -> None                              <-- XATO
+    #     havola          -> None                              <-- XATO
+    #
+    # Ya'ni funksiyaning O'Z hujjati (`QABUL QILADI: ... "#...",
+    # "t...", havola`) buzilardi va buzilish faqat tender bazada
+    # YO'Q bo'lganda ko'rinardi — ishlab chiqarishda kamdan-kam,
+    # toza korpusda esa har safar.
+    #
+    # `nomzodlar()` — AYNI shu prefikslarni biladigan kanonik
+    # ajratgich va u BAZAGA BORMAYDI. Naqshni bu yerda takrorlash
+    # ikkinchi haqiqat manbai bo'lardi: `_RAQAM` o'zgarsa, bu joy
+    # jimgina orqada qolardi.
+    for c in tender_ref.nomzodlar(matn):
+        return int(c["raqam"])
+
+    # Naqsh diapazonidan tashqaridagi sof son (korpusda 3 va 5 xonali
+    # ID lar ham bor). Chaqiruvchiga beramiz: "topilmadi" javobini
+    # baza aytsin.
     return int(matn) if matn.isdigit() else None
 
 
