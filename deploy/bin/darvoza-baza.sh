@@ -851,12 +851,21 @@ PYEOF
     # --- SIZISH QO'RIQCHISI: KEYIN --------------------------------------
     # Sinovlar yiqilgan bo'lsa ham o'lchanadi: sizish AYRIM nosozlik
     # va u yiqilish bilan birga yashirinib qolmasin.
+    # NOMI BILAN. Faqat SON berilsa "qaysi to'plam sizdirdi" degan
+    # savol ochiq qolardi va uni topish uchun butun jurnalni qayta
+    # o'qish kerak bo'lardi. Prefiks to'plam nomini o'zida saqlaydi
+    # (`zzyuklama_*` -> `yuklama_test`), ya'ni nom AYBDORNI ko'rsatadi.
+    KEYIN_NOM="$(psql "$SINOV_DSN" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT COALESCE(string_agg(username, ', ' ORDER BY id), '-')
+           FROM company_account WHERE username LIKE 'zz%' AND active")"
     KEYIN="$(psql "$SINOV_DSN" -v ON_ERROR_STOP=1 -qtA -c \
         "SELECT count(*) FROM company_account
           WHERE username LIKE 'zz%' AND active")"
-    log "sinovdan KEYIN faol zz* hisoblar: $KEYIN"
+    log "sinovdan KEYIN faol zz* hisoblar: $KEYIN  ($KEYIN_NOM)"
     if [ "$KEYIN" != "0" ]; then
-        echo "XATO: sinov FAOL qoldiq qoldirdi ($KEYIN) — fixture sizishi." >&2
+        echo "XATO: sinov FAOL qoldiq qoldirdi ($KEYIN): $KEYIN_NOM" >&2
+        echo "      Odatda bu to'plam O'LDIRILGANINI bildiradi:" >&2
+        echo "      \`finally\` tozalashi jarayon tirik bo'lgandagina yuradi." >&2
         echo "      Bu 'jimgina tozalab, PASS' bo'lmaydi: darvoza YIQILADI." >&2
         exit 1
     fi
