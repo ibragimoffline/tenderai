@@ -1,0 +1,43 @@
+# RELIZ TASNIFI — MASHINA O'QIYDIGAN ARTEFAKT
+#
+# Ustunlar (TAB bilan):  toplam <TAB> tasnif <TAB> dalil
+#
+# NEGA BU FAYL REPOZITORIYADA: tasnif QARORDIR, o'lchov emas.
+# U ko'rib chiqishdan (PR) o'tishi kerak. Jurnal matnini tahlil
+# qilib qaror chiqarish esa "chiqish matni o'zgardi -> siyosat
+# o'zgardi" degan jimgina bog'liqlik yaratardi.
+#
+# `PASS` = bu to'plam O'TISHI KUTILADI. Agar u yiqilsa tasnif
+# UNKNOWN bo'lib hisoblanadi va reliz TO'XTAYDI. Ya'ni regressiya
+# avtomatik to'siqqa aylanadi -- ro'yxatni yangilash ESDAN chiqsa
+# ham.
+#
+# To'siq toifalari (reliz TO'XTAYDI):
+#   CODE_BUG MIGRATION SECURITY TENANT_ISOLATION AUDIT_BUG
+#   DATA_CORRUPTION STARTUP READINESS API_CONTRACT
+#   BACKUP_INTEGRITY ROLLBACK RUNTIME_PRIVILEGE UNKNOWN
+#
+# To'smaydigan toifalar (dalil MAJBURIY):
+#   TEST_FIXTURE CROSS_SUITE_DEPENDENCY CORPUS_MISSING
+#   QUALITY_UNMEASURED NON_BLOCKING_ENVIRONMENT
+#   NON_BLOCKING_EXTERNAL_DEPENDENCY
+#
+# =====================================================================
+# YIQILISHI KUTILGAN TO'PLAMLAR — HAR BIRI DALIL BILAN
+# =====================================================================
+aktor_test	TEST_FIXTURE	audit_jurnal id=37 tarixiy qator; test uni yaratmaydi, faqat o'qiydi. erp_sinxron {} qaytaradi -- amal umuman bajarilmaydi, ya'ni audit nuqsoni emas.
+catalog_kod_test	TEST_FIXTURE	company_id=2 qat'iy yozilgan; toza bazada ikkinchi ijarachi yo'q. Tahlil (catalog_kodla.py --tahlil) ham yurgizilmagan.
+chat_id_test	CORPUS_MISSING	20000508544 va 8440527 tenderlari korpusda yo'q. 20000509114 (11 xonali) AYNI yurishda hal qilinadi -- kesish nuqsoni yo'q.
+chat_tahlil_test	TEST_FIXTURE	gonogo_v2 tahlili uchun sinov ma'lumoti yo'q.
+embed_qamrov_test	CORPUS_MISSING	ochiq tenderlar maxraji umumiy maxrajga teng (4327=4327): korpusda yopilgan tender yo'q, ya'ni ikki o'lchov ajralmaydi.
+kodlash_test	TEST_FIXTURE	sinov mahsuloti, ma'lumoti va navbat qatorlari yo'q.
+korik_navbat_test	TEST_FIXTURE	malakasi no_go chiqadigan tender yo'q; test 40 ta atrofdagi tenderni skanerlaydi.
+matn_moslik_test	CORPUS_MISSING	bo'lim kesimida korpusda bitta bo'lim bor (26); ko'rinish 1 qator qaytardi.
+pricing_test	NON_BLOCKING_ENVIRONMENT	host Node TypeScript qo'llab-quvvatlashisiz qurilgan (ERR_NO_TYPESCRIPT). Ilova ish vaqtida Node ishlatmaydi; frontend oldindan quriladi.
+qualification_test	TEST_FIXTURE	o'lchov bazasi yo'q (ochiq tender, profil qatori). CHECK cheklovi sxemada MAVJUD -- UPDATE 0 qatorga tegdi.
+rag_eval_test	CORPUS_MISSING	yorliqlangan dalil iboralari korpusda yo'q; MRR ochiq "O'LCHANMADI" deb qaytariladi, yashil emas.
+rag_sifat_test	CORPUS_MISSING	rag_eval bilan ayni korpus sababi: A1/A2/A3 dalillari topilmadi.
+req_qamrov_test	TEST_FIXTURE	v_requirement_qamrov da yagona kompaniya uchun qator yo'q.
+requirement_test	TEST_FIXTURE	o'lchov bazasi yo'q: muddati o'tgan tender va katalogga mos tender topilmadi.
+review_butunlik_test	CROSS_SUITE_DEPENDENCY	navbat qatorlari boshqa to'plamlar tomonidan yaratiladi; yolg'iz yurganda bo'sh. migratsiya jurnali yozuvi SHARTLI (IF n_soxta>0 OR n_kutayot>0) va ko'chiriladigan qator bo'lmagan.
+routing_kelishuv_test	TEST_FIXTURE	inson qarori qatorlari yo'q -- kelishuv o'lchab bo'lmaydi.

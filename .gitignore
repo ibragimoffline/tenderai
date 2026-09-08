@@ -34,6 +34,11 @@ etl_cron.log
 # klonda `migratsiya.py` umuman ishlamasdi ("Manifest YO'Q") va buni
 # hech narsa ko'rsatmasdi.
 !migratsiya_manifest.tsv
+# Reliz tasnifi ham LOG EMAS -- u QARORNI belgilaydigan artefakt va
+# ko'rib chiqishdan o'tishi kerak. `*.tsv` unga ham tushib qolgan edi;
+# natijada darvoza uni topmadi va HAMMA yiqilishni UNKNOWN deb sanab
+# relizni to'xtatdi. (Siyosat to'g'ri ishladi, fayl esa yo'q edi.)
+!deploy/relis-tasnif.tsv
 *.bak
 .tmp/
 .runtime/
