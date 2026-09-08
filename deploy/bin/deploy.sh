@@ -289,6 +289,7 @@ else
 
     log "reliz darvozasi (izolyatsiyalangan baza: $DARVOZA_BAZA)"
     TENDERAI_DARVOZA_FRONTEND=0 TENDERAI_PY="${YANGI}/.venv/bin/python" \
+    RELEASE_SHA="$SHA" \
     XT_DB_DSN="$DARVOZA_DSN" XT_DB_DSN_OWNER="$DARVOZA_DSN_OWNER" \
         "${YANGI}/deploy/bin/relis-darvoza.sh" "$YANGI" \
         || xato "reliz darvozasi yiqildi — joylashtirish TO'XTATILDI"

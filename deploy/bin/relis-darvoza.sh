@@ -93,7 +93,26 @@ trap 'rm -f "$LOG"' EXIT
 
 log "backend sinovlari yuritilmoqda (bu bir necha daqiqa)…"
 set +e
-"$PY" run_tests.py >"$LOG" 2>&1
+# KUZATILGAN FAYLLAR MANIFESTI — sinovlardan OLDIN.
+# O'LCHANGAN NUQSON (2026-09-09): manifest faqat `darvoza-baza.sh
+# sinov` ga ulangan edi. Reliz yo'li `relis-darvoza.sh` ni TO'G'RIDAN
+# chaqiradi, ya'ni u yerda manifest YO'Q edi -- `xavfsizlik_test`
+# fail-closed qoidasi bo'yicha QIZIL berdi va reliz to'xtadi.
+# Siyosat to'g'ri ishladi; manifest noto'g'ri joyda edi.
+MANIFEST="${ILDIZ}/.kuzatilgan-manifest"
+if [ -n "${RELEASE_SHA:-}" ]; then
+    if _n="$("${ILDIZ}/deploy/bin/kuzatilgan-manifest.sh" \
+                "$RELEASE_SHA" "$MANIFEST" 2>&1)"; then
+        log "kuzatilgan manifest: ${_n} fayl"
+    else
+        log "OGOH: manifest yasalmadi (${_n})"
+    fi
+else
+    log "OGOH: RELEASE_SHA yo'q — manifest yasalmadi"
+fi
+
+TENDERAI_TRACKED_MANIFEST="$MANIFEST" RELEASE_SHA="${RELEASE_SHA:-}" \
+    "$PY" run_tests.py >"$LOG" 2>&1
 KOD=$?
 set -e
 

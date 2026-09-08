@@ -924,22 +924,15 @@ PROBE2
     # qilinadi va faqat o'qish uchun uzatiladi.
     MANIFEST="${ILDIZ_TOLIQ}/.kuzatilgan-manifest"
     if [ -n "${RELEASE_SHA:-}" ]; then
-        {
-            echo "# tenderai-kuzatilgan-manifest v1"
-            echo "# sha: ${RELEASE_SHA}"
-            git --git-dir="${TENDERAI_REPO:-/opt/tenderai/repo.git}" \
-                ls-tree -r --name-only "$RELEASE_SHA"
-        } > "$MANIFEST" 2>/dev/null || rm -f "$MANIFEST"
-        if [ -s "$MANIFEST" ]; then
-            sha256sum "$MANIFEST" | cut -d" " -f1 > "${MANIFEST}.sha256"
-            log "kuzatilgan manifest: $(($(wc -l < "$MANIFEST") - 2)) fayl"
+        if _n="$("${ILDIZ_TOLIQ}/deploy/bin/kuzatilgan-manifest.sh" \
+                    "$RELEASE_SHA" "$MANIFEST" 2>&1)"; then
+            log "kuzatilgan manifest: ${_n} fayl"
         else
-            log "OGOH: manifest yasalmadi — xavfsizlik sinovi QIZIL beradi"
+            log "OGOH: manifest yasalmadi (${_n}) — xavfsizlik sinovi QIZIL"
         fi
     else
         log "OGOH: RELEASE_SHA yo'q — manifest yasalmadi"
     fi
-
     set +e
     TENDERAI_DEBUG_LAUNCH=1 \
     TENDERAI_PY="$PY" \
