@@ -478,14 +478,61 @@ def _js_results(cases):
         f.write(_JS_HARNESS)
     try:
         p = subprocess.run(
-            ["node", harness, JS_FILE],
+            # `--experimental-strip-types` ANIQ BERILADI.
+            #
+            # `pricing.ts` ataylab faqat "o'chiriladigan" TS
+            # sintaksisidan iborat, ya'ni Node uni tur izohlarini
+            # olib tashlab import qila oladi. LEKIN bu qobiliyat
+            # Node versiyasiga qarab standart bo'yicha yoqilgan yoki
+            # yoqilmagan bo'ladi.
+            #
+            # O'LCHANGAN (2026-09-08): darvoza serverida
+            # `/usr/bin/node` v22.22.1 va import
+            #
+            #     ERR_UNKNOWN_FILE_EXTENSION
+            #
+            # bilan yiqilardi; ishlab chiquvchi mashinasida esa nvm
+            # dagi v22.23.2 bilan O'TARDI. Ya'ni sinov natijasi
+            # PATH dagi Node versiyasiga bog'liq edi — "menda
+            # ishlayapti" sinfi.
+            #
+            # Bayroq ikkala versiyada ham qabul qilinadi (o'lchandi),
+            # shuning uchun uni ANIQ berish natijani versiyadan
+            # mustaqil qiladi.
+            ["node", "--experimental-strip-types", harness, JS_FILE],
             input=json.dumps(cases, ensure_ascii=False).encode("utf-8"),
             capture_output=True, timeout=60)
     except (FileNotFoundError, OSError):
         return None
     if p.returncode != 0:
-        raise AssertionError("Node ijrosi yiqildi:\n"
-                             + p.stderr.decode("utf-8", "replace"))
+        xato = p.stderr.decode("utf-8", "replace")
+        # SABAB TANIB OLINADI — xom Node stegi o'rniga bitta gap.
+        #
+        # O'LCHANGAN (2026-09-08, darvoza serveri): Debian/Ubuntu
+        # `nodejs` paketi TypeScript qo'llab-quvvatlashisiz quriladi
+        # (`amaro` kiritilmagan) va `pricing.ts` importi
+        #
+        #     Error [ERR_NO_TYPESCRIPT]: Node.js is not compiled
+        #     with TypeScript support
+        #
+        # beradi. Hech qanday BAYROQ buni tuzatmaydi — bu ijro
+        # muhitining qobiliyati.
+        #
+        # SINOV BARIBIR YIQILADI va bu ATAYLAB: paritet tekshiruvi
+        # HAQIQATAN bajarilmadi. "O'lchay olmadim" ni "o'tdi" ga
+        # aylantirish bu loyihada eng qimmat xato sinfi. Lekin sabab
+        # endi ANIQ aytiladi, aks holda u xom stek ichida qolardi.
+        if "ERR_NO_TYPESCRIPT" in xato:
+            raise AssertionError(
+                "PARITET O'LCHANMADI: bu hostdagi Node TypeScript "
+                "qo'llab-quvvatlashisiz qurilgan (ERR_NO_TYPESCRIPT).\n"
+                "  `pricing.ts` ni Node import qila olmaydi, ya'ni "
+                "Python va JS hisobi SOLISHTIRILMADI.\n"
+                "  Kerak: `amaro` bilan qurilgan Node (masalan rasmiy "
+                "nodejs.org paketi yoki nvm), yoki TS ni oldindan "
+                "kompilyatsiya qiladigan qadam.\n"
+                "  Bu 'o'tdi' EMAS — o'lchov bajarilmadi.")
+        raise AssertionError("Node ijrosi yiqildi:\n" + xato)
     return json.loads(p.stdout.decode("utf-8"))
 
 

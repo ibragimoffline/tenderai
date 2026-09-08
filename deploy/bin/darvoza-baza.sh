@@ -604,7 +604,12 @@ sinov)
     # o'sha yerdan o'qiydi. Darvoza ham AYNI keshni ishlatsa:
     # tarmoq kerak emas, yurish tez va TAKRORLANADIGAN bo'ladi.
     HF_KESH="${HF_HOME:-/opt/tenderai/${APP_ENV:-staging}/var/hf}"
-    log "HF_HOME: $HF_KESH"
+    # OFLAYN. Model keshda bor, lekin kutubxona baribir HF Hub ga
+    # metama'lumot uchun boradi: o'lchandi — 17 ta HTTP so'rov,
+    # "unauthenticated requests" ogohlantirishi va `yuklama_test`
+    # ning sekinlashib o'ldirilishi (fikstura FAOL qolib ketardi).
+    # Darvoza tarmoqqa bog'liq bo'lmasligi kerak.
+    log "HF_HOME: $HF_KESH  (HF_HUB_OFFLINE=1)"
 
     log "python: $PY"
     log "sys.executable: $("$PY" -c 'import sys;print(sys.executable)' 2>&1 | tail -1)"
@@ -738,6 +743,7 @@ PROBE2
     TENDERAI_DEBUG_LAUNCH=1 \
     TENDERAI_PY="$PY" \
     HF_HOME="$HF_KESH" \
+    HF_HUB_OFFLINE=1 \
     XT_DB_DSN="$SINOV_DSN" \
     XT_DB_DSN_TEST_ADMIN="$ADMIN_DSN" \
     APP_ENV=staging \
