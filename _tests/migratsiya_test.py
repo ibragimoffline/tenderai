@@ -563,6 +563,11 @@ def test_rol_shartnomasi():
     matn = io.open(os.path.join(ROOT, _ROL_PATCH), encoding="utf-8").read()
     amaliy = "\n".join(q for q in matn.splitlines()
                        if q.strip() and not q.lstrip().startswith("--"))
+    # SATR LITERALLARI SANALMAYDI. Patchdagi `HINT` matni operatorga
+    # tuzatish buyrug'ini aytadi va unda `ALTER ROLE` MATNI bor --
+    # lekin u BAJARILMAYDI. Literallar olib tashlanmasa tekshiruv
+    # yolg'on qizil berardi (o'lchandi).
+    amaliy = re.sub(r"'[^']*'", "''", amaliy)
 
     # --- MIGRATSIYA KLASTER HOLATINI O'ZGARTIRMAYDI ---
     # O'LCHANGAN (2026-09-09): `ALTER ROLE tai_app NOSUPERUSER …`
