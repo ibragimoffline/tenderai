@@ -213,10 +213,25 @@ if ! "${PY:-python3}" "${ILDIZ}/deploy/bin/relis-qaror.py" \
         --xulosa "$_XULOSA_JSON" --tasnif "$_TASNIF" >&2; then
     xato "reliz qarori: TO'XTATILDI (yuqoridagi toifalarga qarang)"
 fi
-[ "$KOD" -eq 0 ] || {
-    tail -30 "$LOG" >&2
-    xato "run_tests.py chiqish kodi $KOD"
-}
+# CHIQISH KODI QAROR QILMAYDI — TOIFA SIYOSATI QILADI.
+#
+# O'LCHANGAN NUQSON (2026-09-09, haqiqiy reliz): toifa siyosati
+# "STAGING GA RUXSAT" dedi, keyin SHU QATOR relizni to'xtatdi.
+# `run_tests.py` 1 qaytaradi (ba'zi to'plam yiqildi), ya'ni bu shart
+# ayni almashtirilgan "hammasi yashil bo'lsin" qoidasining nusxasi
+# edi -- men uni birinchi tuzatishda ko'zdan qochirdim.
+#
+# 0 = hammasi yashil, 1 = ba'zilari yiqildi. Ikkalasi ham NORMAL:
+# qarorni siyosat chiqaradi. Boshqa kod esa yurgizuvchining O'ZI
+# buzilganini bildiradi va u to'xtatadi.
+#
+# Yurgizuvchi umuman ishlamasa `xulosa.json` yozilmaydi va siyosat
+# 2-kod bilan to'xtaydi -- ya'ni bu yo'l ham yopiq.
+case "$KOD" in
+    0|1) ;;
+    *)   tail -30 "$LOG" >&2
+         xato "run_tests.py KUTILMAGAN chiqish kodi $KOD" ;;
+esac
 log "backend: $JAMI to'plam, 0 yiqildi"
 
 # --- 2) FRONTEND: TIP, BIRLIK SINOVLARI, QURILISH ----------------------------
