@@ -4,7 +4,7 @@
 # =============================================================================
 #     MANBA_BAZA=<baza> darvoza-baza.sh yarat  # nusxa + migratsiya
 #         (manba MUHIT O'ZGARUVCHISIDAN olinadi, $2 dan EMAS)
-#     darvoza-baza.sh tashla  <darvoza-baza>
+#     darvoza-baza.sh tozala  <darvoza-baza>
 #     darvoza-baza.sh nom                     # yangi nom chop etadi
 #     darvoza-baza.sh tekshir                 # ulanish + rol (sirsiz)
 #
@@ -38,7 +38,7 @@
 # =============================================================================
 set -euo pipefail
 
-AMAL="${1:?foydalanish: darvoza-baza.sh <yarat|tashla|nom> [baza]}"
+AMAL="${1:?foydalanish: darvoza-baza.sh <tekshir|yarat|sinov|tozala|tasdiq|nom> [baza]}"
 
 # --- QO'RIQCHI 1: NOM NAQSHI -------------------------------------------------
 # Buzuvchi amal FAQAT shu naqshga tushgan nomga tegadi. Naqsh

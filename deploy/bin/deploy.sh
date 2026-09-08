@@ -133,7 +133,7 @@ tozalash() {
     # ketsa har joylashtiruvda bittadan yig'ilib, diskni va
     # `pg_stat_activity` ni ifloslantirardi.
     if [ -n "$DARVOZA_BAZA" ]; then
-        "${YANGI}/deploy/bin/darvoza-baza.sh" tashla "$DARVOZA_BAZA" \
+        "${YANGI}/deploy/bin/darvoza-baza.sh" tozala "$DARVOZA_BAZA" \
             >/dev/null 2>&1 || xato_izoh "OGOH: darvoza bazasi tashlanmadi: $DARVOZA_BAZA"
         DARVOZA_BAZA=""
     fi
@@ -295,8 +295,15 @@ else
 
     # O'tdi: bazani DARHOL tashlaymiz (`tozalash` ham urinadi, lekin
     # muvaffaqiyatli yo'lda uni uzoq ushlab turishning ma'nosi yo'q).
-    "${YANGI}/deploy/bin/darvoza-baza.sh" tashla "$DARVOZA_BAZA" >/dev/null 2>&1 || true
-    DARVOZA_BAZA=""
+    # FAQAT TASHLANGAN BO'LSA UNUTAMIZ.
+    # Ilgari `|| true` dan keyin o'zgaruvchi SHARTSIZ tozalanardi --
+    # ya'ni tashlash yiqilsa `tozalash` tuzog'i qayta urinmasdi va
+    # baza JIMGINA qolib ketardi.
+    if "${YANGI}/deploy/bin/darvoza-baza.sh" tozala "$DARVOZA_BAZA" >/dev/null 2>&1; then
+        DARVOZA_BAZA=""
+    else
+        log "OGOH: darvoza bazasi tashlanmadi, tuzoq qayta urinadi: $DARVOZA_BAZA"
+    fi
 fi
 
 # --- 6) MIGRATSIYA — EGASI roli bilan ---------------------------------------

@@ -2486,10 +2486,15 @@ def test_faza2_staging_konteyneri():
           any('XT_DB_DSN_OWNER="$DARVOZA_DSN_OWNER"' in q for q in d_amaliy))
     check("darvoza bazasi nomi qayta tekshiriladi",
           "tenderai_gate_[0-9]*)" in d)
-    check("darvoza bazasi har holda tashlanadi (tozalash ichida)",
-          "tozalash()" in d
-          and d.index("tozalash()") < d.index("darvoza-baza.sh\" tashla")
-          if 'darvoza-baza.sh" tashla' in d else False)
+    # BAZA `tozalash` TUZOG'I ICHIDAN tashlansin -- ya'ni yiqilganda
+    # ham. Bu tekshiruv ilgari `tashla` degan MAVJUD BO'LMAGAN amal
+    # nomini kutardi: xato kodda ham, testda ham bir xil yozilgani
+    # uchun test uni ushlay olmasdi.
+    tz_bosh = d.index("tozalash() {")
+    tz_oxir = d.index("trap tozalash EXIT")
+    check("darvoza bazasi tozalash tuzog'i ichida tashlanadi",
+          'darvoza-baza.sh" tozala' in d[tz_bosh:tz_oxir],
+          d[tz_bosh:tz_oxir][:120].replace(chr(10), " | "))
     check("production da darvoza qayta yuritilmaydi",
           'MUHIT" = "production"' in d
           and "production bazasida YURITILMAYDI" in d)
@@ -2500,6 +2505,56 @@ def test_faza2_staging_konteyneri():
     prod_bolim = prod_bolim.split("else", 1)[0] if prod_bolim else ""
     check("production shoxi relis-darvoza.sh ni chaqirmaydi",
           "relis-darvoza.sh" not in prod_bolim, prod_bolim[:80])
+
+    # --- CHAQIRILGAN AMAL HAQIQATDA MAVJUD BO'LSIN ---
+    # O'LCHANGAN NUQSON (2026-09-08): `deploy.sh` darvoza bazasini
+    # `tashla` amali bilan tashlardi. Bunday amal YO'Q -- haqiqiy nomi
+    # `tozala`. Nom `darvoza-baza.sh` ning FOYDALANISH IZOHIDAN
+    # olingan edi, izoh esa mavjud bo'lmagan amalni yozgan.
+    #
+    # Skript `*)` shoxiga tushib xato qaytardi, lekin chaqiruv
+    # `>/dev/null 2>&1` bilan o'ralgani uchun sabab KO'RINMADI --
+    # faqat "tashlanmadi" degan ogohlantirish qoldi va
+    # `tenderai_gate_20260908_232707` bazasi QOLIB KETDI.
+    #
+    # Bu sinf xatoni faqat SHU tekshiruv ushlaydi: izoh ham, chaqiruv
+    # ham "to'g'ri ko'rinadi", lekin ular haqiqiy `case` yorliqlari
+    # bilan solishtirilmagan.
+    dbz = _oqi_ildiz("deploy/bin/darvoza-baza.sh")
+    gavda_dbz = dbz[dbz.index('case "$AMAL" in'):]
+    yorliq_dbz = set(re.findall(r"^([a-z]+)\)", gavda_dbz, re.M))
+    check("darvoza-baza.sh amallari kutilganidek",
+          yorliq_dbz == {"tekshir", "yarat", "sinov", "tozala", "tasdiq", "nom"},
+          f"topildi: {sorted(yorliq_dbz)}")
+
+    chaqiruvchilar = ["deploy/bin/deploy.sh",
+                      "deploy/bin/tender-darvoza-docker.namuna"]
+    yomon = []
+    for nom in chaqiruvchilar:
+        matn = _oqi_ildiz(nom)
+        for q in matn.splitlines():
+            if q.lstrip().startswith("#") or "darvoza-baza.sh" not in q:
+                continue
+            # `darvoza-baza.sh` dan KEYINGI birinchi so'z -- amal.
+            keyin = q.split("darvoza-baza.sh", 1)[1].strip()
+            keyin = keyin.strip('"').split()
+            if not keyin:
+                continue
+            amal = keyin[0].strip('"')
+            if not amal or not amal[0].islower() or not amal.isalpha():
+                continue
+            if amal not in yorliq_dbz:
+                yomon.append(f"{os.path.basename(nom)}: '{amal}'")
+    check("chaqirilgan darvoza-baza amallari mavjud", not yomon,
+          "; ".join(yomon))
+
+    # Foydalanish izohi ham HAQIQATNI aytsin -- aynan u chalg'itgan.
+    bosh_dbz = dbz[:dbz.index('set -euo pipefail')]
+    izohdagi = set(re.findall(r"darvoza-baza\.sh (?:<)?([a-z|]+)", bosh_dbz))
+    uydirma = sorted({a for guruh in izohdagi for a in guruh.split("|")
+                      if a and a not in yorliq_dbz})
+    check("foydalanish izohi mavjud bo'lmagan amalni yozmaydi",
+          not uydirma, "izohda bor, kodda yo'q: " + ", ".join(uydirma))
 
     # --- BO'SH ZAXIRA "ZAXIRA BOR" DEB KO'RINMASIN ---
     # O'LCHANGAN NUQSON (2026-09-08): `pg_dump` autentifikatsiyada
