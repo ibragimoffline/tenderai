@@ -718,6 +718,7 @@ PROBE2
     ADMIN_DSN="$(dsn_baza "${XT_DB_DSN_TEST_ADMIN:-}" "postgres")"
     set +e
     TENDERAI_DEBUG_LAUNCH=1 \
+    TENDERAI_PY="$PY" \
     XT_DB_DSN="$SINOV_DSN" \
     XT_DB_DSN_TEST_ADMIN="$ADMIN_DSN" \
     APP_ENV=staging \
