@@ -49,9 +49,19 @@ import io
 import os
 import sys
 
-# Kod SKANERLANADIGAN fayllar. Ilova ijrosiga kiradiganlar, xolos:
-# `deploy/` skriptlari konteynerda YURMAYDI.
-MANBALAR = ("api", "run_etl.py")
+# Kod SKANERLANADIGAN fayllar — KONTEYNERDA YURADIGANLAR.
+#
+# `api/` ning o'zi YETARLI EMAS: `api/yuklama.py` ildizdagi
+# `etl_embed` va `etl_doc_text` ni import qiladi va ULAR ham muhitdan
+# o'qiydi (`CHUNK_SIZE`, `CHUNK_OVERLAP`, `EMBED_BATCH`). Faqat `api/`
+# skanerlanganda bu kalitlar ro'yxatga tushmasdi va konteyner
+# sozlangan qiymat o'rniga sukut qiymatni ishlatardi -- host relizi
+# bilan BOSHQACHA bo'laklash, jimgina.
+#
+# Ro'yxat `Dockerfile.backend` dagi `COPY` bilan mos turishi kerak;
+# buni `deploy_test` 27-bo'limi tekshiradi.
+MANBALAR = ("api", "run_etl.py", "etl_embed.py", "etl_doc_text.py",
+            "migratsiya.py")
 
 O_QISH = {"getenv", "environ"}
 
