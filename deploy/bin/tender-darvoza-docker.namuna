@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# =============================================================================
+# /usr/local/sbin/tender-darvoza-docker — ROOT O'RAMASI (NAMUNA)
+# =============================================================================
+# Bu fayl repozitoriyada NAMUNA sifatida turadi va `/usr/local/sbin` ga
+# nusxalanadi. Repozitoriyadagi nusxa VERSIYALANADI va ko'rib chiqiladi;
+# ishlayotgan nusxa esa root ga tegishli.
+#
+# NIMA QILADI — UCH TOR ISH:
+#   1. muhit faylini ROOT sifatida o'qiydi (sir chiqmaydi);
+#   2. imijni O'ZGARMAS SHA dan quradi;
+#   3. `deploy/bin/darvoza-docker.sh` ni chaqiradi.
+#
+# NIMA QILMAYDI:
+#   * `tenderai` ni docker guruhiga QO'SHMAYDI;
+#   * konteynerga docker soketini ULAMAYDI;
+#   * konteynerni root bilan yurgizmaydi (imijda uid 10001).
+#
+# Docker soketi root-ekvivalenti. Uni xizmat hisobiga berish
+# `tai_service` ga CREATEDB bermaslik qoidasini ma'nosiz qilardi.
+# =============================================================================
+set -euo pipefail
+
+ENV_FILE=/etc/tenderai/staging.env
+REPO=/opt/tenderai/repo.git
+PREFIKS=tenderai_gate_
+
+[ "$(id -u)" = 0 ] || { echo "root kerak: sudo $0 $*" >&2; exit 1; }
+[ -r "$ENV_FILE" ] || { echo "muhit fayli o'qilmadi: $ENV_FILE" >&2; exit 1; }
+
+CMD="${1:-}"; shift || true
+
+# --- SIR ROOT SIFATIDA O'QILADI ---------------------------------------------
+# `set -a` bilan eksport qilinadi, lekin PASTGA faqat kerakli qiymatlar
+# uzatiladi (`darvoza-docker.sh` o'zi tanlaydi).
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+
+sha_ol() {
+    local s
+    s="$(sudo -u tenderai git --git-dir="$REPO" rev-parse 'main^{commit}')"
+    [[ "$s" =~ ^[0-9a-f]{40}$ ]] || { echo "SHA aniqlanmadi" >&2; exit 1; }
+    printf '%s' "$s"
+}
+
+daraxt_ol() {   # $1 = SHA, $2 = katalog
+    sudo -u tenderai git --git-dir="$REPO" archive "$1" | tar -x -C "$2"
+    chmod +x "$2"/deploy/bin/*.sh
+}
+
+case "$CMD" in
+tekshir)
+    echo "docker      : $(docker version --format '{{.Server.Version}}' 2>/dev/null || echo YO\'Q)"
+    SHA="$(sha_ol)"; echo "main SHA    : $SHA"
+    echo "imij        : $(docker images -q "tenderai-gate:$SHA" 2>/dev/null | head -1 || true)"
+    echo "XT_DB_DSN   : $([ -n "${XT_DB_DSN:-}" ] && echo bor || echo YO\'Q)"
+    echo "TEST_ADMIN  : $([ -n "${XT_DB_DSN_TEST_ADMIN:-}" ] && echo bor || echo YO\'Q)"
+    # QOLDIQLAR — ikkalasi ham bir martalik bo'lishi kerak.
+    echo "qoldiq konteyner: $(docker ps -aq --filter "ancestor=tenderai-gate:$SHA" 2>/dev/null | wc -l)"
+    echo "qoldiq gate DB  : $(sudo -u postgres psql -qtA -c \
+        "SELECT count(*) FROM pg_database WHERE datname LIKE '${PREFIKS}%'" 2>/dev/null || echo '?')"
+    ;;
+
+qur)
+    SHA="$(sha_ol)"
+    VAQT="$(mktemp -d)"; trap 'rm -rf "$VAQT"' EXIT
+    daraxt_ol "$SHA" "$VAQT"
+    echo "[o'rama] imij quriladi: tenderai-gate:$SHA" >&2
+    docker build -f "$VAQT/Dockerfile.gate" -t "tenderai-gate:$SHA" "$VAQT" >&2
+    printf '%s\n' "$SHA"
+    ;;
+
+sinov)
+    # $1 = darvoza bazasi (`tender-darvoza yarat` beradi), qolgani
+    # `run_tests.py` ga uzatiladi.
+    SHA="$(sha_ol)"
+    docker image inspect "tenderai-gate:$SHA" >/dev/null 2>&1 \
+        || { echo "imij yo'q — avval: $0 qur" >&2; exit 1; }
+    VAQT="$(mktemp -d)"; trap 'rm -rf "$VAQT"' EXIT
+    daraxt_ol "$SHA" "$VAQT"
+    echo "darvoza SHA: $SHA" >&2
+    IMIJ="tenderai-gate:$SHA" exec "$VAQT/deploy/bin/darvoza-docker.sh" "$@"
+    ;;
+
+tozala)
+    # FAQAT darvoza konteynerlari. Boshqa hech narsaga tegilmaydi.
+    N="$(docker ps -aq --filter "ancestor=tenderai-gate" 2>/dev/null | wc -l)"
+    docker ps -aq --filter "ancestor=tenderai-gate" 2>/dev/null | xargs -r docker rm -f >/dev/null
+    echo "[o'rama] $N ta darvoza konteyneri olib tashlandi"
+    ;;
+
+holat)
+    docker ps -a --filter "ancestor=tenderai-gate" \
+        --format '{{.Names}} {{.Status}} {{.Image}}' 2>/dev/null || true
+    docker images tenderai-gate --format '{{.Tag}} {{.Size}}' 2>/dev/null || true
+    ;;
+
+*)
+    echo "Ruxsat etilgan buyruqlar: tekshir | qur | sinov | tozala | holat" >&2
+    exit 2
+    ;;
+esac
