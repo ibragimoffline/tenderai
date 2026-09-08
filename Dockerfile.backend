@@ -51,7 +51,12 @@ COPY api/ ./api/
 # `CHUNK_SIZE` import qilingan joyda esa zaxira BOR (1200/150), ya'ni
 # fayl tushib qolsa ilova YIQILMASDI — host relizidan BOSHQACHA
 # bo'laklardi. Jimgina paritet farqi: eng yomon turi.
-COPY etl_embed.py etl_doc_text.py ./
+#
+# RO'YXAT O'TUVCHI: `etl_doc_text` o'z navbatida `etl_ishonch` ni
+# import qiladi. Faqat `api/` ning BEVOSITA importlarini sanash
+# yetarli emas edi -- imij quriladi, `docker build` o'tadi va nuqson
+# faqat birinchi fayl yuklashda ko'rinardi.
+COPY etl_embed.py etl_doc_text.py etl_ishonch.py ./
 COPY migratsiya.py migratsiya_manifest.tsv ./
 COPY schema_patch_*.sql ./
 

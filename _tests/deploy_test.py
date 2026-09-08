@@ -2347,18 +2347,33 @@ def test_faza2_staging_konteyneri():
                     kochirilgan.add("api")
 
     import re as _re2
-    kerak = set()
+
+    def _ildiz_importlar(yol):
+        """Shu fayl import qiladigan ILDIZ modullari."""
+        try:
+            matn = io.open(yol, encoding="utf-8").read()
+        except Exception:                                     # noqa: BLE001
+            return set()
+        return {m.group(1) for m in _re2.finditer(
+                    r"^\s*(?:from|import)\s+([a-z_][a-z0-9_]*)", matn, _re2.M)
+                if os.path.isfile(os.path.join(ROOT, m.group(1) + ".py"))}
+
+    # YOPILMA O'TUVCHI BO'LISHI SHART: `etl_doc_text` o'z navbatida
+    # `etl_ishonch` ni import qiladi. Faqat `api/` ning BEVOSITA
+    # importlarini sanash imijni to'liq deb ko'rsatardi, `docker build`
+    # o'tardi va nuqson faqat birinchi fayl yuklashda chiqardi.
+    kerak, korildi, navbat = set(), set(), []
     for k, _d, fayllar in os.walk(os.path.join(ROOT, "api")):
-        for f in fayllar:
-            if not f.endswith(".py"):
-                continue
-            matn = io.open(os.path.join(k, f), encoding="utf-8").read()
-            for m in _re2.finditer(r"^\s*(?:from|import)\s+([a-z_][a-z0-9_]*)",
-                                   matn, _re2.M):
-                nom = m.group(1)
-                # Ildizda SHU nomli modul bormi -- bo'lsa, u imijga kerak.
-                if os.path.isfile(os.path.join(ROOT, nom + ".py")):
-                    kerak.add(nom)
+        navbat += [os.path.join(k, f) for f in fayllar if f.endswith(".py")]
+    while navbat:
+        yol = navbat.pop()
+        if yol in korildi:
+            continue
+        korildi.add(yol)
+        for nom in _ildiz_importlar(yol):
+            if nom not in kerak:
+                kerak.add(nom)
+                navbat.append(os.path.join(ROOT, nom + ".py"))
     yetishmaydi = sorted(kerak - kochirilgan)
     check("imij `api/` import qiladigan ildiz modullarini saqlaydi",
           not yetishmaydi, "yetishmaydi: " + ", ".join(yetishmaydi))

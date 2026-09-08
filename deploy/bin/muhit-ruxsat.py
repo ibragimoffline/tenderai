@@ -61,7 +61,7 @@ import sys
 # Ro'yxat `Dockerfile.backend` dagi `COPY` bilan mos turishi kerak;
 # buni `deploy_test` 27-bo'limi tekshiradi.
 MANBALAR = ("api", "run_etl.py", "etl_embed.py", "etl_doc_text.py",
-            "migratsiya.py")
+            "etl_ishonch.py", "migratsiya.py")
 
 O_QISH = {"getenv", "environ"}
 
