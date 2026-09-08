@@ -481,8 +481,8 @@ def test_stock_real_tender():
                 (tid, str(tid)))
             cur.execute(
                 "INSERT INTO tender_item (tender_id, lot_id, item_id, "
-                "  name, unit, amount_text) "
-                "VALUES (%s, 1, %s, %s, 'шт', '500.00 шт') "
+                "  name, unit, amount_text, raw_json) "
+                "VALUES (%s, 1, %s, %s, 'шт', '500.00 шт', '{}') "
                 "ON CONFLICT DO NOTHING",
                 (tid, f"{tid}-1", "Мышь компьютерная"))
         conn.commit()
