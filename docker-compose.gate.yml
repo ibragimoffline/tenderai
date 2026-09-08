@@ -1,0 +1,58 @@
+# =============================================================================
+# DARVOZA — DOCKER BILAN YURGIZISH
+# =============================================================================
+# Bu fayl JOYLASHTIRISH uchun emas. U faqat darvozani (44 to'plam)
+# takrorlanadigan muhitda yurgizadi.
+#
+# ISHLATISH:
+#     GATE_DB=tenderai_gate_20260908_120000 \
+#     docker compose -f docker-compose.gate.yml run --rm darvoza
+#
+# `GATE_DB` ni `tender-darvoza yarat` beradi. Baza HOSTDA qoladi.
+# =============================================================================
+services:
+  darvoza:
+    image: tenderai-gate:local
+    build:
+      context: .
+      dockerfile: Dockerfile.gate
+
+    # `network_mode: host` — ATAYLAB VA ASOSLANGAN.
+    #
+    # PostgreSQL faqat `127.0.0.1` da tinglaydi (o'lchandi) va docker
+    # ko'prigidan (`172.17.0.1`) KO'RINMAYDI. Ikki yo'l bor edi:
+    #
+    #   a) Postgres ni `172.17.0.1` da ham tinglatish — BAZANI
+    #      KENGROQ OCHADI, ya'ni yomonroq;
+    #   b) konteynerni host tarmoq fazosiga qo'yish — bu YANGI HECH
+    #      NARSA OCHMAYDI, u shunchaki o'sha loopback ni ko'radi.
+    #
+    # (b) tanlandi. Darvoza bir martalik va tashqariga port
+    # chiqarmaydi.
+    network_mode: host
+
+    # SIRLAR IMIJDA EMAS — ish vaqtida, root egalik qiladigan fayldan.
+    env_file:
+      - /etc/tenderai/staging.env
+
+    environment:
+      # Sinovlar ILOVA roli bilan yuradi. `GATE_DB` — izolyatsiyalangan
+      # nusxa; haqiqiy `tenderai_staging` ga TEGILMAYDI.
+      XT_DB_DSN: "${GATE_DSN:?GATE_DSN kerak — nusxa bazasiga ilova roli DSN i}"
+      APP_ENV: staging
+      TENDERAI_PY: /usr/local/bin/python
+      TENDERAI_NODE: /usr/local/bin/node
+      # Model keshi ULANADI, YUKLANMAYDI. Darvoza tarmoqqa chiqmaydi.
+      HF_HOME: /model-kesh
+      HF_HUB_OFFLINE: "1"
+
+    volumes:
+      # FAQAT O'QISH. Kesh 471 MB va reviziyaga bog'liq — uni imijga
+      # bokish har build ni og'irlashtirardi va reviziyani muzlatardi.
+      - /opt/tenderai/staging/var/hf:/model-kesh:ro
+
+    # XAVFSIZLIK
+    read_only: false          # `_test_natija` ga yoziladi (bir martalik)
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # Docker soketi ULANMAYDI, privileged EMAS, root EMAS (uid 10001).
