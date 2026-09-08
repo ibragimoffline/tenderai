@@ -475,6 +475,20 @@ tekshir)
                          aclexplode(c.relacl) a
                    WHERE n.nspname='erp' AND c.relname='app_user'
                    ORDER BY 1" 2>&1 | sed 's/^/  /'
+        echo "  --- TO'LIQ SILJISH: tai_app ga erp da berilgan HAMMA huquq ---"
+        # Faqat `app_user` emas: boshqa jadvallarda ham provenansiz
+        # grant bo'lishi mumkin. `schema_patch_huquq.sql` FAQAT uchta
+        # shartnoma-view ni ruxsat etadi, ERP tomoni ham shuni yozadi.
+        psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c \
+            "SELECT '  ' || c.relkind || ' erp.' || c.relname
+                  || ' -> ' || a.privilege_type
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace,
+                     aclexplode(c.relacl) a
+               WHERE n.nspname = 'erp'
+                 AND a.grantee::regrole::text = 'tai_app'
+               ORDER BY c.relname, a.privilege_type" 2>&1 | sed 's/^/  /'
+        echo "  (relkind: r=jadval  v=ko'rinish  m=materiallashgan)"
         echo "  --- erp sxemasi ACL ---"
         psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c "SELECT '  ' || COALESCE(a.grantee::regrole::text,'PUBLIC')
                       || ' ' || a.privilege_type
