@@ -160,29 +160,91 @@ build ni og'irlashtirardi. U `:ro` ulanadi, darvoza esa
 
 ## 8. Faza 2 — staging ko'chirish rejasi
 
-Faqat to'liq 44 to'plam pariteti isbotlangach:
+Faqat to'liq 44 to'plam pariteti isbotlangach.
 
-1. `tenderai-backend:<SHA>` qurish (ayni nomzod SHA)
-2. Konteynerni **boshqa portda** ko'tarish (masalan 8012)
-3. `/health` va `/ready` ni tekshirish — nginx **hali tegilmaydi**
-4. Auth, AI Chat, fayl yuklash, ETL ni sinash
-5. nginx upstream ni 8011 -> 8012 ga o'tkazish
-6. Kuzatish; muammo bo'lsa quyidagi qaytarish
+| # | qadam | buyruq | qaytariladimi |
+|---|---|---|---|
+| 1 | imij, o'zgarmas SHA dan | `sudo tender-staging-docker qur` | — hech narsa o'zgarmaydi |
+| 2 | konteyner **8012** da, systemd **8011** da qoladi | `sudo tender-staging-docker ishga` | ha, to'liq |
+| 3 | `/health` va `/ready` | `sudo tender-staging-docker sogliq` | — o'lchov |
+| 4 | auth, AI Chat, fayl yuklash, ETL | qo'lda, 8012 ga qarshi | ha, to'liq |
+| 5 | nginx upstream 8011 -> 8012 | `sudo tender-nginx` | ha, §9 |
+| 6 | kuzatish | — | ha, §9 |
 
-Baza, nginx, sertifikat, zaxira — **hech biri o'zgarmaydi**.
+**1–4 qadamlar foydalanuvchiga ko'rinmaydi.** Trafik hamon systemd
+relizida; konteyner yiqilsa ham hech kim sezmaydi. Birinchi ko'rinadigan
+qadam — 5.
+
+Baza, nginx sertifikati, zaxira nusxa tartibi — **hech biri
+o'zgarmaydi**. Konteynerga faqat ilova ijrosi ko'chadi.
+
+### Muhit — qat'iy ruxsat ro'yxati
+
+`staging.env` da konteynerga **kerak bo'lmagan** sirlar bor:
+
+| kalit | nega konteynerga berilmaydi |
+|---|---|
+| `XT_DB_DSN_OWNER` | migratsiya roli — sxemani o'zgartira oladi |
+| `XT_DB_DSN_TEST_ADMIN` | `CREATEDB` huquqli sinov roli |
+| `E2E_PAROL`, `E2E_LOGIN` | sinov hisobi |
+| `BACKUP_REMOTE_CMD`, `BACKUP_DIR` | zaxira nusxa sirti |
+
+Butun faylni uzatish bularning hammasini berardi va ilova jarayoni
+buzilganda hujumchi migratsiya rolini qo'lga kiritardi — `tai_service`
+ga `CREATEDB` bermaslik qoidasi shu bilan **ma'nosiz** bo'lardi.
+
+Ro'yxat **qo'lda yozilmaydi**: `deploy/bin/muhit-ruxsat.py` uni shu SHA
+dagi koddan hisoblaydi. Qo'lda ro'yxat surilib ketardi — kodga sozlama
+qo'shilar, ro'yxat unutilar va ilova sukut qiymat bilan **jimgina**
+noto'g'ri ishlardi.
+
+Ro'yxat `ast` bilan quriladi, regex bilan emas: `APP_PUBLIC_URL`,
+`PUBLIC_BASE_URL` va `AI_PAID_ENABLED` kodda o'zgaruvchi orqali
+o'qiladi va regex ularni tushirib qoldirardi.
+
+Filtr tirnoqni ham yechadi. `docker --env-file` tirnoqni qiymat deb
+qoldiradi, `systemd EnvironmentFile` esa yechadi — ya'ni tirnoqli DSN
+da systemd relizi **ishlab**, konteyner **yiqilardi** va sabab
+ko'rinmasdi.
+
+### Nega host tarmog'i va nega bu xavfsiz emas deb qo'rqmaslik kerak
+
+PostgreSQL faqat `127.0.0.1` da tinglaydi va shunday **qoladi**.
+Ko'prik tarmog'idagi konteyner unga yeta olmaydi. Bazani ko'prikka
+ochish uni **kengroq** ochardi, unix soketini ulash esa DSN ni qayta
+yozishni — ya'ni sirni qayta ishlashni — talab qilardi. Shuning uchun
+host tarmog'i tanlandi va xizmat `API_HOST=127.0.0.1` bilan **faqat
+loopback**ka bog'lanadi: systemd relizi (`127.0.0.1:8011`) bilan aynan
+bir xil ko'rinish. O'lchangan: tashqi manzildan (`49.12.47.155:8012`)
+ulanib bo'lmadi.
+
+`API_HOST` `0.0.0.0` ga qaytarilsa xizmat butun internetga chiqib
+ketardi, shuning uchun uni `deploy_test` 27-bo'limi qo'riqlaydi.
 
 ## 9. Qaytarish (Faza 2 uchun)
 
 Baza qaytarish **KERAK EMAS**: faqat ijro qadoqlash o'zgardi, sxema
-emas.
+emas. Migratsiya qo'llanmagan.
+
+**5-qadamgacha** (nginx hali tegilmagan) — bitta buyruq yetadi:
 
 ```bash
-sudo docker stop tenderai-staging          # 1. konteyner to'xtaydi
-sudo /usr/local/sbin/tender-nginx          # 2. upstream 8011 ga qaytadi
-sudo systemctl start tenderai-api@staging  # 3. eski systemd relizi
+sudo tender-staging-docker toxtat
+```
+
+**5-qadamdan keyin** (trafik konteynerda edi):
+
+```bash
+sudo tender-nginx                          # 1. upstream 8011 ga qaytadi
+sudo tender-staging-docker toxtat          # 2. konteyner olib tashlanadi
+systemctl is-active tenderai-api@staging   # 3. systemd relizi tirikmi
 curl -sS 127.0.0.1:8011/health             # 4. tiriklik
 curl -sS 127.0.0.1:8011/ready              # 5. tayyorlik
 ```
+
+systemd relizi butun Faza 2 davomida **to'xtatilmaydi**, shuning uchun
+uni qayta ko'tarish kerak emas — u allaqachon ishlab turibdi. Aynan shu
+qaytarishni bir buyruqqa tushiradi.
 
 ## 10. Xavfsizlik
 

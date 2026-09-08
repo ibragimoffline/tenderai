@@ -58,7 +58,8 @@ USER tenderai
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/model-kesh \
-    API_PORT=8000
+    API_PORT=8000 \
+    API_HOST=0.0.0.0
 
 EXPOSE 8000
 
@@ -69,4 +70,13 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 
 # SIR YO'Q. `XT_DB_DSN`, `ANTHROPIC_API_KEY` va boshqalar FAQAT ish
 # vaqtida `--env-file /etc/tenderai/<muhit>.env` bilan beriladi.
-CMD ["sh", "-c", "exec uvicorn api.main:app --host 0.0.0.0 --port ${API_PORT} --proxy-headers --forwarded-allow-ips '*' --no-access-log"]
+# BOG'LANISH MANZILI SOZLANADI. Ko'prik tarmoqda `0.0.0.0` YAGONA
+# to'g'ri qiymat — u konteyner ichidagi manzil, tashqariga faqat
+# `-p 127.0.0.1:PORT:8000` ochadi.
+#
+# HOST TARMOG'IDA esa `0.0.0.0` xizmatni BUTUN INTERNETGA ochib
+# yuboradi. PostgreSQL faqat `127.0.0.1` da tinglagani uchun staging
+# konteyneri host tarmog'ida ishlashi kerak, shuning uchun u
+# `API_HOST=127.0.0.1` beradi va systemd relizi (`127.0.0.1:8011`)
+# bilan BIR XIL ko'rinishda qoladi.
+CMD ["sh", "-c", "exec uvicorn api.main:app --host ${API_HOST} --port ${API_PORT} --proxy-headers --forwarded-allow-ips '*' --no-access-log"]

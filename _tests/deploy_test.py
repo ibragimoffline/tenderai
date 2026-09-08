@@ -2204,6 +2204,184 @@ def test_0071_tasdigi():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+# =============================================================================
+# 27. FAZA 2 — STAGING KONTEYNERI TRAFIKNI O'G'IRLAB KETMASIN
+# =============================================================================
+# Faza 2 ning butun ma'nosi: konteyner systemd relizining YONIDA
+# ko'tariladi va yiqilsa ham foydalanuvchi hech narsa sezmaydi.
+# Bu xossani bir nechta mustaqil qaror ushlab turadi va ularning
+# HAR BIRI beparvo tahrirdan buziladigan:
+#
+#   * port 8012 -> 8011 ga aylansa, konteyner systemd relizi bilan
+#     PORT UCHUN URUSHADI;
+#   * `API_HOST` `0.0.0.0` bo'lib qolsa, host tarmog'ida xizmat
+#     BUTUN INTERNETGA chiqadi (49.12.47.155:8012);
+#   * o'ram nginx ni tahrirlay boshlasa, qadam QAYTARILADIGAN
+#     bo'lmay qoladi.
+#
+# Uchalasi ham "ishlayapti" degan sinovdan O'TIB KETADI — yiqilish
+# faqat ishlab chiqarishda ko'rinardi. Shuning uchun statik tekshiruv.
+
+
+def test_faza2_staging_konteyneri():
+    bolim("27. Faza 2 — staging konteyneri")
+    y = _oqi_ildiz("deploy/bin/staging-docker.sh")
+    o = _oqi_ildiz("deploy/bin/tender-staging-docker.namuna")
+    d = _oqi_ildiz("Dockerfile.backend")
+
+    # --- port ajratilgan ---
+    check("yordamchi 8012 da (systemd 8011 dan ajratilgan)",
+          "8012" in y and ":-8012}" in y)
+    check("o'ram portni qotiradi", "PORT=8012" in o)
+    # IZOHLAR sanalmaydi: o'ram 8011 ni TUSHUNTIRISHI mumkin, lekin
+    # unga qarshi HARAKAT qilmasligi kerak.
+    def _amaliy(matn):
+        return [q for q in matn.splitlines()
+                if q.strip() and not q.lstrip().startswith("#")]
+
+    # 8011 ni ESLATISH mumkin (holat chiqarish, izoh), lekin unga
+    # BOG'LANISH yoki uni TO'XTATISH mumkin emas — aynan shu ikkisi
+    # systemd relizi bilan urushga olib kelardi.
+    ozgartiruvchi = ("-p ", "--publish", "PORT=8011", "API_PORT=8011",
+                     "systemctl stop", "systemctl restart", "fuser", "kill")
+    urush = [q for q in _amaliy(o)
+             if "8011" in q and any(t in q for t in ozgartiruvchi)]
+    check("o'ram 8011 ga bog'lanmaydi va uni to'xtatmaydi", not urush,
+          "; ".join(q.strip() for q in urush))
+    check("o'ram 8011 ni faqat o'qiydi/eslatadi",
+          all(("echo" in q or q.lstrip().startswith("PORT=8012"))
+              for q in _amaliy(o) if "8011" in q))
+
+    # --- host tarmog'ida FAQAT loopback ---
+    check("host tarmog'i ishlatiladi", "--network host" in y)
+    check("bog'lanish loopback ga qotirilgan", "-e API_HOST=127.0.0.1" in y)
+    check("0.0.0.0 ga bog'lanmaydi", "API_HOST=0.0.0.0" not in y)
+    check("Dockerfile API_HOST ni sozlanadigan qilgan",
+          "${API_HOST}" in d and "API_HOST=0.0.0.0" in d)
+    check("Dockerfile da qotirilgan --host 0.0.0.0 qolmagan",
+          "--host 0.0.0.0" not in d)
+
+    # --- imtiyoz ---
+    for bayroq, nom in (("--cap-drop ALL", "cap-drop ALL"),
+                        ("no-new-privileges:true", "no-new-privileges")):
+        check(f"yordamchi: {nom}", bayroq in y)
+    for yomon in ("--privileged", "docker.sock", "--user root", "chmod 777"):
+        check(f"yordamchi: {yomon} yo'q", yomon not in y)
+        check(f"o'ram: {yomon} yo'q", yomon not in o)
+
+    # --- o'ram argument shartnomasi ---
+    check("o'ram ixtiyoriy docker argumentini uzatmaydi",
+          'docker "$@"' not in o and "docker $@" not in o)
+    check("o'ram ortiqcha argumentni rad etadi", '"$#" -le 1' in o)
+    check("o'ram imij tegini chaqiruvchidan olmaydi",
+          "sha_ol" in o and "${SHA:0:12}" in o)
+    check("o'ram root talab qiladi", '[ "$(id -u)" = 0 ]' in o)
+    check("o'ram noma'lum amalni rad etadi",
+          "foydalanish:" in o and "exit 2" in o)
+
+    # --- amal ro'yxati YOPIQ: `case` dagi yorliqlar sanab chiqiladi ---
+    import re as _re
+    gavda = o[o.index("case \"$AMAL\" in"):]
+    yorliqlar = set(_re.findall(r"^([a-z]+)\)", gavda, _re.M))
+    check("amallar ro'yxati kutilganidek",
+          yorliqlar == {"tekshir", "qur", "ishga", "sogliq", "toxtat", "holat"},
+          f"topildi: {sorted(yorliqlar)}")
+
+    # --- qaytarilishi: o'ram nginx va systemd ga TEGMAYDI ---
+    # nginx ni O'QISH mumkin (`tekshir` upstream ni ko'rsatadi), lekin
+    # YOZISH mumkin emas — aks holda qadam qaytariladigan bo'lmay qoladi
+    # va nginx egaligi `tender-nginx` dan o'g'irlanadi.
+    nginx_yozish = [q for q in _amaliy(o)
+                    if "nginx" in q and any(t in q for t in
+                        ("nginx -s", "systemctl reload nginx",
+                         "systemctl restart nginx", "sed -i", "tee ",
+                         "> /etc/nginx", ">>/etc/nginx", "> /etc/nginx"))]
+    check("o'ram nginx ni qayta sozlamaydi", not nginx_yozish,
+          "; ".join(q.strip() for q in nginx_yozish))
+    check("o'ram nginx ni faqat o'qiydi",
+          all("grep" in q or "echo" in q
+              for q in _amaliy(o) if "/etc/nginx" in q))
+    check("o'ram systemd relizini to'xtatmaydi",
+          "systemctl stop" not in o and "systemctl disable" not in o)
+    check("o'ram migratsiya qo'llamaydi",
+          "migratsiya.sh" not in o and "schema_patch" not in o)
+
+    # --- sir tarqalmasin ---
+    check("sir buyruq qatoriga tushmaydi (env-file ishlatiladi)",
+          "--env-file" in y and "-e XT_DB_DSN" not in y)
+    check("o'ram muhit faylini root sifatida o'qiydi",
+          "ENV_FILE=/etc/tenderai/staging.env" in o)
+    check("Dockerfile ga sir kirmagan",
+          "XT_DB_DSN=" not in d and "ANTHROPIC_API_KEY=" not in d)
+
+    check("o'ram eval ishlatmaydi",
+          not [q for q in _amaliy(o) if "eval " in q or "eval\t" in q])
+
+    # --- MUHIT RUXSAT RO'YXATI ---
+    # Butun `staging.env` ni uzatish konteynerga MIGRATSIYA roli DSN
+    # sini berardi. Ro'yxat koddan hisoblanadi, chunki qo'lda yozilgani
+    # surilib ketardi: kodga sozlama qo'shiladi, ro'yxat unutiladi va
+    # ilova sukut qiymat bilan JIMGINA noto'g'ri ishlaydi.
+    sys.path.insert(0, os.path.join(ROOT, "deploy", "bin"))
+    import importlib.util as _iu
+    _sp = _iu.spec_from_file_location(
+        "muhit_ruxsat", os.path.join(ROOT, "deploy", "bin", "muhit-ruxsat.py"))
+    _mr = _iu.module_from_spec(_sp)
+    _sp.loader.exec_module(_mr)
+    ruxsat = set(_mr.royxat(ROOT))
+
+    check("o'ram muhit filtridan foydalanadi",
+          "muhit_filtrla" in o and "muhit-ruxsat.py" in o)
+    check("filtrlanmagan muhit fayli konteynerga uzatilmaydi",
+          'TENDERAI_ENVFILE="$ENV_FILE"' not in o)
+
+    # Bilvosita o'qiladigan kalitlar. Regex bilan qurilgan ro'yxat
+    # bularni TUSHIRIB QOLDIRARDI va ilova ishga tushmasdi.
+    for k in ("APP_PUBLIC_URL", "PUBLIC_BASE_URL", "AI_PAID_ENABLED"):
+        check(f"ruxsatda bilvosita kalit: {k}", k in ruxsat)
+    for k in ("XT_DB_DSN", "APP_ENV", "ANTHROPIC_API_KEY"):
+        check(f"ruxsatda kerakli kalit: {k}", k in ruxsat)
+
+    # ENG MUHIMI: konteyner sxemani o'zgartira oladigan rolni OLMAYDI.
+    for k in ("XT_DB_DSN_OWNER", "XT_DB_DSN_TEST_ADMIN", "E2E_PAROL",
+              "E2E_LOGIN", "BACKUP_REMOTE_CMD", "BACKUP_DIR"):
+        check(f"ruxsatda YO'Q (to'g'ri): {k}", k not in ruxsat)
+
+    check("majburiy kalitlar e'lon qilingan",
+          set(_mr.MAJBURIY) == {"APP_ENV", "APP_PUBLIC_URL", "XT_DB_DSN"})
+
+    # `docker --env-file` tirnoqni YECHMAYDI, `systemd EnvironmentFile`
+    # yechadi. Ya'ni tirnoqli DSN da systemd relizi ISHLAB, konteyner
+    # YIQILARDI -- va sabab ko'rinmasdi.
+    check("tirnoq yechiladi", _mr._tirnoq_yech('"a=b"') == "a=b"
+          and _mr._tirnoq_yech("'a=b'") == "a=b"
+          and _mr._tirnoq_yech("a=b") == "a=b")
+
+    # Filtr HAQIQATDA sirni tashlaydimi -- soxta fayl ustida.
+    import tempfile as _tf
+    _d = _tf.mkdtemp()
+    try:
+        _m = os.path.join(_d, "m.env")
+        io.open(_m, "w", encoding="utf-8").write(
+            "APP_ENV=staging\nAPP_PUBLIC_URL=https://x.invalid\n"
+            "XT_DB_DSN=host=127.0.0.1\nXT_DB_DSN_OWNER=host=1 password=SIR\n"
+            "E2E_PAROL=SIR\n")
+        _c = os.path.join(_d, "c.env")
+        _mr.filtr(ROOT, _m, _c)
+        _matn = io.open(_c, encoding="utf-8").read()
+        check("filtr sirni tashlaydi", "SIR" not in _matn, _matn.replace("\n", " | "))
+        check("filtr natijasi 0600",
+              oct(os.stat(_c).st_mode & 0o777) == "0o600")
+    finally:
+        shutil.rmtree(_d, ignore_errors=True)
+
+    # --- hujjat ---
+    h = _oqi_ildiz("docs/docker.md")
+    check("hujjatda qaytarish tartibi bor", "8012" in h)
+    check("hujjatda ruxsat ro'yxati tushuntirilgan",
+          "XT_DB_DSN_OWNER" in h)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -2242,6 +2420,7 @@ def main():
     test_darvoza_stdout_kelishuvi()
     test_darvoza_toliq_daraxt()
     test_0071_tasdigi()
+    test_faza2_staging_konteyneri()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

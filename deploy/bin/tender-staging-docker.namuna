@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# =============================================================================
+# /usr/local/sbin/tender-staging-docker — ROOT O'RAMASI (NAMUNA)
+# =============================================================================
+# FAZA 2. Staging ilovasini konteynerda, systemd relizining YONIDA
+# ko'taradi. nginx ga, PostgreSQL ga va zaxira nusxa tartibiga
+# TEGMAYDI.
+#
+#     sudo tender-staging-docker tekshir     # o'lchaydi, o'zgartirmaydi
+#     sudo tender-staging-docker qur         # imij, o'zgarmas SHA dan
+#     sudo tender-staging-docker ishga       # 8012 da ko'taradi
+#     sudo tender-staging-docker sogliq      # /health va /ready
+#     sudo tender-staging-docker toxtat      # konteynerni olib tashlaydi
+#     sudo tender-staging-docker holat
+#
+# --- NEGA BU O'RAM UMUMAN KERAK ---------------------------------------------
+# YAGONA sabab: `/etc/tenderai/staging.env` root niki va shunday
+# QOLISHI kerak. `XT_DB_DSN` va API kalitlari faqat shu faylda.
+# O'ram uni ROOT sifatida o'qiydi va `--env-file` orqali beradi —
+# sir na buyruq qatoriga, na imij qatlamiga, na jurnalga tushmaydi.
+#
+# --- NIMA QILMAYDI ----------------------------------------------------------
+#   * chaqiruvchidan IXTIYORIY docker argumentini QABUL QILMAYDI;
+#   * chaqiruvchi argumentlarini docker ga UZATMAYDI — amallar
+#     ro'yxati yopiq va har bir docker chaqiruvi shu yerda to'liq yozilgan;
+#   * imij tegini chaqiruvchidan OLMAYDI, o'zi SHA dan hisoblaydi;
+#   * nginx yuqori oqimini O'ZGARTIRMAYDI (bu `tender-nginx` ishi);
+#   * systemd relizini TO'XTATMAYDI;
+#   * bazaga migratsiya QO'LLAMAYDI.
+#
+# --- QAYTARISH --------------------------------------------------------------
+# Bu qadam qaytariladigan: `toxtat` konteynerni o'chiradi, xolos.
+# Trafik hamon systemd relizida (8011) bo'lgani uchun foydalanuvchi
+# hech narsa sezmaydi. Batafsil: docs/docker.md §9.
+# =============================================================================
+set -euo pipefail
+
+ENV_FILE=/etc/tenderai/staging.env
+REPO=/opt/tenderai/repo.git
+PORT=8012                       # QOTIRILGAN. 8011 — systemd relizi.
+
+[ "$(id -u)" = 0 ] || { echo "root kerak: sudo $0 $*" >&2; exit 1; }
+[ -r "$ENV_FILE" ] || { echo "muhit fayli o'qilmadi: $ENV_FILE" >&2; exit 1; }
+
+# ARGUMENT SHARTNOMASI: FAQAT amal nomi. Boshqa hech nima.
+AMAL="${1:-}"
+[ "$#" -le 1 ] || { echo "ortiqcha argument: bu o'ram faqat amal nomini oladi" >&2; exit 2; }
+
+sha_ol() {
+    local s
+    s="$(sudo -u tenderai git --git-dir="$REPO" rev-parse 'main^{commit}')"
+    [[ "$s" =~ ^[0-9a-f]{40}$ ]] || { echo "SHA aniqlanmadi" >&2; exit 1; }
+    printf '%s' "$s"
+}
+
+daraxt_ol() {   # $1 = SHA, $2 = katalog
+    sudo -u tenderai git --git-dir="$REPO" archive "$1" | tar -x -C "$2"
+    chmod +x "$2"/deploy/bin/*.sh
+}
+
+# --- MUHIT FILTRI -----------------------------------------------------------
+# Butun `staging.env` ni konteynerga uzatish unga MIGRATSIYA roli DSN
+# sini (`XT_DB_DSN_OWNER`), E2E parolini va zaxira buyrug'ini ham
+# berardi. Ilova jarayoni buzilsa hujumchi sxemani o'zgartira oladigan
+# rolni qo'lga kiritardi -- `tai_service` ga CREATEDB bermaslik qoidasi
+# shu bilan ma'nosiz bo'lardi.
+#
+# Ruxsat ro'yxati QO'LDA YOZILMAYDI, shu SHA dagi KODDAN hisoblanadi
+# (`deploy/bin/muhit-ruxsat.py`) -- qo'lda ro'yxat surilib ketardi.
+muhit_filtrla() {   # $1 = daraxt, $2 = chiqish fayli
+    python3 "$1/deploy/bin/muhit-ruxsat.py" filtr "$ENV_FILE" "$2"
+}
+
+case "$AMAL" in
+tekshir)
+    echo "docker       : $(docker version --format '{{.Server.Version}}' 2>/dev/null || echo YO\'Q)"
+    SHA="$(sha_ol)";  QISQA="${SHA:0:12}"
+    echo "main SHA     : $SHA"
+    echo "imij         : $(docker images -q "tenderai-backend:$QISQA" | head -1 || true)"
+    echo "XT_DB_DSN    : $(grep -q '^XT_DB_DSN=' "$ENV_FILE" && echo bor || echo YO\'Q)"
+    echo "APP_PUBLIC_URL: $(grep -q '^APP_PUBLIC_URL=' "$ENV_FILE" && echo bor || echo YO\'Q)"
+    echo "systemd 8011 : $(systemctl is-active tenderai-api@staging 2>&1)"
+    # MUHIT FILTRI QURUQ YURGIZILADI: qaysi kalit tushayotganini
+    # o'zgartirishdan OLDIN ko'rsatadi. Qiymatlar chop etilmaydi.
+    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    trap 'rm -rf "$TMP"' EXIT
+    daraxt_ol "$SHA" "$TMP"
+    echo "--- muhit filtri ---"
+    muhit_filtrla "$TMP" "$TMP/tekshir.env" || true
+    echo "konteyner    : $(docker ps -a --filter 'name=^tenderai-staging$' --format '{{.Status}}' || echo yo\'q)"
+    # nginx hozir KIMGA ishora qilyapti — o'zgartirmasdan, faqat aytadi.
+    echo "nginx upstream: $(grep -rhoE 'proxy_pass +http://127\.0\.0\.1:[0-9]+' /etc/nginx 2>/dev/null | grep -oE '[0-9]+$' | sort -u | tr '\n' ' ')"
+    ;;
+
+qur)
+    SHA="$(sha_ol)"; QISQA="${SHA:0:12}"
+    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    trap 'rm -rf "$TMP"' EXIT
+    daraxt_ol "$SHA" "$TMP"
+    docker build -f "$TMP/Dockerfile.backend" \
+                 -t "tenderai-backend:$QISQA" "$TMP"
+    echo "[qur] tenderai-backend:$QISQA tayyor (SHA $SHA)"
+    ;;
+
+ishga)
+    SHA="$(sha_ol)"; QISQA="${SHA:0:12}"
+    docker image inspect "tenderai-backend:$QISQA" >/dev/null 2>&1 \
+        || { echo "imij yo'q, avval: sudo $0 qur" >&2; exit 1; }
+    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    trap 'rm -rf "$TMP"' EXIT
+    daraxt_ol "$SHA" "$TMP"
+    # FILTRLANGAN muhit. 0600, root niki, `trap` bilan o'chadi.
+    FILTR="$TMP/staging.filtrlangan.env"
+    muhit_filtrla "$TMP" "$FILTR" \
+        || { echo "muhit filtri yiqildi -- konteyner KO'TARILMADI" >&2; exit 1; }
+
+    # Hayot sikli YORDAMCHIDA — bu yerda TAKRORLANMAYDI.
+    TENDERAI_ENVFILE="$FILTR" STAGING_DOCKER_PORT="$PORT" \
+        "$TMP/deploy/bin/staging-docker.sh" ishga "$QISQA"
+    ;;
+
+sogliq)
+    TMP="$(mktemp -d /tmp/tenderai-staging-docker.XXXXXX)"
+    trap 'rm -rf "$TMP"' EXIT
+    daraxt_ol "$(sha_ol)" "$TMP"
+    STAGING_DOCKER_PORT="$PORT" "$TMP/deploy/bin/staging-docker.sh" sogliq
+    ;;
+
+toxtat)  docker rm -f tenderai-staging >/dev/null 2>&1 \
+             && echo "[toxtat] tenderai-staging olib tashlandi" \
+             || echo "[toxtat] konteyner ishlamayapti"
+         echo "[toxtat] trafik systemd relizida (8011) — o'zgarmadi" ;;
+
+holat)   docker ps -a --filter 'name=^tenderai-staging$' \
+             --format '{{.Names}} {{.Status}} {{.Image}}' ;;
+
+*) echo "foydalanish: $0 <tekshir|qur|ishga|sogliq|toxtat|holat>" >&2; exit 2 ;;
+esac
