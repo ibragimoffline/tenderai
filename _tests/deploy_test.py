@@ -2317,17 +2317,63 @@ def test_faza2_staging_konteyneri():
     check("o'ram eval ishlatmaydi",
           not [q for q in _amaliy(o) if "eval " in q or "eval\t" in q])
 
-    # --- MUHIT RUXSAT RO'YXATI ---
-    # Butun `staging.env` ni uzatish konteynerga MIGRATSIYA roli DSN
-    # sini berardi. Ro'yxat koddan hisoblanadi, chunki qo'lda yozilgani
-    # surilib ketardi: kodga sozlama qo'shiladi, ro'yxat unutiladi va
-    # ilova sukut qiymat bilan JIMGINA noto'g'ri ishlaydi.
-    sys.path.insert(0, os.path.join(ROOT, "deploy", "bin"))
     import importlib.util as _iu
     _sp = _iu.spec_from_file_location(
         "muhit_ruxsat", os.path.join(ROOT, "deploy", "bin", "muhit-ruxsat.py"))
     _mr = _iu.module_from_spec(_sp)
     _sp.loader.exec_module(_mr)
+    _mr_manbalar = set(_mr.MANBALAR)
+
+    # --- IMIJ `api/` IMPORT QILADIGAN HAMMA NARSANI SAQLASIN ---
+    # `api/yuklama.py` ildizdagi `etl_embed` va `etl_doc_text` ni
+    # import qiladi. Ular imijga tushmasa:
+    #
+    #   * `sniff_magic`, `extract`, `chunk_text` -> `ImportError`,
+    #     ya'ni FAYL YUKLASH BUTUNLAY ISHLAMAYDI;
+    #   * `CHUNK_SIZE` import qilingan joyda zaxira BOR (1200/150),
+    #     ya'ni ilova YIQILMASDI -- host relizidan boshqacha
+    #     bo'laklardi. Jimgina paritet farqi: eng yomon turi.
+    #
+    # Darvoza to'plami buni USHLAMAYDI: `Dockerfile.gate` butun
+    # daraxtni ko'chiradi, `Dockerfile.backend` esa tanlab ko'chiradi.
+    df = _oqi_ildiz("Dockerfile.backend")
+    kochirilgan = set()
+    for q in df.splitlines():
+        if q.startswith("COPY "):
+            for b in q[len("COPY "):].split():
+                if b.endswith(".py"):
+                    kochirilgan.add(os.path.basename(b)[:-3])
+                elif b.rstrip("/") == "api":
+                    kochirilgan.add("api")
+
+    import re as _re2
+    kerak = set()
+    for k, _d, fayllar in os.walk(os.path.join(ROOT, "api")):
+        for f in fayllar:
+            if not f.endswith(".py"):
+                continue
+            matn = io.open(os.path.join(k, f), encoding="utf-8").read()
+            for m in _re2.finditer(r"^\s*(?:from|import)\s+([a-z_][a-z0-9_]*)",
+                                   matn, _re2.M):
+                nom = m.group(1)
+                # Ildizda SHU nomli modul bormi -- bo'lsa, u imijga kerak.
+                if os.path.isfile(os.path.join(ROOT, nom + ".py")):
+                    kerak.add(nom)
+    yetishmaydi = sorted(kerak - kochirilgan)
+    check("imij `api/` import qiladigan ildiz modullarini saqlaydi",
+          not yetishmaydi, "yetishmaydi: " + ", ".join(yetishmaydi))
+
+    # Ruxsat ro'yxati imij tarkibi bilan mos tursin: import qilinadigan
+    # modul muhitdan o'qisa, uning kaliti ham uzatilishi kerak.
+    for m in kerak:
+        check(f"ruxsat ro'yxati {m} ni skanerlaydi",
+              m + ".py" in _mr_manbalar or m in _mr_manbalar)
+
+    # --- MUHIT RUXSAT RO'YXATI ---
+    # Butun `staging.env` ni uzatish konteynerga MIGRATSIYA roli DSN
+    # sini berardi. Ro'yxat koddan hisoblanadi, chunki qo'lda yozilgani
+    # surilib ketardi: kodga sozlama qo'shiladi, ro'yxat unutiladi va
+    # ilova sukut qiymat bilan JIMGINA noto'g'ri ishlaydi.
     ruxsat = set(_mr.royxat(ROOT))
 
     check("o'ram muhit filtridan foydalanadi",

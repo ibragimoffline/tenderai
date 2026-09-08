@@ -44,6 +44,14 @@ RUN pip install --no-cache-dir \
         -r requirements-api.lock
 
 COPY api/ ./api/
+# ILDIZDAGI MODULLAR. `api/yuklama.py` bularni import qiladi va
+# ularsiz FAYL YUKLASH `ImportError` bilan yiqiladi: `sniff_magic`,
+# `extract` va `chunk_text` chaqiruvlarida zaxira yo'l YO'Q.
+#
+# `CHUNK_SIZE` import qilingan joyda esa zaxira BOR (1200/150), ya'ni
+# fayl tushib qolsa ilova YIQILMASDI — host relizidan BOSHQACHA
+# bo'laklardi. Jimgina paritet farqi: eng yomon turi.
+COPY etl_embed.py etl_doc_text.py ./
 COPY migratsiya.py migratsiya_manifest.tsv ./
 COPY schema_patch_*.sql ./
 
