@@ -2615,6 +2615,19 @@ def test_faza2_staging_konteyneri():
                   'pg_dump "$XT_DB_DSN_OWNER"' in bk
                   and 'pg_dump "$XT_DB_DSN"' not in bk)
             e1b = dict(e_z); e1b["BACKUP_DIR"] = os.path.join(tz, "b1b")
+            # MUHITDAN HAM OLIB TASHLANADI.
+            #
+            # O'LCHANGAN NUQSON (2026-09-09, darvoza): faylga yozmaslik
+            # YETARLI EMAS. `backup.sh` muhit faylini `set -a` bilan
+            # SOURCE qiladi; fayl o'zgaruvchini o'rnatmasa, JARAYON
+            # MUHITIDAN meros qolgan qiymat o'z kuchida qoladi.
+            #
+            # Darvoza `XT_DB_DSN_OWNER` ni uzatadi, ya'ni u yerda
+            # qo'riqcha SINALMAY qolardi va tekshiruv `kod=0` olardi.
+            # Mahalliy yurishda o'zgaruvchi yo'q edi va test YASHIL
+            # bo'lardi -- ya'ni u faqat mening mashinamda haqiqatni
+            # o'lchardi.
+            e1b.pop("XT_DB_DSN_OWNER", None)
             io.open(env_z, "w", encoding="utf-8", newline=chr(10)).write(
                 f"XT_DB_DSN={dsn}\n")          # EGASI ATAYLAB YO'Q
             r1b = subprocess.run(
