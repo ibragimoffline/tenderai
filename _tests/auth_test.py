@@ -694,8 +694,21 @@ def test_db():
             if erp_yopiq:
                 # HUQUQ bilan yopiq — surat solishtirish MUMKIN EMAS va
                 # KERAK EMAS: yozish imkoni umuman yo'q.
-                check(True, "erp.* surati o'tkazib yuborildi — huquq "
-                            "darajasida yozib bo'lmaydi")
+                #
+                # ILGARI BU YERDA `check(True, ...)` turardi — SHARTSIZ
+                # o'tish. U hech nima o'lchamasdi va hisobda yashil
+                # bo'lib ko'rinardi. Endi HUQUQNING O'ZI tasdiqlanadi:
+                # "o'qiy olmadim" bilan "o'qishga huquqim yo'q" bir xil
+                # emas -- birinchisi tarmoq yoki xato bo'lishi mumkin.
+                check(not db.scalar(
+                    "SELECT has_table_privilege(current_user, "
+                    "       'erp.app_user', 'SELECT')"),
+                      "`erp.app_user` ga SELECT huquqi YO'Q (surat o'rniga "
+                      "huquq chegarasi o'lchandi)")
+                check(not db.scalar(
+                    "SELECT has_table_privilege(current_user, "
+                    "       'erp.opportunity', 'SELECT')"),
+                      "`erp.opportunity` ga SELECT huquqi YO'Q")
             else:
                 after = db.query_one(ERP_SNAPSHOT_SQL)
                 eq("erp.app_user soni tegilmadi", after["u_n"], erp_before["u_n"])
