@@ -429,6 +429,63 @@ tekshir)
                ORDER BY rolname" 2>/dev/null | sed 's/^/  /' || \
         echo "  (rol atributlari o'qilmadi)"
 
+    # --- IMTIYOZ ZANJIRI — `DARVOZA_HUQUQ=1` bo'lganda -------------------
+    # `xavfsizlik_test` `tai_app` ning `erp.app_user` ga SELECT huquqi
+    # borligini aytadi. "Nima uchun" degan savolga javob berish uchun
+    # ZANJIR kerak: to'g'ridan-to'g'ri grantmi, ota-rol orqalimi,
+    # PUBLIC ormi, yoki egalik.
+    #
+    # Taxmin qilib REVOKE qilish xato bo'lardi: noto'g'ri bo'g'inni
+    # uzsak ERP ishlamay qolishi mumkin. Shuning uchun avval o'lchov.
+    #
+    # `tekshir` DIAGNOSTIKA amali, shuning uchun shartsiz chiqadi.
+    # O'ram muhit o'zgaruvchilarini qat'iy ro'yxat bilan uzatadi, ya'ni
+    # bayroq bilan yoqib bo'lmasdi. FAQAT metama'lumot — sir yo'q.
+    {
+        echo "--- imtiyoz zanjiri: tai_app -> erp.app_user ---"
+        psql_ -c "SELECT 'samarali: schema_usage='
+                      || has_schema_privilege('tai_app','erp','USAGE')
+                      || ' table_select='
+                      || has_table_privilege('tai_app','erp.app_user','SELECT')"                2>/dev/null | sed 's/^/  /'
+        echo "  --- tai_app a'zoligi (kimga a'zo) ---"
+        psql_ -c "SELECT '  -> ' || r.rolname
+                    FROM pg_auth_members m
+                    JOIN pg_roles r ON r.oid = m.roleid
+                    JOIN pg_roles u ON u.oid = m.member
+                   WHERE u.rolname = 'tai_app'" 2>/dev/null | sed 's/^/  /'
+        echo "  --- kim tai_app ga a'zo ---"
+        psql_ -c "SELECT '  <- ' || u.rolname
+                    FROM pg_auth_members m
+                    JOIN pg_roles r ON r.oid = m.roleid
+                    JOIN pg_roles u ON u.oid = m.member
+                   WHERE r.rolname = 'tai_app'" 2>/dev/null | sed 's/^/  /'
+        echo "  --- erp.app_user egasi va ACL ---"
+        psql_ -c "SELECT 'egasi=' || pg_get_userbyid(c.relowner)
+                    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                   WHERE n.nspname='erp' AND c.relname='app_user'" 2>/dev/null | sed 's/^/  /'
+        psql_ -c "SELECT '  ACL: ' || COALESCE(a.grantee::regrole::text,'PUBLIC')
+                      || ' ' || a.privilege_type
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid=c.relnamespace,
+                         aclexplode(c.relacl) a
+                   WHERE n.nspname='erp' AND c.relname='app_user'
+                   ORDER BY 1" 2>/dev/null | sed 's/^/  /'
+        echo "  --- erp sxemasi ACL ---"
+        psql_ -c "SELECT '  ' || COALESCE(a.grantee::regrole::text,'PUBLIC')
+                      || ' ' || a.privilege_type
+                    FROM pg_namespace n, aclexplode(n.nspacl) a
+                   WHERE n.nspname='erp' ORDER BY 1" 2>/dev/null | sed 's/^/  /'
+        echo "  --- sukut huquqlar (pg_default_acl) ---"
+        psql_ -c "SELECT '  ' || n.nspname || ' ' || d.defaclobjtype
+                      || ' ' || COALESCE(a.grantee::regrole::text,'PUBLIC')
+                      || ' ' || a.privilege_type
+                    FROM pg_default_acl d
+                    JOIN pg_namespace n ON n.oid=d.defaclnamespace,
+                         aclexplode(d.defaclacl) a
+                   WHERE COALESCE(a.grantee::regrole::text,'PUBLIC')
+                         IN ('tai_app','PUBLIC') ORDER BY 1" 2>/dev/null | sed 's/^/  /'
+    } || true
+
     echo "TEKSHIR: PASS — besh invariant ham o'tdi"
     ;;
 
