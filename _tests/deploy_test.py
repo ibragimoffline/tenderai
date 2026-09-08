@@ -2501,6 +2501,77 @@ def test_faza2_staging_konteyneri():
     check("production shoxi relis-darvoza.sh ni chaqirmaydi",
           "relis-darvoza.sh" not in prod_bolim, prod_bolim[:80])
 
+    # --- BO'SH ZAXIRA "ZAXIRA BOR" DEB KO'RINMASIN ---
+    # O'LCHANGAN NUQSON (2026-09-08): `pg_dump` autentifikatsiyada
+    # yiqildi, `set -e` skriptni to'xtatdi, LEKIN `pg_dump` faylni
+    # allaqachon yaratgan edi. Katalogda 0 baytli, checksumsiz dump
+    # qoldi -- va u ENG YANGI fayl bo'lib turdi.
+    #
+    # `restore-test.sh` eng yangi dumpni tanlaydi va checksum yo'qligi
+    # faqat OGOHLANTIRISH edi. Ya'ni insident paytidagi haqiqiy
+    # tiklash 0 baytli fayldan tiklashga urinardi: zaxira "bor" edi,
+    # lekin BO'SH edi va buni hech narsa aytmasdi.
+    #
+    # Bu bo'lim skriptlarni MATN sifatida emas, YURGIZIB tekshiradi.
+    bash_z = _mashq_bash()
+    if not bash_z:
+        check("bash yo'q — zaxira yurgizib tekshirilmadi", True)
+    else:
+        with tempfile.TemporaryDirectory() as tz:
+            env_z = os.path.join(tz, "e.env")
+            # PORT 1: hech kim tinglamaydi -> ulanish TEZ rad etiladi.
+            # Haqiqiy PostgreSQL ga tayanmaymiz -- sinov har joyda
+            # bir xil yursin.
+            dsn = ('"host=127.0.0.1 port=1 dbname=yoq user=yoq '
+                   'password=yoq connect_timeout=2"')
+            io.open(env_z, "w", encoding="utf-8", newline=chr(10)).write(
+                f"XT_DB_DSN={dsn}\nXT_DB_DSN_OWNER={dsn}\n")
+            e_z = dict(os.environ)
+            e_z["TENDERAI_ENVFILE"] = env_z
+            e_z["PGPASSFILE"] = os.devnull
+
+            # 1) `pg_dump` yiqilsa YARIM FAYL QOLMASIN.
+            e1 = dict(e_z); e1["BACKUP_DIR"] = os.path.join(tz, "b1")
+            subprocess.run([bash_z, os.path.join(D, "bin", "backup.sh"),
+                            "staging"], capture_output=True, text=True,
+                           env=e1, timeout=90, stdin=subprocess.DEVNULL)
+            qoldiq = os.path.join(tz, "b1", "staging")
+            check("yiqilgan zaxira yarim fayl QOLDIRMAYDI",
+                  not os.path.isdir(qoldiq) or not os.listdir(qoldiq),
+                  str(os.listdir(qoldiq)) if os.path.isdir(qoldiq) else "")
+
+            # 2) BO'SH dump RAD ETILSIN.
+            b2 = os.path.join(tz, "b2", "staging")
+            os.makedirs(b2)
+            io.open(os.path.join(b2, "tenderai-staging-20260101-000000.dump"),
+                    "w").write("")
+            e2 = dict(e_z); e2["BACKUP_DIR"] = os.path.join(tz, "b2")
+            r2 = subprocess.run(
+                [bash_z, os.path.join(D, "bin", "restore-test.sh"), "staging"],
+                capture_output=True, text=True, env=e2, timeout=90,
+                stdin=subprocess.DEVNULL)
+            check("BO'SH dump tiklashda RAD ETILADI",
+                  r2.returncode != 0
+                  and "0 bayt" in (r2.stdout + r2.stderr),
+                  f"kod={r2.returncode}")
+
+            # 3) CHECKSUMSIZ dump RAD ETILSIN.
+            # `backup.sh` sha256 ni dump TUGAGACH yozadi, ya'ni uning
+            # yo'qligi "tekshirilmadi" emas, "TUGALLANMAGAN" degani.
+            b3 = os.path.join(tz, "b3", "staging")
+            os.makedirs(b3)
+            io.open(os.path.join(b3, "tenderai-staging-20260101-000000.dump"),
+                    "w").write("xxxx")
+            e3 = dict(e_z); e3["BACKUP_DIR"] = os.path.join(tz, "b3")
+            r3 = subprocess.run(
+                [bash_z, os.path.join(D, "bin", "restore-test.sh"), "staging"],
+                capture_output=True, text=True, env=e3, timeout=90,
+                stdin=subprocess.DEVNULL)
+            check("CHECKSUMSIZ dump tiklashda RAD ETILADI",
+                  r3.returncode != 0
+                  and "sha256 fayli YO'Q" in (r3.stdout + r3.stderr),
+                  f"kod={r3.returncode}")
+
     # --- DARVOZA O'Z ICHIDA QAYTA CHAQIRILMASIN ---
     # O'LCHANGAN NUQSON (2026-09-08): halqa
     #     darvoza -> run_tests -> deploy_test -> darvoza

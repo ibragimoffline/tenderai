@@ -57,6 +57,32 @@ FAYL="${KATALOG}/tenderai-${MUHIT}-${STAMP}.dump"
 mkdir -p "$KATALOG"
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 
+# --- YARIM DUMP QOLMASIN ----------------------------------------------------
+# O'LCHANGAN NUQSON (2026-09-08): `pg_dump` autentifikatsiyada
+# yiqildi va `set -e` skriptni darhol to'xtatdi. Lekin `pg_dump`
+# faylni ALLAQACHON yaratgan edi, ya'ni katalogda
+#
+#     tenderai-production-20260908-023858.dump   (0 bayt, .sha256 YO'Q)
+#
+# qolib ketdi -- va u katalogdagi ENG YANGI fayl bo'lib turdi.
+#
+# NEGA BU XAVFLI: `restore-test.sh` eng yangi dumpni tanlaydi. Ya'ni
+# navbatdagi tiklash sinovi -- va yomoni, INSIDENT PAYTIDAGI HAQIQIY
+# TIKLASH -- 0 baytli fayldan tiklashga urinardi. Zaxira "bor" edi,
+# lekin u BO'SH edi va buni hech narsa aytmasdi.
+#
+# `trap` muvaffaqiyatsiz tugashda faylni o'chiradi. Yo'q zaxira --
+# yomon; BO'SH zaxira -- undan ham yomon, chunki u tiklanadi deb
+# o'ylatadi.
+TUGADI=0
+yarimni_ochir() {
+    if [ "$TUGADI" -eq 0 ] && [ -n "${FAYL:-}" ] && [ -f "$FAYL" ]; then
+        log "XATO: zaxira tugallanmadi -> yarim fayl o'chirilmoqda: $FAYL"
+        rm -f "$FAYL" "${FAYL}.sha256"
+    fi
+}
+trap yarimni_ochir EXIT
+
 log "zaxira boshlandi -> $FAYL"
 # `--no-owner --no-privileges`: tiklash BOSHQA rol bilan ham ishlasin
 # (tiklash mashqi vaqtinchalik bazaga tiklaydi).
@@ -212,3 +238,6 @@ done
 
 QOLGAN="$(find "$KATALOG" -maxdepth 1 -name '*.dump' | wc -l)"
 log "TUGADI. Katalogda $QOLGAN ta zaxira."
+
+# HAMMASI O'TDI. `trap` endi faylga tegmaydi.
+TUGADI=1
