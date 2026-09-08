@@ -99,7 +99,29 @@ def yurgiz(yol: str, rejim_nomi: str) -> Tuple[str, int, float, str, str]:
     qilishning imkoni yo'q edi. Endi chiqish faylga yoziladi.
     """
     nom = os.path.basename(yol)[:-3]
-    args = [sys.executable, yol] + REJIM[rejim_nomi]
+    # BOLA INTERPRETATORI — `sys.executable` GA TAYANMAYMIZ.
+    #
+    # O'LCHANGAN NUQSON (2026-09-08): darvozada beshta to'plam
+    # `ModuleNotFoundError: dotenv` berardi. Bolaning O'ZIDAN so'ralgan
+    # tashxis sababni ko'rsatdi:
+    #
+    #     executable=/usr/bin/python3
+    #     prefix=/usr  base=/usr
+    #     find_spec=None
+    #
+    # Ya'ni bola TIZIM pythonida yurardi, reliz venv ida emas — u yerda
+    # esa `dotenv` yo'q. Ota jarayon venv da bo'lsa ham `sys.executable`
+    # venv ga yechilmagan (venv `bin/python` simvolik havola, va
+    # yechilgan haqiqiy yo'l yonida `pyvenv.cfg` yo'q).
+    #
+    # Nima uchun FAQAT BESHTASI yiqilardi: qolgan to'plamlar `dotenv`
+    # ni try/except bilan oladi yoki umuman ishlatmaydi — ya'ni bitta
+    # muhit nuqsoni BESHTA "sinov yiqildi" bo'lib ko'rinardi.
+    #
+    # `TENDERAI_PY` — `relis-darvoza.sh` da allaqachon bor kelishuv.
+    # Berilmasa xulq o'zgarmaydi.
+    bola_py = os.environ.get("TENDERAI_PY") or sys.executable
+    args = [bola_py, yol] + REJIM[rejim_nomi]
 
     # BOLAGA UTF-8 MAJBURAN BERILADI. Bu yurgizuvchining o'zi UTF-8
     # bo'lgani yetarli emas — har bola O'Z oqimini o'zi ochadi.
