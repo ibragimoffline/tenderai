@@ -400,6 +400,35 @@ tekshir)
         echo "OGOHLANTIRISH: ${_gate} ta darvoza bazasi qolgan —" >&2
         echo "               'tozala <nom>' bilan olib tashlang." >&2; }
 
+    # --- ROL ATRIBUTLARI — KLASTER DARAJASI, SIRSIZ -----------------------
+    # NEGA KERAK: `schema_patch_huquq.sql` migratsiyasi
+    #
+    #     ALTER ROLE tai_app NOSUPERUSER NOCREATEDB ...
+    #
+    # yuboradi va PostgreSQL `SUPERUSER` atributini o'zgartirish uchun
+    # -- HATTO OLIB TASHLASH uchun ham -- superuser talab qiladi.
+    # Ya'ni bo'sh bazadan tiklash superuser'siz to'xtaydi (o'lchandi
+    # 2026-09-09, darvoza).
+    #
+    # Qaror qabul qilishdan OLDIN rollarning HAQIQIY holatini bilish
+    # kerak: agar ular allaqachon qattiqlashtirilgan bo'lsa,
+    # migratsiya ularni O'ZGARTIRISHI emas, TEKSHIRISHI kerak.
+    #
+    # FAQAT METAMA'LUMOT: parol ham, DSN ham chiqmaydi.
+    echo "--- rol atributlari (klaster) ---"
+    psql_ -c "SELECT rolname
+                     || ' super='   || rolsuper
+                     || ' createdb='|| rolcreatedb
+                     || ' createrole=' || rolcreaterole
+                     || ' bypassrls=' || rolbypassrls
+                     || ' replication=' || rolreplication
+                     || ' login='   || rolcanlogin
+                FROM pg_roles
+               WHERE rolname IN ('tai_app','tai_service',
+                                 'tai_test_admin','tai_owner')
+               ORDER BY rolname" 2>/dev/null | sed 's/^/  /' || \
+        echo "  (rol atributlari o'qilmadi)"
+
     echo "TEKSHIR: PASS — besh invariant ham o'tdi"
     ;;
 
