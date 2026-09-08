@@ -812,7 +812,12 @@ for nom in x.get("yiqilgan") or []:
     # naqshga tushmasa, ular yozilgani bilan darvoza jurnaliga
     # YETIB BORMAYDI: aynan shu bo'ldi va `dotenv` sababi yana bir
     # yurishga cho'zildi.
-    RX = re.compile(r"\[FAIL\]|\[XATO\]|\[tashxis\]|YIQILDI:|Traceback"
+    # QAVSSIZ SHAKL HAM OLINADI. To'plamlar ikki uslubda yozadi:
+    # `[XATO] nom` va `XATO  nom: sabab` (masalan `pricing_test`,
+    # `notify_test`). Faqat qavslisini qidirish `pricing_test` ning
+    # yagona yiqilgan tekshiruvini KO'RINMAS qilgan edi.
+    RX = re.compile(r"\[FAIL\]|\[XATO\]|\[tashxis\]|^\s*XATO\s|^\s*FAIL\s"
+                    r"|YIQILDI:|Traceback"
                     r"|AssertionError|Error:|error:|Exception"
                     r"|kutilgan|expected|actual")
     tanlangan = set()
