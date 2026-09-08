@@ -53,19 +53,71 @@ BEGIN;
 -- ---------------------------------------------------------------------
 -- 1) Rol
 -- ---------------------------------------------------------------------
+-- BU BO'LIM ROLNI YARATMAYDI VA O'ZGARTIRMAYDI — TEKSHIRADI.
+--
+-- ILGARI shunday edi:
+--     CREATE ROLE tai_app NOLOGIN INHERIT;          -- CREATEROLE kerak
+--     ALTER ROLE  tai_app NOSUPERUSER NOCREATEDB …; -- SUPERUSER kerak
+--
+-- O'LCHANGAN (2026-09-09, darvoza): bo'sh bazadan qayta qurish
+-- 57-migratsiyada to'xtardi:
+--
+--     permission denied to alter role
+--     DETAIL: Only roles with the SUPERUSER attribute may change
+--             the SUPERUSER attribute.
+--
+-- MUHIM TAFSILOT: `tai_app` O'SHA PAYTDA ALLAQACHON `NOSUPERUSER` edi.
+-- Ya'ni PostgreSQL imtiyozni buyruq BO'SH ISH bo'lganda ham talab
+-- qiladi. Demak "zararsiz idempotent himoya" aslida butun tiklash
+-- yo'lini superuser'ga bog'lab qo'ygan edi.
+--
+-- MAS'ULIYAT AJRATILDI:
+--   BOOTSTRAP (superuser, bir marta)  -- rolni YARATADI va klaster
+--                                        atributlarini o'rnatadi;
+--                                        `deploy/sql/bootstrap-rollar.sql`
+--   MIGRATSIYA (egasi roli)           -- rol holatini TEKSHIRADI va
+--                                        baza ichidagi huquqlarni beradi.
+--
+-- SILJISH JIMGINA O'TMAYDI. Rolda taqiqlangan klaster atributi bo'lsa
+-- migratsiya TO'XTAYDI. U buni O'ZI TUZATMAYDI: tuzatish superuser
+-- aralashuvini talab qiladi va bunday hodisa ko'rinishi kerak, jimgina
+-- "tuzatilib" o'tib ketmasligi kerak.
 DO $$
+DECLARE
+    r      record;
+    yomon  text[] := ARRAY[]::text[];
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tai_app') THEN
-        -- NOLOGIN: bu guruh roli, u bilan to'g'ridan-to'g'ri
-        -- ulanilmaydi. INHERIT — a'zo rol huquqlarni oladi.
-        CREATE ROLE tai_app NOLOGIN INHERIT;
-        RAISE NOTICE 'tai_app roli yaratildi.';
-    END IF;
-END $$;
+    SELECT rolsuper, rolcreatedb, rolcreaterole, rolbypassrls,
+           rolreplication, rolcanlogin
+      INTO r
+      FROM pg_roles WHERE rolname = 'tai_app';
 
--- Superuser bo'lmasligi ANIQ ta'minlanadi: rol qo'lda o'zgartirilgan
--- bo'lsa ham bu patch uni qaytaradi.
-ALTER ROLE tai_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION
+            'ROL YO''Q: tai_app. Bu migratsiya rol YARATMAYDI.'
+            USING HINT = 'Avval bootstrap: deploy/sql/bootstrap-rollar.sql '
+                         '(superuser, bir marta) — docs/deploy.md §4.';
+    END IF;
+
+    IF r.rolsuper       THEN yomon := yomon || 'SUPERUSER';   END IF;
+    IF r.rolcreatedb    THEN yomon := yomon || 'CREATEDB';    END IF;
+    IF r.rolcreaterole  THEN yomon := yomon || 'CREATEROLE';  END IF;
+    IF r.rolbypassrls   THEN yomon := yomon || 'BYPASSRLS';   END IF;
+    IF r.rolreplication THEN yomon := yomon || 'REPLICATION'; END IF;
+    IF r.rolcanlogin    THEN yomon := yomon || 'LOGIN';       END IF;
+
+    IF array_length(yomon, 1) IS NOT NULL THEN
+        RAISE EXCEPTION
+            'SECURITY_ROLE_DRIFT: tai_app taqiqlangan klaster atribut(lar)iga ega: %',
+            array_to_string(yomon, ', ')
+            USING HINT = 'Tuzatish SUPERUSER aralashuvini talab qiladi: '
+                         'ALTER ROLE tai_app NOSUPERUSER NOCREATEDB '
+                         'NOCREATEROLE NOBYPASSRLS NOREPLICATION NOLOGIN; '
+                         'Sabab tekshirilsin — rol qo''lda ko''tarilgan.';
+    END IF;
+
+    RAISE NOTICE 'tai_app: klaster atributlari toza (tekshirildi).';
+END $$;
 
 -- ---------------------------------------------------------------------
 -- 2) public — ilova ishlaydigan joy
