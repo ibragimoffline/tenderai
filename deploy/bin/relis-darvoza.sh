@@ -178,6 +178,35 @@ log "xulosa: $XULOSA"
 if [ "$YIQILGAN" -ne 0 ]; then
     grep -E '^\s*\[XATO\]|^YIQILGAN:' "$LOG" >&2 || true
 fi
+# --- YIQILGAN TO'PLAMLAR TAFSILOTI -----------------------------------------
+# O'LCHANGAN NUQSON (2026-09-09, haqiqiy reliz): reliz yo'li faqat
+# "N ta to'plam yiqildi" derdi. Har to'plamning jurnali
+# `_test_natija/` da bor, LEKIN yiqilgach `deploy.sh` yarim relizni
+# o'chiradi va tafsilot u bilan ketadi.
+#
+# Natijada `xavfsizlik_test 135/136` degan xabar qoldi va QAYSI
+# tekshiruv yiqilgani noma'lum bo'ldi -- javob uchun butun relizni
+# qayta yurgizish kerak bo'lardi (~6 daqiqa).
+#
+# Mustaqil darvozada bunday tafsilot allaqachon bor edi; reliz
+# yo'lida yo'q edi.
+if [ "$YIQILGAN" -ne 0 ] && [ -d "${ILDIZ}/_test_natija" ]; then
+    echo "--- YIQILGAN TO'PLAMLAR: muhim qatorlar ---" >&2
+    for _f in "${ILDIZ}"/_test_natija/*.log; do
+        [ -f "$_f" ] || continue
+        _nom="$(basename "$_f" .log)"
+        case " $(grep -oE '^YIQILGAN:.*' "$LOG" | head -1) " in
+            *" ${_nom},"*|*" ${_nom} "*|*"${_nom}"*) ;;
+            *) continue ;;
+        esac
+        _qat="$(grep -aE '\[FAIL\]|\[XATO\]|^\s*XATO |YIQILDI:' "$_f" \
+                | head -6)"
+        [ -n "$_qat" ] || continue
+        echo "  ===== ${_nom}" >&2
+        printf '%s\n' "$_qat" | sed 's/^/    /' >&2
+    done
+fi
+
 _XULOSA_JSON="${ILDIZ}/_test_natija/xulosa.json"
 _TASNIF="${ILDIZ}/deploy/relis-tasnif.tsv"
 if ! "${PY:-python3}" "${ILDIZ}/deploy/bin/relis-qaror.py" \
