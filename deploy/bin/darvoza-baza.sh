@@ -800,11 +800,32 @@ except Exception as e:
     print(f"[tafsilot] xulosa.json o'qilmadi: {e}"); raise SystemExit(0)
 # `yiqilgan` — yurgizuvchining O'ZI tuzgan ro'yxat (443-qator).
 # Uni qayta hisoblash ikkinchi haqiqat manbai bo'lardi.
+# CHIQISH KODI SARLAVHAGA CHIQADI.
+#
+# `subprocess` signaldan o'lgan bolani MANFIY kod bilan qaytaradi
+# (`-9` = SIGKILL, `-15` = SIGTERM). Bu farq HAL QILUVCHI: o'z-o'zidan
+# yiqilgan sinov (kod 1) va TASHQARIDAN o'ldirilgan sinov (kod -9)
+# butunlay boshqa nosozliklar, lekin darvoza jurnalida ikkalasi ham
+# "XULOSA QATORI YO'Q" bo'lib ko'rinardi.
+_kodlar = {t.get("nom"): t.get("kod") for t in (x.get("toplamlar") or [])}
+
+
+def _kod_izoh(k):
+    if k is None:
+        return "kod=?"
+    if k < 0:
+        _nom = {-9: "SIGKILL", -15: "SIGTERM", -2: "SIGINT",
+                -6: "SIGABRT", -11: "SIGSEGV"}.get(k, f"signal {-k}")
+        return f"kod={k} ({_nom} — TASHQARIDAN o'ldirilgan)"
+    return f"kod={k}"
+
+
 for nom in x.get("yiqilgan") or []:
     if not nom:
         continue
     yol = os.path.join(nat, f"{nom}.log")
-    print(f"\n===== {nom} " + "=" * (60 - len(nom)))
+    _bosh = f"===== {nom} [{_kod_izoh(_kodlar.get(nom))}] "
+    print("\n" + _bosh + "=" * max(3, 78 - len(_bosh)))
     try:
         qatorlar = io.open(yol, encoding="utf-8", errors="replace").read().splitlines()
     except Exception as e:
