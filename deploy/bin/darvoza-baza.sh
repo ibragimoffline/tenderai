@@ -645,6 +645,17 @@ sinov)
     # huquqida yashil bo'lib, ishlab chiqarishda qizarardi.
     muhit_tekshir
     BAZA="${2:?darvoza bazasi nomi kerak}"
+    # QOLGAN ARGUMENTLAR `run_tests.py` GA UZATILADI.
+    #
+    # NEGA: bitta to'plamni tuzatayotganda butun 44 to'plamni yurgizish
+    # ~4 daqiqa oladi va chiqishni ko'mib yuboradi. `run_tests.py` da
+    # `--only <naqsh>` allaqachon bor edi, lekin darvoza uni uzatmasdi.
+    #
+    #     tender-darvoza sinov <baza> --only import
+    #
+    # QO'RIQCHALAR O'ZGARMAYDI: `zz*` sanog'i, 0071 tasdig'i va
+    # tozalash HAR HOLDA yuradi -- ular argumentga bog'liq emas.
+    shift 2 2>/dev/null || shift $#
     nom_tekshir "$BAZA"
     : "${XT_DB_DSN:?sinov uchun XT_DB_DSN kerak (ilova roli)}"
     SINOV_DSN="$(dsn_baza "$XT_DB_DSN" "$BAZA")"
@@ -841,7 +852,7 @@ PROBE2
     APP_ENV=staging \
     APP_PUBLIC_URL="$APP_PUBLIC_URL" \
     AUTH_COOKIE_SECURE="${AUTH_COOKIE_SECURE:-1}" \
-        "${PY:-python3}" run_tests.py
+        "${PY:-python3}" run_tests.py "$@"
     SINOV_KOD=$?
     set -e
 

@@ -54,6 +54,10 @@ from api import db, importer, stock                  # noqa: E402
 FIX = Path(__file__).parent / "fixtures"
 PREFIX = "ZZTEST "          # sinov mahsulotlari shu bilan boshlanadi
 
+#: SINOV TENDERI — haqiqiy manba identifikatorlaridan UZOQ
+#: (ular ~11 xonali). Tozalash `_silent_cleanup()` da.
+SINOV_TENDER_ID = 9000000000001
+
 # J1.6: katalog KOMPANIYAGA bog'landi. Sinov mavjud faol hisobdan
 # foydalanadi — o'zi hisob yaratmaydi (auth sinovi buni alohida qiladi).
 TEST_COMPANY_ID = None   # main() da to'ldiriladi
@@ -442,12 +446,46 @@ def test_stock_logic():
 # =========================================================================
 def test_stock_real_tender():
     print("\n[10] P0-6 — haqiqiy tender (bazadagi ma’lumot)")
-    tid = db.scalar(
-        "SELECT tender_id FROM tender_item WHERE name ILIKE %(q)s LIMIT 1",
-        {"q": "%компьютерная%"})
-    if tid is None:
-        print("     (o‘tkazib yuborildi — mos tender topilmadi)")
-        return
+    # TENDER SINOVNIKI, ATROFDAGI EMAS.
+    #
+    # O'LCHANGAN NUQSON (2026-09-09, darvoza): bu yerda
+    #
+    #     SELECT tender_id FROM tender_item
+    #      WHERE name ILIKE '%компьютерная%' LIMIT 1
+    #
+    # turardi -- `ORDER BY` siz, ya'ni IXTIYORIY qator. Keyin
+    # `required_qty` 500.0 deb QAT'IY kutilardi. 500 esa sinov
+    # yozilgan kunda tasodifan mos kelgan qatorning xossasi edi.
+    #
+    # Darvoza nusxasida boshqa qator tanlandi (`amount_text` = "8 …")
+    # va TO'RTTA tekshiruv birdan yiqildi: miqdor 8 vs 500, holat
+    # "yetarli" vs "yetishmaydi", yetishmagan miqdor None vs 300.
+    #
+    # TAHLILCHI AYBDOR EMAS: `parse_amount_text` alohida sinaldi --
+    # "500 шт"->500, "8 шт"->8, "1 500 шт"->1500, va noaniq matnda
+    # ("8 x 500 шт") TAXMIN QILMASDAN rad etadi. 8.0 -- o'sha
+    # qatorning TO'G'RI tahlili edi.
+    #
+    # Endi tender ham, pozitsiya ham SHU SINOVNIKI: 500 talab,
+    # 200 qoldiq -> 300 yetishmaydi. Ya'ni tekshiruv atrofdagi
+    # ma'lumotga emas, BIZNES QOIDASIGA bog'langan.
+    tid = SINOV_TENDER_ID
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO tender (id, source_id, source_platform, "
+                "  status, close_at, raw_json) "
+                "VALUES (%s, %s, 'zztest', 'open', "
+                "        now() + interval '7 days', '{}') "
+                "ON CONFLICT (id) DO UPDATE SET status='open'",
+                (tid, str(tid)))
+            cur.execute(
+                "INSERT INTO tender_item (tender_id, lot_id, item_id, "
+                "  name, unit, amount_text) "
+                "VALUES (%s, 1, %s, %s, 'шт', '500.00 шт') "
+                "ON CONFLICT DO NOTHING",
+                (tid, f"{tid}-1", "Мышь компьютерная"))
+        conn.commit()
 
     # Qoldig'i ATAYIN yetmaydigan sinov mahsuloti
     db.execute_returning(
@@ -583,6 +621,10 @@ def _silent_cleanup():
             cur.execute("DELETE FROM catalog_product WHERE name LIKE %(p)s",
                         {"p": PREFIX + "%"})
             n = cur.rowcount
+            # SINOV TENDERI HAM O'CHADI. `tender_item` `ON DELETE CASCADE`
+            # bilan bog'langan, ya'ni pozitsiya o'zi ketadi.
+            cur.execute("DELETE FROM tender WHERE id = %(t)s",
+                        {"t": SINOV_TENDER_ID})
             cur.execute(
                 "DELETE FROM catalog_import_batch WHERE filename IN "
                 "('katalog_togri.xlsx','katalog_xatoli.csv','qayta.xlsx',"
