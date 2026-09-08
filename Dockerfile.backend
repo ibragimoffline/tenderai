@@ -1,0 +1,72 @@
+# =============================================================================
+# TENDER-AI BACKEND — ILOVA IJRO MUHITI
+# =============================================================================
+# Bu imij HALI JOYLASHTIRILMAYDI. U Faza 2 (Docker staging) uchun
+# tayyorlanadi va oldin darvoza paritetidan o'tishi kerak.
+#
+# JOYLASHTIRISH ARXITEKTURASI O'ZGARMAYDI (Faza 2 rejasi):
+#
+#     Internet -> HOST nginx -> Docker backend -> HOST PostgreSQL
+#
+# nginx ham, PostgreSQL ham HOSTDA qoladi. Konteynerga faqat ILOVA
+# ijrosi ko'chadi — zaxira strategiyasi, sertifikatlar va baza
+# hayot sikli tegilmaydi.
+#
+# NEGA `Dockerfile.gate` DAN ALOHIDA
+# ---------------------------------
+# Darvoza imijida sinov jabduqlari, `git`, `psql` va butun `_tests/`
+# bor — ular ishlab chiqarishda KERAK EMAS va hujum yuzasini
+# kengaytiradi. Ikki imij ikki maqsad: biri o'lchaydi, biri xizmat
+# qiladi.
+# =============================================================================
+FROM python:3.14.4-slim-trixie
+
+# Ish vaqtida kerak bo'ladigan tizim paketlari. `git`/`psql` YO'Q:
+# ilova ularni ishlatmaydi (migratsiya ALOHIDA qadam va u hostda
+# yoki bir martalik job da yuradi).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# BOG'LIQLIKLAR QULF BO'YICHA — kod nusxalanishidan OLDIN.
+# Qatlam keshi: kod o'zgarganda bog'liqliklar qayta o'rnatilmaydi.
+#
+# `torch` QULFDA BOR, chunki qulf ishlab turgan relizdan olingan va
+# u `EMBED_INSTALL=1` bilan qurilgan (`deploy.sh` 4b-bo'limi:
+# `EMBED_PROVIDER=local` uchun torch SHART). Ya'ni imij hajmi
+# (~2.5 GB) tasodif emas — u joriy ishlab chiqarish holatining
+# aynan o'zi. Embeddingsiz nusxa kerak bo'lsa alohida qulf yasaladi.
+COPY requirements-api.lock ./
+RUN pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements-api.lock
+
+COPY api/ ./api/
+COPY migratsiya.py migratsiya_manifest.tsv ./
+COPY schema_patch_*.sql ./
+
+# ROOT EMAS va YOZMAYDI.
+# Jurnal `stdout` ga chiqadi (systemd/docker o'zi yig'adi), yuklamalar
+# va model keshi TASHQARIDAN ulanadi — konteyner qatlamida doimiy
+# ma'lumot QOLMAYDI.
+RUN useradd --system --create-home --uid 10002 tenderai \
+    && chown -R tenderai:tenderai /app
+USER tenderai
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/model-kesh \
+    API_PORT=8000
+
+EXPOSE 8000
+
+# SOG'LIQ — konteyner darajasida. `/health` bazaga bormaydi
+# (`/ready` boradi), shuning uchun tiriklik uchun aynan shu to'g'ri.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${API_PORT}/health" || exit 1
+
+# SIR YO'Q. `XT_DB_DSN`, `ANTHROPIC_API_KEY` va boshqalar FAQAT ish
+# vaqtida `--env-file /etc/tenderai/<muhit>.env` bilan beriladi.
+CMD ["sh", "-c", "exec uvicorn api.main:app --host 0.0.0.0 --port ${API_PORT} --proxy-headers --forwarded-allow-ips '*' --no-access-log"]
