@@ -1626,9 +1626,31 @@ def test_darvoza_dsn():
         io.open(os.path.join(mashq_ildiz, "frontend", "package.json"), "w",
                 encoding="utf-8", newline=N2).write("{}" + N2)
 
+        # ILDIZ `_yetarli` BO'LISHI SHART.
+        #
+        # O'LCHANGAN NUQSON (2026-09-08): yuqoridagi uchta fayl
+        # yetarli emas edi. `darvoza-baza.sh` ning `darvoza_ildiz()`
+        # funksiyasi ildizdan `migratsiya_manifest.tsv`, `api/` va
+        # `_tests/` ni ham talab qiladi; topmasa `RELEASE_SHA` dan
+        # TO'LIQ daraxtni ochib HAQIQIY `run_tests.py` ni yurgizadi.
+        #
+        # Ya'ni "mashq o'z ildizida yuradi" degan tuzatish jimgina
+        # BEKOR QILINARDI va mashq to'liq darvozaga aylanardi. Halqa:
+        # darvoza -> run_tests -> deploy_test -> darvoza. 66 jarayon,
+        # ~2460 MB; xost OOM ga tushdi va ishlab chiqarish o'chdi.
+        io.open(os.path.join(mashq_ildiz, "migratsiya_manifest.tsv"), "w",
+                encoding="utf-8", newline=N2).write("" + N2)
+        for k in ("api", "_tests"):
+            os.makedirs(os.path.join(mashq_ildiz, k), exist_ok=True)
+
         e = dict(os.environ)
         e.pop("XT_DB_DSN", None)
         e.pop("XT_DB_DSN_OWNER", None)
+        # ZAXIRA YO'L UMUMAN ISHGA TUSHMASIN. Ildiz endi `_yetarli`,
+        # lekin `_yetarli` sharti kelajakda o'zgarishi mumkin --
+        # `RELEASE_SHA` siz esa zaxira yo'l haqiqiy repozitoriyaga
+        # BORA OLMAYDI. Ikki mustaqil to'siq.
+        e.pop("RELEASE_SHA", None)
         e["TENDERAI_DARVOZA_FRONTEND"] = "0"       # frontend qurilmasin
         r = subprocess.run([bash, os.path.join(D, "bin", "relis-darvoza.sh"),
                             _posix_yol(bash, mashq_ildiz)],
@@ -2478,6 +2500,52 @@ def test_faza2_staging_konteyneri():
     prod_bolim = prod_bolim.split("else", 1)[0] if prod_bolim else ""
     check("production shoxi relis-darvoza.sh ni chaqirmaydi",
           "relis-darvoza.sh" not in prod_bolim, prod_bolim[:80])
+
+    # --- DARVOZA O'Z ICHIDA QAYTA CHAQIRILMASIN ---
+    # O'LCHANGAN NUQSON (2026-09-08): halqa
+    #     darvoza -> run_tests -> deploy_test -> darvoza
+    # cheksiz yurdi. 66 jarayon, ~2460 MB RSS; xost xotirasi tugadi,
+    # `tenderai-api@production` `oom-kill` bilan yiqildi va
+    # `zynq.uz/api` 502 qaytardi. Sinov infratuzilmasi ishlab
+    # chiqarishni o'chirdi.
+    rd = _oqi_ildiz("deploy/bin/relis-darvoza.sh")
+    check("darvozada chuqurlik hisoblagichi bor",
+          "TENDERAI_DARVOZA_CHUQURLIK" in rd and "-gt 2" in rd)
+
+    # Mashq ildizi `darvoza_ildiz()` ning `_yetarli` shartini
+    # QONDIRSIN -- aks holda zaxira yo'l `RELEASE_SHA` dan to'liq
+    # daraxtni ochib HAQIQIY to'plamlarni yurgizadi.
+    db = _oqi_ildiz("deploy/bin/darvoza-baza.sh")
+    kerakli = re.findall(r'-f "\$1/([a-z_.]+)"', db) + \
+              re.findall(r'-d "\$1/([a-z_]+)"', db)
+    dt = _oqi_ildiz("_tests/deploy_test.py")
+    mashq = dt[dt.index("mashq_ildiz = os.path.join(tmp"):]
+    mashq = mashq[:mashq.index("subprocess.run")]
+    # IZOHLAR SANALMAYDI. Yuqoridagi izohda ayni shu fayl nomlari
+    # tilga olinadi -- ular hisobga olinsa, KOD olib tashlansa ham
+    # tekshiruv o'taverardi. (Shu qo'riqchaning birinchi variantida
+    # aynan shunday bo'ldi: mutatsiya testni yiqitmadi.)
+    mashq = "\n".join(q for q in mashq.splitlines()
+                      if q.strip() and not q.lstrip().startswith("#"))
+    yetishmaydi = [k for k in kerakli if k not in mashq]
+    check("mashq ildizi darvoza talablarini qondiradi", not yetishmaydi,
+          "yetishmaydi: " + ", ".join(yetishmaydi))
+    check("mashq muhitidan RELEASE_SHA olib tashlanadi",
+          'e.pop("RELEASE_SHA", None)' in mashq)
+
+    # YURGIZIB: chuqurlik 2 dan oshsa darvoza TO'XTASIN.
+    bash_y = _mashq_bash()
+    if bash_y:
+        e2 = dict(os.environ)
+        e2["TENDERAI_DARVOZA_CHUQURLIK"] = "2"
+        r2 = subprocess.run(
+            [bash_y, os.path.join(D, "bin", "relis-darvoza.sh"), ROOT],
+            capture_output=True, text=True, env=e2, timeout=60)
+        check("chuqurlik 2 dan oshganda darvoza to'xtaydi",
+              r2.returncode != 0 and "O'Z ICHIDA" in (r2.stdout + r2.stderr),
+              f"kod={r2.returncode}")
+    else:
+        check("bash yo'q — chuqurlik yurgizib tekshirilmadi", True)
 
     # --- VAQTINCHALIK KATALOG RAM DA BO'LMASIN ---
     # Bu xostda `/tmp` -- `tmpfs`, ya'ni RAM.
