@@ -143,7 +143,23 @@ def _env_oquvchilar():
                 continue
             yol = os.path.join(katalog, f)
             src = io.open(yol, encoding="utf-8", errors="replace").read()
-            kod = "\n".join(ln for ln in src.split("\n")
+            # DOCSTRING VA UCH TIRNOQLI MATN SANALMAYDI.
+            #
+            # O'LCHANGAN NUQSON (2026-09-09): `deploy/bin/muhit-ruxsat.py`
+            # muhitni UMUMAN o'qimaydi -- u muhit FAYLINI o'qiydi va
+            # kodni `ast` bilan skanerlaydi. Lekin uning docstring'i
+            # regexni TUSHUNTIRISH uchun `os.environ.get(...)` shaklini
+            # so'zma-so'z keltiradi va invariant shunga tushdi.
+            #
+            # Ya'ni tekshiruv PROZAGA reaksiya qilardi. `#` izohlar
+            # allaqachon olib tashlanardi, uch tirnoqli matn esa yo'q.
+            #
+            # BIR TIRNOQLI MATN QOLADI VA BU MUHIM: haqiqiy o'qish
+            # `os.environ.get("APP_PUBLIC_URL")` shaklida bo'ladi --
+            # nom AYNAN tirnoq ichida. Ularni ham olib tashlash
+            # invariantni KO'R qilardi.
+            kod = re.sub(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'', '', src)
+            kod = "\n".join(ln for ln in kod.split("\n")
                             if not ln.lstrip().startswith("#"))
             if ENV_OQISH_RE.search(kod):
                 topildi.append(os.path.relpath(yol, ROOT).replace("\\", "/"))
