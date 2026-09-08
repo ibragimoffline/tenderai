@@ -480,7 +480,7 @@ tekshir)
         # grant bo'lishi mumkin. `schema_patch_huquq.sql` FAQAT uchta
         # shartnoma-view ni ruxsat etadi, ERP tomoni ham shuni yozadi.
         psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c \
-            "SELECT '  ' || c.relkind || ' erp.' || c.relname
+            "SELECT '  ' || c.relkind::text || ' erp.' || c.relname
                   || ' -> ' || a.privilege_type
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace,
@@ -495,7 +495,7 @@ tekshir)
                     FROM pg_namespace n, aclexplode(n.nspacl) a
                    WHERE n.nspname='erp' ORDER BY 1" 2>&1 | sed 's/^/  /'
         echo "  --- sukut huquqlar (pg_default_acl) ---"
-        psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c "SELECT '  ' || n.nspname || ' ' || d.defaclobjtype
+        psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c "SELECT '  ' || n.nspname || ' ' || d.defaclobjtype::text
                       || ' ' || COALESCE(a.grantee::regrole::text,'PUBLIC')
                       || ' ' || a.privilege_type
                     FROM pg_default_acl d
