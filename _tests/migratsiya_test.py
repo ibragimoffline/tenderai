@@ -386,8 +386,44 @@ def _sxema_yoli_ochilsin():
         with c.cursor() as cur:
             cur.execute('GRANT CREATE, USAGE ON SCHEMA public TO "%s"'
                         % _sinov_rol())
+        _kengaytmalar(c)
     finally:
         c.close()
+
+
+#: Migratsiyalar talab qiladigan kengaytmalar. `0026_ai_chat` ularni
+#: `IF NOT EXISTS` bilan yaratadi.
+KENGAYTMALAR = ("vector", "unaccent", "pg_trgm")
+
+
+def _kengaytmalar(c):
+    """Kengaytmalarni ADMIN roli bilan oldindan o'rnatishga urinadi.
+
+    O'LCHANGAN NUQSON (2026-09-08): "bo'sh baza -> joriy sxema"
+    stsenariysi 85 migratsiyadan 25 tasidan keyin TO'XTARDI.
+    26-migratsiya (`0026_ai_chat`)
+
+        CREATE EXTENSION IF NOT EXISTS vector
+
+    qiladi va kengaytma yaratish ILOVA ROLIGA ochiq emas.
+
+    NEGA BU ILGARI KO'RINMAGAN: staging bazasida kengaytmalar
+    ALLAQACHON bor, ya'ni `IF NOT EXISTS` u yerda hech nima
+    qilmaydigan buyruqqa aylanadi va huquq umuman so'ralmaydi.
+    Kamchilik faqat BO'SH bazada -- ya'ni aynan shu stsenariyda --
+    ochiladi.
+
+    YIQILSA — MAYLI: bu yerda imtiyoz TALAB QILINMAYDI. Agar admin
+    roli ham yarata olmasa, migratsiya o'sha joyda to'xtaydi va
+    sinov buni TUSHUNARLI xabar bilan aytadi (`_yurgiz` chiqishni
+    tafsilotga qo'shadi) -- "kod 1" degan jumboq o'rniga.
+    """
+    for k in KENGAYTMALAR:
+        try:
+            with c.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS %s" % k)
+        except Exception:                                     # noqa: BLE001
+            c.rollback()
 
 
 def _baza_amal(sqllar):
@@ -516,8 +552,14 @@ def test_1_bosh_bazadan_qurish():
     kod, chiqish = _yurgiz("--qolla")
     # `multitenant` ma'lumot talab qiladi va u yerda TO'XTAYDI (kod 2).
     # Bu KUTILGAN xulq va u yerda urug' hisob yaratiladi.
+    # KUTILMAGAN KOD BO'LSA — SABABNI KO'RSATAMIZ.
+    # O'LCHANGAN (2026-09-08): tekshiruv faqat "chiqish kodi 1" derdi
+    # va nima uchun yiqilgani darvoza jurnalida KO'RINMASDI. Sababni
+    # topish uchun butun darvozani qayta yurgizish kerak bo'lardi.
     check("birinchi bosqich ma'lumot shartida TO'XTADI", kod == 2,
-          f"chiqish kodi {kod}")
+          f"chiqish kodi {kod}" if kod == 2
+          else f"chiqish kodi {kod}; oxirgi qatorlar: "
+               + " / ".join(chiqish.strip().splitlines()[-4:]))
     check("to'xtash SABABI tushuntirildi",
           "company_account" in chiqish and "tenant_id" in chiqish)
     check("to'xtaganda YARIM qo'llangan holat yaratilmadi",
