@@ -509,6 +509,51 @@ tekshir)
                          IN ('tai_app','PUBLIC') ORDER BY 1" 2>&1 | sed 's/^/  /'
     } || true
 
+    # --- ESKI `public.app_user` — INVENTAR (SIRSIZ) ----------------------
+    # `schema_patch_auth_2.sql` uni SHARTLI tushiradi: `erp.app_user`
+    # bo'sh bo'lsa QOLDIRADI. O'sha paytda bo'sh edi, ERP keyin to'ldi,
+    # migratsiya esa qayta yurmaydi. Natijada eski parol xeshlari
+    # ikkinchi joyda saqlanib turibdi.
+    #
+    # FAQAT SANOQ VA METAMA'LUMOT. Xesh, token, parol CHIQMAYDI.
+    echo "--- eski public.app_user inventari ---"
+    psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c \
+        "SELECT '  mavjud: ' || (to_regclass('public.app_user') IS NOT NULL)::text" 2>&1 | sed 's/^/  /'
+    psql "$XT_DB_DSN" -qtA -c \
+        "SELECT '  eski qatorlar: ' || count(*)::text FROM public.app_user" 2>&1 | sed 's/^/  /'
+    psql "$XT_DB_DSN" -qtA -c \
+        "SELECT '  erp qatorlar  : ' || count(*)::text FROM erp.app_user" 2>&1 | sed 's/^/  /'
+    echo "  --- kimlik solishtiruvi (username bo'yicha) ---"
+    psql "$XT_DB_DSN" -qtA -c \
+        "SELECT '  moslashgan   : ' || count(*)::text
+           FROM public.app_user l JOIN erp.app_user e
+             ON lower(e.username) = lower(l.username)" 2>&1 | sed 's/^/  /'
+    psql "$XT_DB_DSN" -qtA -c \
+        "SELECT '  MOSLASHMAGAN : ' || count(*)::text
+           FROM public.app_user l
+          WHERE NOT EXISTS (SELECT 1 FROM erp.app_user e
+                             WHERE lower(e.username) = lower(l.username))" 2>&1 | sed 's/^/  /'
+    psql "$XT_DB_DSN" -qtA -c \
+        "SELECT '  IKKILANGAN   : ' || count(*)::text FROM (
+            SELECT lower(l.username) u FROM public.app_user l
+              JOIN erp.app_user e ON lower(e.username) = lower(l.username)
+             GROUP BY 1 HAVING count(*) > 1) q" 2>&1 | sed 's/^/  /'
+    echo "  --- bog'liqliklar ---"
+    psql "$XT_DB_DSN" -qtA -c \
+        "SELECT '  FK -> app_user: ' || count(*)::text
+           FROM pg_constraint c JOIN pg_class t ON t.oid = c.confrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+          WHERE c.contype = 'f' AND n.nspname='public' AND t.relname='app_user'" 2>&1 | sed 's/^/  /'
+    psql "$XT_DB_DSN" -qtA -c \
+        "SELECT '  bog''liq obyekt: ' || COALESCE(string_agg(DISTINCT dep.relname, ', '), '-')
+           FROM pg_depend d
+           JOIN pg_rewrite r ON r.oid = d.objid
+           JOIN pg_class dep ON dep.oid = r.ev_class
+           JOIN pg_class src ON src.oid = d.refobjid
+           JOIN pg_namespace n ON n.oid = src.relnamespace
+          WHERE n.nspname='public' AND src.relname='app_user'
+            AND dep.relname <> 'app_user'" 2>&1 | sed 's/^/  /'
+
     echo "TEKSHIR: PASS — besh invariant ham o'tdi"
     ;;
 
