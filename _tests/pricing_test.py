@@ -17,6 +17,7 @@ bir-biridan chetga chiqsa — shu yerda ushlanadi.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -492,7 +493,27 @@ def _node() -> str:
 
 def _js_results(cases):
     """JS ijrosini Node bilan ishga tushiradi. Node yo'q bo'lsa None."""
+    # KATALOG `finally` DA O'CHIRILADI.
+    #
+    # O'LCHANGAN (2026-09-08): tozalash yo'q edi va bu funksiya har
+    # chaqirilganda `/tmp` ga bitta katalog qoldirardi. Darvoza
+    # yurishlari davomida 1724 ta yig'ilib qoldi.
+    #
+    # NEGA BU SHUNCHAKI IFLOSLIK EMAS: bu xostda `/tmp` — `tmpfs`,
+    # ya'ni RAM. Qoldiqlar diskni emas, XOTIRANI yeydi va o'sha
+    # xotira ishlab chiqarish API siga kerak edi. 2026-09-08 da
+    # `tenderai-api@production` aynan `oom-kill` bilan yiqildi.
+    #
+    # Ya'ni tozalanmagan sinov katalogi ishlab chiqarishni o'chirdi.
     tmp = tempfile.mkdtemp(prefix="pricing_parity_")
+    try:
+        return _js_results_ichida(tmp, cases)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _js_results_ichida(tmp, cases):
+    """`_js_results` ning ichki qismi — katalog tashqarida boshqariladi."""
     harness = os.path.join(tmp, "harness.mjs")
     with open(harness, "w", encoding="utf-8") as f:
         f.write(_JS_HARNESS)
