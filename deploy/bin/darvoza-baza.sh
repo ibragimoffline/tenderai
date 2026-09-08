@@ -495,7 +495,11 @@ tekshir)
                     FROM pg_namespace n, aclexplode(n.nspacl) a
                    WHERE n.nspname='erp' ORDER BY 1" 2>&1 | sed 's/^/  /'
         echo "  --- sukut huquqlar (pg_default_acl) ---"
-        psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c "SELECT '  ' || n.nspname || ' ' || d.defaclobjtype::text
+        # `defaclrole` HAL QILUVCHI: `ALTER DEFAULT PRIVILEGES` ROLGA
+        # bog'langan va uni neytrallash uchun AYNAN o'sha rol (yoki
+        # superuser) kerak. Rolsiz tuzatish rejasini yozib bo'lmaydi.
+        psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c "SELECT '  egasi=' || pg_get_userbyid(d.defaclrole)
+                      || ' ' || n.nspname || ' ' || d.defaclobjtype::text
                       || ' ' || COALESCE(a.grantee::regrole::text,'PUBLIC')
                       || ' ' || a.privilege_type
                     FROM pg_default_acl d
