@@ -545,6 +545,92 @@ def test_xavfsizlik():
           f"ishlab chiqarish={q.get('dbname')} sinov={SINOV_BAZA}")
 
 
+#: `0057_huquq` tekshiradigan taqiqlangan klaster atributlari.
+#: Ro'yxat PATCH FAYLIDAN o'qiladi — ikkita haqiqat manbai bo'lmasin.
+_ROL_PATCH = "schema_patch_huquq.sql"
+
+
+def _taqiqlangan_atributlar():
+    """Patch qaysi `pg_roles` ustunlarini taqiqlangan deb biladi."""
+    matn = io.open(os.path.join(ROOT, _ROL_PATCH), encoding="utf-8").read()
+    return re.findall(r"IF\s+r\.(rol\w+)\s+THEN\s+yomon", matn)
+
+
+def test_rol_shartnomasi():
+    """Rol shartnomasi: migratsiya TEKSHIRADI, o'zgartirmaydi."""
+    bolim("Rol shartnomasi — bootstrap yaratadi, migratsiya tekshiradi")
+
+    matn = io.open(os.path.join(ROOT, _ROL_PATCH), encoding="utf-8").read()
+    amaliy = "\n".join(q for q in matn.splitlines()
+                       if q.strip() and not q.lstrip().startswith("--"))
+
+    # --- MIGRATSIYA KLASTER HOLATINI O'ZGARTIRMAYDI ---
+    # O'LCHANGAN (2026-09-09): `ALTER ROLE tai_app NOSUPERUSER …`
+    # SUPERUSER talab qiladi -- HATTO rol allaqachon NOSUPERUSER
+    # bo'lganda ham. Ya'ni bu bitta qator butun falokatdan tiklash
+    # yo'lini superuser'ga bog'lab qo'ygan edi.
+    check("migratsiya ALTER ROLE yubormaydi", "ALTER ROLE" not in amaliy,
+          [q.strip() for q in amaliy.splitlines() if "ALTER ROLE" in q][:1])
+    check("migratsiya CREATE ROLE yubormaydi", "CREATE ROLE" not in amaliy,
+          [q.strip() for q in amaliy.splitlines() if "CREATE ROLE" in q][:1])
+
+    # --- SILJISH JIMGINA O'TMAYDI ---
+    check("siljish uchun aniq diagnostika bor",
+          "SECURITY_ROLE_DRIFT" in matn)
+    check("siljishda ISTISNO ko'tariladi (ogohlantirish emas)",
+          "RAISE EXCEPTION" in amaliy)
+    check("rol yo'q bo'lsa ham to'xtaydi", "ROL YO''Q" in matn)
+
+    # --- BOOTSTRAP FAYLI BOR VA U ATRIBUTLARNI O'RNATADI ---
+    b_yol = os.path.join(ROOT, "deploy", "sql", "bootstrap-rollar.sql")
+    check("bootstrap fayli bor", os.path.isfile(b_yol))
+    if os.path.isfile(b_yol):
+        b = io.open(b_yol, encoding="utf-8").read()
+        check("bootstrap rolni yaratadi", "CREATE ROLE tai_app" in b)
+        check("bootstrap atributlarni o'rnatadi",
+              "ALTER ROLE tai_app" in b and "NOSUPERUSER" in b)
+        check("bootstrapda parol YO'Q",
+              "PASSWORD '" not in b.replace("PASSWORD '<kuchli", "").
+              replace("PASSWORD '<parol", ""))
+
+    # --- ANIQLASH MANTIG'I HAQIQIY ROLLAR USTIDA SINALADI ---
+    # CASE B ni "rolni buzib ko'rish" bilan sinab bo'lmaydi: bizda
+    # `CREATEROLE` yo'q va `tai_app` KLASTER bo'ylab umumiy -- uni
+    # buzish ishlab chiqarishga tegardi.
+    #
+    # Lekin buzishning KERAGI YO'Q: klasterda taqiqlangan atributga
+    # ega HAQIQIY rollar allaqachon bor (`tai_owner` superuser,
+    # `tai_test_admin` createdb). Aniqlash mantig'i ular ustida
+    # yurgiziladi -- ya'ni CASE B ROSTAKAM o'lchanadi.
+    atr = _taqiqlangan_atributlar()
+    check("patch oltita klaster atributini tekshiradi",
+          set(atr) == {"rolsuper", "rolcreatedb", "rolcreaterole",
+                       "rolbypassrls", "rolreplication", "rolcanlogin"},
+          str(sorted(atr)))
+    if not atr:
+        return
+
+    ifoda = " OR ".join(atr)
+    c = psycopg2.connect(os.environ["XT_DB_DSN"], connect_timeout=8)
+    try:
+        with c.cursor() as cur:
+            cur.execute(
+                f"SELECT rolname, ({ifoda}) AS siljish FROM pg_roles "
+                "WHERE rolname IN ('tai_app','tai_owner','tai_test_admin')")
+            holat = dict(cur.fetchall())
+    finally:
+        c.close()
+
+    # CASE A — toza rol aniqlanmaydi.
+    check("CASE A: tai_app siljish sifatida BELGILANMAYDI",
+          holat.get("tai_app") is False, str(holat.get("tai_app")))
+    # CASE B — taqiqlangan atributli rol ANIQLANADI.
+    for rol in ("tai_owner", "tai_test_admin"):
+        if rol in holat:
+            check(f"CASE B: {rol} siljish sifatida ANIQLANADI",
+                  holat[rol] is True, str(holat[rol]))
+
+
 def test_1_bosh_bazadan_qurish():
     bolim("1) BO'SH BAZA -> JORIY SXEMA")
     _baza_qayta_yarat()
@@ -772,6 +858,7 @@ def main():
               f"Ular ~40 s oladi va o'z bazasini yaratadi.")
     else:
         test_xavfsizlik()
+        test_rol_shartnomasi()
         # Xavfsizlik tekshiruvi yiqilsa BAZAGA UMUMAN TEGILMAYDI.
         if all(ok for nom, ok, _d in _natija if "sinov bazasi" in nom):
             try:

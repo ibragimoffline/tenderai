@@ -80,7 +80,10 @@ sudo chown root:tenderai /etc/tenderai/staging.env
 
 ---
 
-## 4. Baza
+## 4. Baza va rollar — BOOTSTRAP (superuser, bir marta)
+
+Bu bosqich **migratsiyalardan oldin** va **superuser bilan** bajariladi.
+Migratsiyalar buni takrorlamaydi — ular faqat **tekshiradi**.
 
 ```sql
 CREATE DATABASE tenderai_staging;
@@ -90,17 +93,50 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS unaccent;
 ```
 
-Migratsiyalar **egasi** roli bilan yuriladi (`XT_DB_DSN_OWNER`), ilova
-esa **eng kam huquqli** `tai_app` bilan (`schema_patch_huquq.sql`,
-`docs/xavfsizlik.md` §4):
+Keyin klaster rollari:
+
+```bash
+sudo -u postgres psql -f deploy/sql/bootstrap-rollar.sql
+```
+
+Bu `tai_app` guruh rolini yaratadi va uning klaster atributlarini
+(`NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION
+NOLOGIN`) o'rnatadi. Ilova ulanish roli parol bilan yaratiladi —
+parol repozitoriyaga tushmasligi uchun qo'lda:
 
 ```sql
 CREATE ROLE tai_service LOGIN PASSWORD '<kuchli tasodifiy parol>';
 GRANT tai_app TO tai_service;
 ```
 
+Keyin atributlarni qattiqlashtirish uchun `bootstrap-rollar.sql` ni
+yana bir marta yurgizing (idempotent).
+
 `tai_app` da **DDL huquqi ataylab yo'q** — ilova sxemani o'zgartira
 olmasligi kerak.
+
+### Nega rollar migratsiyada emas
+
+Rol atributlari **klaster** darajasida: ular bitta bazaga emas, butun
+serverga tegishli. Sxema migratsiyasi esa bitta bazani o'zgartiradi.
+
+Bu chegara nazariy emas. `0057_huquq` ilgari `ALTER ROLE tai_app
+NOSUPERUSER …` yuborardi, PostgreSQL esa `SUPERUSER` atributini
+o'zgartirish uchun — **hatto olib tashlash uchun ham** — superuser
+talab qiladi. O'lchangan (2026-09-09): bo'sh bazadan qayta qurish
+aynan shu qatorda to'xtadi, garchi `tai_app` allaqachon `NOSUPERUSER`
+bo'lsa ham.
+
+Endi shartnoma quyidagicha:
+
+| qatlam | vazifa |
+|---|---|
+| bootstrap (superuser) | rollarni yaratadi, klaster atributlarini beradi |
+| migratsiya (egasi roli) | holatni **tekshiradi**, baza ichidagi huquqlarni beradi |
+
+Rolda taqiqlangan atribut topilsa migratsiya `SECURITY_ROLE_DRIFT`
+bilan **to'xtaydi** va uni o'zi tuzatmaydi — tuzatish superuser
+aralashuvini talab qiladi va bunday hodisa ko'rinishi kerak.
 
 ---
 
