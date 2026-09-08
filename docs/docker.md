@@ -105,6 +105,48 @@ Yechim: `tender-darvoza` kabi **cheklangan o'rama**, u muhit faylini
 root sifatida o'qiydi va `docker run` ni chaqiradi; konteyner esa
 root emas (uid 10001).
 
+Mantiq repozitoriyada tayyor: `deploy/bin/darvoza-docker.sh` (nom
+qo'riqchasi, rol tekshiruvi, kesh ulash, `cap-drop ALL`). O'ramaning
+o'zi shundan iborat:
+
+```bash
+#!/usr/bin/env bash
+# /usr/local/sbin/tender-darvoza-docker
+set -euo pipefail
+ENV_FILE=/etc/tenderai/staging.env
+REPO=/opt/tenderai/repo.git
+[ "$(id -u)" = 0 ] || { echo "root kerak"; exit 1; }
+
+set -a; . "$ENV_FILE"; set +a          # sir root sifatida o'qiladi
+
+SHA="$(sudo -u tenderai git --git-dir="$REPO" rev-parse 'main^{commit}')"
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "SHA aniqlanmadi"; exit 1; }
+
+VAQT="$(mktemp -d)"; trap 'rm -rf "$VAQT"' EXIT
+sudo -u tenderai git --git-dir="$REPO" archive "$SHA" | tar -x -C "$VAQT"
+echo "darvoza SHA: $SHA" >&2
+
+# Imij AYNI SHA dan quriladi (kesh bo'lsa tez).
+docker build -q -f "$VAQT/Dockerfile.gate" -t "tenderai-gate:$SHA" "$VAQT" >&2
+
+IMIJ="tenderai-gate:$SHA" exec "$VAQT/deploy/bin/darvoza-docker.sh" "$@"
+```
+
+O'rnatish:
+
+```bash
+sudo install -m 0755 /dev/stdin /usr/local/sbin/tender-darvoza-docker <<'SH'
+...yuqoridagi matn...
+SH
+echo 'ibragimoff ALL=(root) NOPASSWD: /usr/local/sbin/tender-darvoza-docker' \
+  | sudo tee /etc/sudoers.d/tender-darvoza-docker
+```
+
+**Nima berilmaydi:** `tenderai` docker guruhiga QO'SHILMAYDI va
+konteynerga docker soketi ULANMAYDI. O'rama root sifatida ishlaydi,
+lekin faqat bitta narsani qiladi — imijni qurib, konteynerni
+ko'taradi.
+
 **b) PostgreSQL faqat `127.0.0.1` da tinglaydi** va docker
 ko'prigidan ko'rinmaydi. `network_mode: host` tanlandi: u yangi hech
 narsa ochmaydi, konteyner shunchaki o'sha loopback ni ko'radi.
