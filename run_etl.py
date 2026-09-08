@@ -350,6 +350,30 @@ def _uzilish_qabul(signum, frame):        # noqa: ARG001
 #: yangi tenderlar YIG'ILMAY qolardi va yurish baribir "OK" derdi.
 UZILISH_KODI = 3221225786
 
+#: POSIX DA MAJBURIY TO'XTATISH BOSHQACHA KO'RINADI.
+#:
+#: `UZILISH_KODI` — WINDOWS tushunchasi. Linuxda `subprocess`
+#: signaldan o'lgan bolani MANFIY kod bilan qaytaradi (`-9` = SIGKILL),
+#: va `3221225786` u yerda HECH QACHON uchramaydi: POSIX chiqish kodi
+#: 8 bit (`0xC000013A & 0xFF == 58`).
+#:
+#: O'LCHANGAN (2026-09-08, izolyatsiyalangan darvoza serverda):
+#: `etl_coverage_test` ning "majburan to'xtatilgan bola QAYTA
+#: urinildi" tekshiruvi `err=chiqish kodi 58` bilan yiqildi. Ya'ni
+#: Windows uchun O'LCHOV BILAN asoslangan himoya (14 kunda 100 marta,
+#: ~10% yurish) LINUX SERVERDA UMUMAN ISHLAMAY turgan edi.
+#:
+#: FAQAT SIGKILL. `SIGTERM` (-15) — systemd xizmatni to'xtatayotgani,
+#: `SIGINT` (-2) — foydalanuvchi Ctrl+C bosgani; ikkalasida ham qayta
+#: urinish NOTO'G'RI bo'lardi. SIGKILL esa OOM-killer yoki `kill -9`,
+#: ya'ni Windows dagi "majburan to'xtatildi" ning aynan qarshi tomoni.
+POSIX_UZILISH_KODI = -9
+
+
+def _majburan_toxtadimi(kod: int) -> bool:
+    """Bola MAJBURAN to'xtatildimi (qayta urinishga arziydimi)."""
+    return kod == UZILISH_KODI or kod == POSIX_UZILISH_KODI
+
 
 #: Bola stderr idan jurnalga o'tadigan qator soni. Cheklov KERAK:
 #: yozuv darajasidagi xato minglab bo'lishi mumkin va ular jurnalni
@@ -597,7 +621,8 @@ def run_script(script: str, extra_args: List[str],
             # BIR MARTA qayta urinish — faqat MAJBURAN TO'XTATILGANDA.
             # Boshqa xatolar (Python xatosi, tarmoq, DSN) qayta
             # urinishdan tuzalmaydi va vaqtni behuda sarflardi.
-            if (not ok and urinish == 1 and res.returncode == UZILISH_KODI
+            if (not ok and urinish == 1
+                    and _majburan_toxtadimi(res.returncode)
                     and not _UZILDI):
                 out.append("    !! majburan to'xtatildi — qayta urinilmoqda")
                 out = out[:1] + out[-1:]        # birinchi urinish chiqishi

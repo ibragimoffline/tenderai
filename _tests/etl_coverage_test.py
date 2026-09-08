@@ -533,7 +533,19 @@ def test_qayta_urinish() -> None:
         "n = int(io.open(p).read()) if os.path.exists(p) else 0" + chr(10) +
         "io.open(p, 'w').write(str(n + 1))" + chr(10) +
         "print('urinish', n + 1)" + chr(10) +
-        "sys.exit(3221225786 if n == 0 else 0)" + chr(10))
+        # MAJBURIY TO'XTATISH PLATFORMAGA QARAB YASALADI.
+        #
+        # Ilgari bu yerda `sys.exit(3221225786)` turardi — Windows
+        # `STATUS_CONTROL_C_EXIT` (`0xC000013A`). POSIX da chiqish kodi
+        # 8 BITGA qisqaradi (`0xC000013A & 0xFF == 58`), ya'ni Linuxda
+        # sinov "majburan to'xtatildi" ni UMUMAN yasay olmasdi va
+        # `err=chiqish kodi 58` bilan yiqilardi.
+        #
+        # Linuxda haqiqiy ekvivalent — SIGKILL: `subprocess` uni `-9`
+        # deb qaytaradi.
+        ("os.kill(os.getpid(), 9) if n == 0 else sys.exit(0)"
+         if os.name != "nt" else
+         "sys.exit(3221225786 if n == 0 else 0)") + chr(10))
     try:
         # 1-urinish o'ldiriladi, 2-si o'tadi.
         if os.path.exists(sanoq):
