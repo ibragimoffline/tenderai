@@ -29,6 +29,39 @@
 # =============================================================================
 set -euo pipefail
 
+# --- REKURSIYA QO'RIQCHASI — CHUQURLIK HISOBLAGICHI -------------------------
+# O'LCHANGAN NUQSON (2026-09-08): darvoza o'z-o'zini cheksiz
+# chaqirdi. Halqa quyidagicha yopildi:
+#
+#     relis-darvoza.sh -> run_tests.py -> deploy_test.py
+#         -> relis-darvoza.sh -> ...
+#
+# `deploy_test` ning bir mashqi darvozani ATAYLAB soxta ildiz bilan
+# yurgizadi. Lekin `darvoza-baza.sh` ning `darvoza_ildiz()` funksiyasi
+# ildizni "yetarli emas" deb topsa va muhitda `RELEASE_SHA` bo'lsa,
+# repozitoriydan TO'LIQ daraxtni ochib HAQIQIY `run_tests.py` ni
+# yurgizadi -- ya'ni mashq jimgina to'liq darvozaga aylanadi.
+#
+# NATIJA: 66 jarayon, ~2460 MB RSS. Xost xotirasi tugadi va
+# `tenderai-api@production` `oom-kill` bilan yiqildi -- `zynq.uz/api`
+# 502 qaytardi. Sinov infratuzilmasi ishlab chiqarishni o'chirdi.
+#
+# NEGA CHUQURLIK 2 GA RUXSAT: 1 -- haqiqiy darvoza, 2 -- `deploy_test`
+# ning nazorat ostidagi mashqi (u soxta ildiz bilan yuradi va o'zi
+# rekursiya yasay olmaydi). 3 esa boshqa hech narsani anglatmaydi --
+# faqat halqani.
+#
+# Bu OXIRGI to'siq. Undan oldin ikkita bor: mashq ildizi endi
+# `_yetarli` va mashq muhitidan `RELEASE_SHA` olib tashlanadi.
+DARVOZA_CHUQURLIK=$(( ${TENDERAI_DARVOZA_CHUQURLIK:-0} + 1 ))
+if [ "$DARVOZA_CHUQURLIK" -gt 2 ]; then
+    echo "XATO: reliz darvozasi O'Z ICHIDA qayta chaqirildi (chuqurlik $DARVOZA_CHUQURLIK)." >&2
+    echo "      Bu halqa: darvoza -> run_tests -> deploy_test -> darvoza." >&2
+    echo "      2026-09-08 da u xostni OOM ga olib keldi." >&2
+    exit 1
+fi
+export TENDERAI_DARVOZA_CHUQURLIK="$DARVOZA_CHUQURLIK"
+
 ILDIZ="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ILDIZ"
 
