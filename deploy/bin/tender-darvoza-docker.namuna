@@ -21,6 +21,25 @@
 # =============================================================================
 set -euo pipefail
 
+# --- VAQTINCHALIK KATALOG DISKDA, RAM DA EMAS -------------------------------
+# BU XOSTDA `/tmp` -- `tmpfs`, ya'ni RAM. Bu yerda yasalgan katalog
+# xotirani yeydi, diskni emas.
+#
+# O'LCHANGAN (2026-09-08): darvoza yurishlaridan `/tmp` da 144 ta
+# `tender-darvoza.*` katalogi qolgan edi, har birida ajratilgan git
+# daraxti -- jami ~787 MB RAM. Xostda 7746 MB dan atigi 515 MB bo'sh
+# qolgan va `tenderai-api@production` `oom-kill` bilan yiqilgan;
+# `zynq.uz/api` 502 qaytargan.
+#
+# `trap` BOR va odatdagi chiqishda ishlaydi. Lekin OOM `SIGKILL`
+# yuboradi va `SIGKILL` ni USHLAB BO'LMAYDI -- ya'ni xotira
+# tugaganda tozalash AYNAN ISHLAMAY QOLADI va qoldiq keyingi OOM ni
+# yaqinlashtiradi. O'zini-o'zi kuchaytiruvchi halqa.
+#
+# `/var/tmp` diskda. Qoldiq baribir yomon, lekin u endi ishlab
+# chiqarishni o'chirmaydi.
+export TMPDIR="${TMPDIR:-/var/tmp}"
+
 ENV_FILE=/etc/tenderai/staging.env
 REPO=/opt/tenderai/repo.git
 PREFIKS=tenderai_gate_
