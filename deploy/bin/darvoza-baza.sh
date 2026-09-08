@@ -907,6 +907,39 @@ PROBE2
     # foydalanadi (`_admin_kon()`). Butun to'plam admin roliga
     # O'TMAYDI.
     ADMIN_DSN="$(dsn_baza "${XT_DB_DSN_TEST_ADMIN:-}" "postgres")"
+    # --- KUZATILGAN FAYLLAR MANIFESTI ------------------------------------
+    # NEGA: `xavfsizlik_test` sirlar kuzatilmayotganini `git ls-files`
+    # bilan tekshirardi. Darvoza esa `git archive` dan ochilgan
+    # daraxtda yuradi va u yerda `.git` YO'Q -- buyruq BO'SH ro'yxat
+    # qaytaradi.
+    #
+    # Oqibati: "`.env` kuzatilmaydi" kabi tekshiruvlar BO'SH ro'yxatda
+    # ALBATTA o'tadi. Ya'ni ular hech narsani isbotlamasdi -- YOLG'ON
+    # YASHIL. Bitta tekshiruv (`.env.example` KUZATILADI) qizil
+    # bo'lgani uchungina muammo ko'rindi.
+    #
+    # `.git` ni arxivga qo'shish YECHIM EMAS: arxiv o'zgarmas bo'lishi
+    # kerak va ichida repozitoriya bo'lmasligi kerak. Buning o'rniga
+    # manifest BARE REPOZITORIYDAN, AYNAN SHU SHA bo'yicha hosil
+    # qilinadi va faqat o'qish uchun uzatiladi.
+    MANIFEST="${ILDIZ_TOLIQ}/.kuzatilgan-manifest"
+    if [ -n "${RELEASE_SHA:-}" ]; then
+        {
+            echo "# tenderai-kuzatilgan-manifest v1"
+            echo "# sha: ${RELEASE_SHA}"
+            git --git-dir="${TENDERAI_REPO:-/opt/tenderai/repo.git}" \
+                ls-tree -r --name-only "$RELEASE_SHA"
+        } > "$MANIFEST" 2>/dev/null || rm -f "$MANIFEST"
+        if [ -s "$MANIFEST" ]; then
+            sha256sum "$MANIFEST" | cut -d" " -f1 > "${MANIFEST}.sha256"
+            log "kuzatilgan manifest: $(($(wc -l < "$MANIFEST") - 2)) fayl"
+        else
+            log "OGOH: manifest yasalmadi — xavfsizlik sinovi QIZIL beradi"
+        fi
+    else
+        log "OGOH: RELEASE_SHA yo'q — manifest yasalmadi"
+    fi
+
     set +e
     TENDERAI_DEBUG_LAUNCH=1 \
     TENDERAI_PY="$PY" \
@@ -914,6 +947,8 @@ PROBE2
     HF_HUB_OFFLINE=1 \
     XT_DB_DSN="$SINOV_DSN" \
     XT_DB_DSN_TEST_ADMIN="$ADMIN_DSN" \
+    TENDERAI_TRACKED_MANIFEST="$MANIFEST" \
+    RELEASE_SHA="${RELEASE_SHA:-}" \
     APP_ENV=staging \
     APP_PUBLIC_URL="$APP_PUBLIC_URL" \
     AUTH_COOKIE_SECURE="${AUTH_COOKIE_SECURE:-1}" \

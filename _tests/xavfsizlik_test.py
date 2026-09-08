@@ -322,14 +322,125 @@ def test_ai():
 # =====================================================================
 # 11. Sirlar
 # =====================================================================
+#: Kuzatilishi TAQIQLANGAN naqshlar. Nom bo'yicha, lekin tozalangan
+#: shablonlar ALOHIDA ro'yxatda (pastda) va ular bu naqshlardan
+#: chiqariladi -- ".env.example" ni ".env" deb hisoblash noto'g'ri
+#: bo'lardi.
+TAQIQ_NAQSH = [
+    (re.compile(r"(^|/)\.env$"),                       "haqiqiy .env"),
+    (re.compile(r"(^|/)\.env\.[A-Za-z0-9_-]+$"),        ".env varianti"),
+    (re.compile(r"(^|/)ngrok\.ya?ml$"),                "ngrok sozlamasi"),
+    (re.compile(r"\.pem$"),                            "shaxsiy kalit (pem)"),
+    (re.compile(r"\.key$"),                            "kalit fayli"),
+    (re.compile(r"\.dump$"),                            "baza dumpi"),
+    (re.compile(r"(^|/)id_rsa"),                       "ssh kaliti"),
+    (re.compile(r"(^|/)credentials?\.json$"),          "hisob ma'lumoti"),
+    (re.compile(r"service[-_]account[^/]*\.json$"),     "xizmat hisobi"),
+]
+
+#: Kuzatilishi RUXSAT etilgan TOZALANGAN shablonlar — ANIQ ro'yxat.
+#: Naqsh ishlatilmaydi: "*.example" degan qoida `secrets.example`
+#: kabi faylni ham jimgina o'tkazardi.
+RUXSAT_SHABLON = {
+    ".env.example",
+    "deploy/env/staging.env.example",
+    "deploy/env/production.env.example",
+}
+
+MANIFEST_SARLAVHA = "# tenderai-kuzatilgan-manifest v1"
+
+
+def manifest_oqi(yol, kutilgan_sha):
+    """Manifestni o'qiydi. `(holat, yollar)` qaytaradi.
+
+    Holatlar: `ok`, `yoq`, `bosh`, `buzuq`, `sha_farq`, `checksum`.
+    HECH BIRI "o'tdi" degani emas -- chaqiruvchi faqat `ok` da
+    tekshiruvni davom ettiradi. Dalil yo'q bo'lsa YASHIL bermaslik
+    shu funksiyaning butun maqsadi.
+    """
+    if not yol or not os.path.isfile(yol):
+        return "yoq", []
+    matn = io.open(yol, encoding="utf-8", errors="replace").read()
+    qatorlar = matn.splitlines()
+    if not qatorlar or qatorlar[0].strip() != MANIFEST_SARLAVHA:
+        return "buzuq", []
+    sha = ""
+    for q in qatorlar[1:3]:
+        if q.startswith("# sha:"):
+            sha = q.split(":", 1)[1].strip()
+    if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
+        return "buzuq", []
+    if kutilgan_sha and sha != kutilgan_sha:
+        return "sha_farq", []
+
+    # CHECKSUM — manifest o'zgartirilmaganini tasdiqlaydi.
+    yon = yol + ".sha256"
+    if os.path.isfile(yon):
+        import hashlib
+        haqiqiy = hashlib.sha256(
+            io.open(yol, "rb").read()).hexdigest()
+        kutilgan = io.open(yon, encoding="utf-8").read().strip()
+        if kutilgan and kutilgan != haqiqiy:
+            return "checksum", []
+
+    yollar = [q.strip() for q in qatorlar
+              if q.strip() and not q.startswith("#")]
+    if not yollar:
+        return "bosh", []
+    return "ok", yollar
+
+
+def taqiqlanganlar(yollar):
+    """Manifestdagi TAQIQLANGAN yo'llar. `(yol, sabab)` ro'yxati."""
+    topildi = []
+    for y in yollar:
+        if y in RUXSAT_SHABLON:
+            continue
+        for rx, sabab in TAQIQ_NAQSH:
+            if rx.search(y):
+                topildi.append((y, sabab))
+                break
+    return topildi
+
+
 def test_sirlar():
     bolim("11. Sirlar repozitoriyada YO'Q")
-    r = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
-                       cwd=ROOT, encoding="utf-8", errors="replace")
-    kuzatilgan = set(r.stdout.split())
-    for yomon in (".env", "ngrok.yml", "frontend/.env"):
-        check(f"`{yomon}` kuzatilmaydi", yomon not in kuzatilgan)
-    check("`.env.example` kuzatiladi (shablon)", ".env.example" in kuzatilgan)
+
+    # `git ls-files` ISHLATILMAYDI.
+    #
+    # O'LCHANGAN NUQSON (2026-09-09): darvoza `git archive` dan
+    # ochilgan daraxtda yuradi va u yerda `.git` YO'Q. Buyruq BO'SH
+    # ro'yxat qaytarardi, "`.env` kuzatilmaydi" kabi tekshiruvlar esa
+    # bo'sh ro'yxatda ALBATTA o'tardi -- ya'ni ular hech narsani
+    # isbotlamasdi. Muammo faqat bitta tekshiruv (`.env.example`
+    # KUZATILADI) qizil bo'lgani uchun ko'rindi.
+    #
+    # Endi dalil manbai — BARE REPOZITORIYDAN aynan shu SHA bo'yicha
+    # hosil qilingan manifest. `.git` arxivga QO'SHILMAYDI.
+    yol = os.environ.get("TENDERAI_TRACKED_MANIFEST", "")
+    sha = os.environ.get("RELEASE_SHA", "")
+    holat, yollar = manifest_oqi(yol, sha)
+
+    izoh = {"yoq": "manifest fayli YO'Q",
+            "bosh": "manifest BO'SH",
+            "buzuq": "manifest sarlavhasi/SHA si BUZUQ",
+            "sha_farq": "manifest SHA si nomzod SHA ga MOS EMAS",
+            "checksum": "manifest checksumi MOS EMAS"}
+    if holat != "ok":
+        # DALIL YO'Q -> QIZIL. Bu "o'tkazib yuborildi" emas.
+        check("kuzatilgan fayllar manifesti bor va butun", False,
+              izoh.get(holat, holat))
+        return
+    check("kuzatilgan fayllar manifesti bor va butun", True,
+          f"{len(yollar)} fayl, sha={sha[:12]}")
+
+    yomonlar = taqiqlanganlar(yollar)
+    check("taqiqlangan sir fayllari KUZATILMAYDI", not yomonlar,
+          "; ".join(f"{y} ({s})" for y, s in yomonlar[:5]))
+
+    # Shablon KUZATILISHI kerak: usiz operator nimadan nusxa olishini
+    # bilmaydi va sozlamani qo'lda to'qiydi.
+    check("`.env.example` kuzatiladi (shablon)", ".env.example" in yollar)
 
     ex = _oqi(".env.example")
     check("shablonda HAQIQIY API kaliti yo'q",
@@ -359,6 +470,92 @@ def test_sirlar():
     check(f"kuzatilgan {len(kuzatilgan)} faylda sir naqshi YO'Q",
           not topildi, str(topildi[:3]))
 
+
+def _manifest_yoz(kat, nom, sha, yollar, sarlavha=None, checksum=True):
+    """Sun'iy manifest yozadi. Sinovlar `.git` ga TAYANMAYDI."""
+    import hashlib
+    yol = os.path.join(kat, nom)
+    qatorlar = [sarlavha if sarlavha is not None else MANIFEST_SARLAVHA,
+                f"# sha: {sha}"] + list(yollar)
+    io.open(yol, "w", encoding="utf-8", newline=chr(10)).write(
+        chr(10).join(qatorlar) + chr(10))
+    if checksum:
+        io.open(yol + ".sha256", "w", encoding="utf-8").write(
+            hashlib.sha256(io.open(yol, "rb").read()).hexdigest())
+    return yol
+
+
+def test_manifest_qoriqchasi():
+    """Manifest shartnomasi: DALIL YO'Q -> QIZIL, hech qachon yashil.
+
+    Bu bo'lim `.git` GA TAYANMAYDI: hamma holat sun'iy manifest bilan
+    o'lchanadi. Aks holda sinovning o'zi darvozada yurmasdi -- ya'ni
+    yolg'on yashilni tuzatib, uning qo'riqchasini yana yolg'on
+    yashilga qo'ygan bo'lardik.
+    """
+    bolim("11b. Manifest qo'riqchasi — dalil yo'q bo'lsa QIZIL")
+    import tempfile
+    SHA = "a" * 40
+    with tempfile.TemporaryDirectory() as t:
+        # CASE G — sog'lom daraxt.
+        y = _manifest_yoz(t, "ok", SHA, ["api/main.py", ".env.example",
+                                         "deploy/env/staging.env.example"])
+        holat, yollar = manifest_oqi(y, SHA)
+        check("CASE G: sog'lom manifest o'qiladi", holat == "ok", holat)
+        check("CASE G: taqiq topilmaydi", not taqiqlanganlar(yollar))
+
+        # CASE A — haqiqiy `.env` kuzatilgan.
+        _, ya = manifest_oqi(_manifest_yoz(t, "a", SHA,
+                                           ["api/main.py", ".env"]), SHA)
+        check("CASE A: haqiqiy `.env` ANIQLANADI",
+              any(s == "haqiqiy .env" for _y, s in taqiqlanganlar(ya)))
+
+        # CASE B — ruxsat etilgan shablon taqiq deb belgilanmaydi.
+        _, yb = manifest_oqi(_manifest_yoz(t, "b", SHA,
+                                           [".env.example"]), SHA)
+        check("CASE B: tozalangan shablon TAQIQ EMAS",
+              not taqiqlanganlar(yb))
+
+        # CASE F — shaxsiy kalit.
+        _, yf = manifest_oqi(_manifest_yoz(t, "f", SHA,
+                                           ["deploy/tls/server.key"]), SHA)
+        check("CASE F: shaxsiy kalit ANIQLANADI",
+              any(s == "kalit fayli" for _y, s in taqiqlanganlar(yf)))
+
+        # `.env.staging` kabi variant ham taqiqlanadi, `.env.example`
+        # esa yo'q -- naqsh ikkalasiga ham tushadi, ro'yxat ajratadi.
+        _, yv = manifest_oqi(_manifest_yoz(t, "v", SHA,
+                                           [".env.staging"]), SHA)
+        check("`.env.staging` varianti ANIQLANADI",
+              any(s == ".env varianti" for _y, s in taqiqlanganlar(yv)))
+
+        # CASE C — manifest yo'q.
+        check("CASE C: manifest YO'Q -> `yoq`",
+              manifest_oqi(os.path.join(t, "yoq"), SHA)[0] == "yoq")
+        check("CASE C: bo'sh yo'l ham `yoq`",
+              manifest_oqi("", SHA)[0] == "yoq")
+
+        # CASE D — SHA mos emas.
+        check("CASE D: SHA farqi ANIQLANADI",
+              manifest_oqi(_manifest_yoz(t, "d", "b" * 40,
+                                         ["api/main.py"]), SHA)[0]
+              == "sha_farq")
+
+        # CASE E — bo'sh manifest.
+        check("CASE E: BO'SH manifest -> `bosh`",
+              manifest_oqi(_manifest_yoz(t, "e", SHA, []), SHA)[0] == "bosh")
+
+        # Buzuq sarlavha.
+        check("buzuq sarlavha ANIQLANADI",
+              manifest_oqi(_manifest_yoz(t, "x", SHA, ["a.py"],
+                                         sarlavha="# boshqa"), SHA)[0]
+              == "buzuq")
+
+        # CHECKSUM buzilishi — manifest KEYIN o'zgartirilgan.
+        yc = _manifest_yoz(t, "c", SHA, ["api/main.py"])
+        io.open(yc, "a", encoding="utf-8").write(".env" + chr(10))
+        check("checksum farqi ANIQLANADI",
+              manifest_oqi(yc, SHA)[0] == "checksum")
 
 # =====================================================================
 # 12. Baza huquqlari (bazali)
@@ -549,6 +746,7 @@ def main():
     test_sql()
     test_ai()
     test_sirlar()
+    test_manifest_qoriqchasi()
     test_boglqliklar_zaifligi()
 
     if args.bazasiz or not os.environ.get("XT_DB_DSN"):
