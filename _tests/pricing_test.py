@@ -470,6 +470,26 @@ console.log(JSON.stringify(cases.map((c) => mod.calculate(c, t))))
 """
 
 
+def _node() -> str:
+    """Node ijrochisi — PATH ga TAYANMAYDI.
+
+    O'LCHANGAN (2026-09-08): natija PATH dagi birinchi `node` ga
+    bog'liq edi. Darvoza hostida ikkita Node bor:
+
+        /usr/bin/node            v22.22.1  — TS QO'LLAB-QUVVATLASHISIZ
+        ~/.nvm/.../v22.23.2      v22.23.2  — TS ishlaydi
+
+    Ikkinchisi `/home/ibragimoff` ichida (0750), ya'ni darvoza
+    yuradigan `tenderai` foydalanuvchisi uni O'QIY OLMAYDI. Natijada
+    ishlab chiquvchi mashinasida sinov o'tardi, darvozada esa
+    `ERR_NO_TYPESCRIPT` bilan yiqilardi — "menda ishlayapti" sinfi.
+
+    `TENDERAI_NODE` — aniq ko'rsatish yo'li. Berilmasa xulq
+    o'zgarmaydi (`node`), ya'ni mavjud o'rnatmalar buzilmaydi.
+    """
+    return os.environ.get("TENDERAI_NODE") or "node"
+
+
 def _js_results(cases):
     """JS ijrosini Node bilan ishga tushiradi. Node yo'q bo'lsa None."""
     tmp = tempfile.mkdtemp(prefix="pricing_parity_")
@@ -499,7 +519,7 @@ def _js_results(cases):
             # Bayroq ikkala versiyada ham qabul qilinadi (o'lchandi),
             # shuning uchun uni ANIQ berish natijani versiyadan
             # mustaqil qiladi.
-            ["node", "--experimental-strip-types", harness, JS_FILE],
+            [_node(), "--experimental-strip-types", harness, JS_FILE],
             input=json.dumps(cases, ensure_ascii=False).encode("utf-8"),
             capture_output=True, timeout=60)
     except (FileNotFoundError, OSError):
