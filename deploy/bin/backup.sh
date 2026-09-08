@@ -49,12 +49,56 @@ set -a
 set +a
 
 : "${XT_DB_DSN:?XT_DB_DSN kerak}"
+
+# --- DUMP EGASI ROLI BILAN OLINADI ------------------------------------------
+# O'LCHANGAN NUQSON (2026-09-05 dan 2026-09-08 gacha, TO'RT KUN):
+#
+#     pg_dump: error: failed to get data for sequence "act_id_seq";
+#     user may lack SELECT privilege on the sequence
+#
+# `pg_dump` ILOVA roli (`tai_service`) bilan yurardi. Bu rol ATAYLAB
+# minimal: unga faqat kerakli ob'ektlarga huquq beriladi. Lekin
+# `pg_dump` BUTUN bazani o'qishi kerak -- ya'ni har yangi jadval va
+# har yangi KETMA-KETLIK uchun alohida grant talab qilinardi.
+#
+# Bitta grant unutilsa zaxira to'xtaydi. Va u JIMGINA to'xtaydi:
+# staging zaxirasi to'rt kun yiqilib turdi va buni hech kim
+# sezmadi, chunki `ALERT_TELEGRAM_CHAT` va `ALERT_EMAIL` bo'sh.
+#
+# NEGA GRANT BERILMADI: ilova roliga huquq qo'shish uni SEMIRTIRADI va
+# bu loyihaning asosiy qarorlaridan biriga zid -- ish vaqtidagi rol
+# eng kam imtiyozli qolishi kerak. Zaxira esa TABIATAN hamma narsani
+# o'qiydi, ya'ni bu ish EGASI rolining ishi. `restore-test.sh`
+# allaqachon shunday qiladi; `backup.sh` esa qolib ketgan edi.
+#
+# ZAXIRA QIYMAT YO'Q: ilova roliga jimgina qaytish aynan shu to'rt
+# kunlik nosozlikni qaytarardi.
+#
+# TEKSHIRUV `${VAR:?...}` BILAN EMAS: ko'p qatorli xabar `:?` ichida
+# bash tahlilini BUZADI (o'lchandi -- skript "command not found" va
+# "unbound variable" bilan sinadi). Shuning uchun aniq `if`.
+if [ -z "${XT_DB_DSN_OWNER:-}" ]; then
+    echo "XATO: zaxira uchun XT_DB_DSN_OWNER kerak (egasi roli)." >&2
+    echo "      Ilova roli bilan pg_dump har yangi ketma-ketlikda" >&2
+    echo "      yiqiladi -- 2026-09-05..08 da aynan shunday bo'ldi:" >&2
+    echo "      'failed to get data for sequence act_id_seq'." >&2
+    exit 2
+fi
 KATALOG="${BACKUP_DIR:-/var/backups/tenderai}/${MUHIT}"
 KUN="${BACKUP_KEEP_DAYS:-14}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 FAYL="${KATALOG}/tenderai-${MUHIT}-${STAMP}.dump"
 
+# --- ZAXIRA HAMMAGA O'QILADIGAN BO'LMASIN -----------------------------------
+# O'LCHANGAN (2026-09-08): production nusxalari `-rw-r--r--` edi, ya'ni
+# xostdagi HAR QANDAY foydalanuvchi butun ishlab chiqarish bazasini
+# o'qiy olardi -- parollar xeshi, hujjatlar, mijoz ma'lumoti.
+#
+# Baza ustidagi barcha rol ajratishlari shu bitta fayl orqali chetlab
+# o'tilardi.
+umask 077
 mkdir -p "$KATALOG"
+chmod 700 "$KATALOG"
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 
 # --- YARIM DUMP QOLMASIN ----------------------------------------------------
@@ -86,7 +130,7 @@ trap yarimni_ochir EXIT
 log "zaxira boshlandi -> $FAYL"
 # `--no-owner --no-privileges`: tiklash BOSHQA rol bilan ham ishlasin
 # (tiklash mashqi vaqtinchalik bazaga tiklaydi).
-pg_dump "$XT_DB_DSN" \
+pg_dump "$XT_DB_DSN_OWNER" \
     --format=custom \
     --compress=6 \
     --no-owner --no-privileges \
