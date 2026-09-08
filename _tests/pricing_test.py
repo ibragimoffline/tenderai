@@ -438,7 +438,14 @@ PARITY_CASES = [
 # TypeScript: Node 22.6+ tur izohlarini o'zi olib tashlaydi (pricing.ts
 # ATAYLAB faqat "o'chiriladigan" TS sintaksisidan iborat). Node eskiroq
 # bo'lsa import yiqiladi va sinov buni ochiq aytadi.
-_JS_HARNESS = """
+# XOM SATR (`r"""`). Ichida JS regexi bor (`/\{(\w+)\}/g`) va
+# Python uni O'ZINING ekran ketma-ketligi deb o'qiydi:
+#
+#     SyntaxWarning: "\{" is an invalid escape sequence
+#
+# Hozircha ogohlantirish, kelgusi Python da XATO. JS matni Python
+# uchun MA'NOSIZ bo'lishi kerak — xom satr aynan shuni ta'minlaydi.
+_JS_HARNESS = r"""
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'

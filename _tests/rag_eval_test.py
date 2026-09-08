@@ -304,12 +304,38 @@ def test_regressiya(b):
 
     # GIBRID ENG YAXSHI BO'LIB QOLSIN — bu arxitektura qarori va
     # u o'lchov bilan himoyalanadi.
-    g = j["usullar"]["gibrid"]
-    check("gibrid MRR leksik va semantikadan past emas",
-          g["mrr"] >= max(j["usullar"]["leksik"]["mrr"],
-                          j["usullar"]["semantik"]["mrr"]) - 1e-9,
-          f"gibrid={g['mrr']:.3f} leksik={j['usullar']['leksik']['mrr']:.3f} "
-          f"semantik={j['usullar']['semantik']['mrr']:.3f}")
+    # O'LCHANMAGAN != PASSAYGAN, va O'LCHANMAGAN != CRASH.
+    #
+    # O'LCHANGAN NUQSON (2026-09-08): korpusda baholanadigan bo'lak
+    # bo'lmasa `mrr` `None` bo'ladi va bu qator
+    #
+    #     TypeError: '>' not supported between instances of
+    #                'NoneType' and 'NoneType'
+    #
+    # bilan qulardi — butun to'plam xulosaga yetmasdan o'lardi va
+    # darvoza "XULOSA QATORI YO'Q" derdi. Ya'ni "o'lchay olmadim"
+    # "yurgizuvchi buzuq" bo'lib ko'rinardi.
+    #
+    # Yuqoridagi `citation_hit_rate` tekshiruvida bu naqsh ALLAQACHON
+    # to'g'ri (`is not None` qo'riqchisi bilan); bu yerda tushib
+    # qolgan edi.
+    #
+    # `None` NOLGA AYLANTIRILMAYDI: nol "eng yomon natija" degan
+    # ma'noli o'lchov, `None` esa "o'lchov yo'q". Ularni qo'shish
+    # bo'sh korpusda soxta regressiya ko'rsatardi.
+    _mrr = {u: (j["usullar"].get(u) or {}).get("mrr")
+            for u in ("gibrid", "leksik", "semantik")}
+    if any(v is None for v in _mrr.values()):
+        # PASS EMAS: darvoza baribir to'siladi, lekin SABAB to'g'ri
+        # aytiladi — korpus yo'q, sifat pasaygan emas.
+        check("gibrid MRR o'lchandi", False,
+              "MRR O'LCHANMADI (korpusda baholanadigan bo'lak yo'q): "
+              + ", ".join(f"{u}={v}" for u, v in _mrr.items()))
+    else:
+        check("gibrid MRR leksik va semantikadan past emas",
+              _mrr["gibrid"] >= max(_mrr["leksik"], _mrr["semantik"]) - 1e-9,
+              f"gibrid={_mrr['gibrid']:.3f} leksik={_mrr['leksik']:.3f} "
+              f"semantik={_mrr['semantik']:.3f}")
     # IKKALA faylni ham tozalaymiz. `rag_eval.py` JSON yonida `.txt`
     # ham yozadi va faqat JSON o'chirilsa `.txt` ishchi daraxtda
     # qolib ketardi — kuzatilmagan artefakt.
