@@ -6,6 +6,7 @@
 # ko'taradi. nginx ga, PostgreSQL ga va zaxira nusxa tartibiga
 # TEGMAYDI.
 #
+#     sudo tender-staging-docker yangila     # oynani GitHub dan yangilaydi
 #     sudo tender-staging-docker tekshir     # o'lchaydi, o'zgartirmaydi
 #     sudo tender-staging-docker qur         # imij, o'zgarmas SHA dan
 #     sudo tender-staging-docker ishga       # 8012 da ko'taradi
@@ -72,6 +73,19 @@ muhit_filtrla() {   # $1 = daraxt, $2 = chiqish fayli
 }
 
 case "$AMAL" in
+yangila)
+    # FAQAT OYNA. Joylashtirish YO'Q, systemd YO'Q, nginx YO'Q.
+    #
+    # `tender-deploy-ai` ham `fetch` qiladi, lekin darhol RELIZ
+    # yasaydi va xizmatni qayta ko'taradi. Faza 2 da bu mumkin emas:
+    # butun ma'no systemd relizini TEGILMAGAN qoldirishda. Shuning
+    # uchun alohida, tor amal.
+    #
+    # `fetch` ishlayotgan tizimga TEGMAYDI: u faqat bare oynaga yozadi.
+    sudo -u tenderai git --git-dir="$REPO" fetch --prune --tags origin
+    echo "[yangila] oyna main : $(sudo -u tenderai git --git-dir="$REPO" rev-parse main)"
+    ;;
+
 tekshir)
     echo "docker       : $(docker version --format '{{.Server.Version}}' 2>/dev/null || echo YO\'Q)"
     SHA="$(sha_ol)";  QISQA="${SHA:0:12}"
@@ -134,5 +148,5 @@ toxtat)  docker rm -f tenderai-staging >/dev/null 2>&1 \
 holat)   docker ps -a --filter 'name=^tenderai-staging$' \
              --format '{{.Names}} {{.Status}} {{.Image}}' ;;
 
-*) echo "foydalanish: $0 <tekshir|qur|ishga|sogliq|toxtat|holat>" >&2; exit 2 ;;
+*) echo "foydalanish: $0 <yangila|tekshir|qur|ishga|sogliq|toxtat|holat>" >&2; exit 2 ;;
 esac
