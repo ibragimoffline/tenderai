@@ -861,9 +861,31 @@ def main() -> None:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM tender_requirement "
                             "WHERE name LIKE '[SINOV]%'")
-        test_halqa_olchovi(conn)
-        test_hisoblagichlar(conn)
-        test_migratsiya_jurnali(conn)
+        # `kod_tasdigi` QATLAMI UCHUN DOMEN HOLATI.
+        #
+        # O'LCHANGAN NUQSON (2026-09-09, darvoza): `test_halqa_olchovi`
+        # `v_inson_halqasi` da UCH qatlamni kutadi, lekin `kod_tasdigi`
+        # `catalog_product_code` dan `GROUP BY` bilan chiqadi. Jadval
+        # bo'sh bo'lsa qatlam BUTUNLAY yo'qoladi va tekshiruv
+        # ['talab_korigi', 'yonaltirish'] deb yiqilardi.
+        #
+        # Bu kod nuqsoni emas edi -- korpus tarkibi. Endi qator
+        # SINOVNIKI va chiqishda o'chadi.
+        #
+        # Tekshiruvning O'ZI global (kompaniya bo'yicha filtr yo'q),
+        # shuning uchun bitta qator yetarli.
+        from api import db as _apidb
+        import fikstura
+        _apidb.init_pool()
+        with fikstura.Domen(_apidb) as _f:
+            _cid = _f.kompaniya("review")
+            _pid = _f.mahsulot(_cid, "review_m")
+            if _f.kod_taklifi(_cid, _pid) is None:
+                print("\n  [i] `dim_good_code` BO'SH — `kod_tasdigi` qatlami")
+                print("      o'lchanmadi; sabab KORPUS, kod emas.")
+            test_halqa_olchovi(conn)
+            test_hisoblagichlar(conn)
+            test_migratsiya_jurnali(conn)
         conn.close()
 
     otdi = sum(1 for _n, ok, _d in _results if ok)

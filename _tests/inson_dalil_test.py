@@ -549,12 +549,37 @@ def main():
     else:
         from api import db
         db.init_pool()
-        test_ajratish(db)
-        test_cheklovlar(db)
-        test_qorovul_haqiqatan(db)
-        test_audit(db)
-        test_metrikalar(db)
-        test_darvoza(db)
+
+        # DOMEN HOLATI SINOVNIKI, ATROFDAN OLINMAYDI.
+        #
+        # O'LCHANGAN NUQSON (2026-09-09, darvoza): ikkita tekshiruv
+        # `catalog_product_code` da qator BO'LISHIGA tayanardi:
+        #
+        #   * `test_qorovul_haqiqatan` -- QARORI YO'Q qator qidiradi
+        #     ("hamma qator allaqachon qaror qilingan" deb yiqilardi);
+        #   * `test_darvoza` -- `kod_tasdigi` QATLAMI `v_sifat_darvoza`
+        #     da paydo bo'lishini kutadi, qatlam esa o'sha jadvaldan
+        #     `GROUP BY` bilan chiqadi va jadval bo'sh bo'lsa BUTUNLAY
+        #     yo'qoladi (['talab_korigi', 'yonaltirish']).
+        #
+        # Ikkalasi ham korpus tarkibiga bog'liq edi, kodga emas.
+        import fikstura
+        with fikstura.Domen(db) as f:
+            cid = f.kompaniya("dalil")
+            pid = f.mahsulot(cid, "dalil_m")
+            kod = f.kod_taklifi(cid, pid)      # qaror YO'Q -> navbatda
+            if kod is None:
+                print("\n  [i] `dim_good_code` BO'SH — `kod_tasdigi` qatlami")
+                print("      o'lchanmadi. Bu SKIP emas: quyidagi ikki")
+                print("      tekshiruv shu sababdan yiqiladi va sabab")
+                print("      KORPUS, kod emas.")
+
+            test_ajratish(db)
+            test_cheklovlar(db)
+            test_qorovul_haqiqatan(db)
+            test_audit(db)
+            test_metrikalar(db)
+            test_darvoza(db)
         test_uchidan_uchiga(db)
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
