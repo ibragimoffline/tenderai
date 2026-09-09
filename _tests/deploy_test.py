@@ -3437,7 +3437,9 @@ def test_tiklash_metasi():
     check("meta ham UZOQQA ketadi", '"$META" "${META}.sha256"' in b)
     check("relizning SHA si yoziladi", "reliz_sha=" in b)
     check("tasdiq SHA si yoziladi", "tasdiq_sha=" in b)
-    check("migratsiya holati yoziladi", "migratsiya_jurnal" in b)
+    # Jadval nomi §8o da `migratsiya.py` bilan SOLISHTIRILADI --
+    # bu yerda faqat maydon YOZILISHI tekshiriladi.
+    check("migratsiya holati yoziladi", "schema_migration" in b)
 
     # ASOSIY SHART: `=` dan KEYINGISI TASHLANADI. Zaxira sirni
     # ikkinchi joyga -- uzoq omborga, boshqa ma'muriyat ostiga --
