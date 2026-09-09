@@ -2,11 +2,16 @@
 # =============================================================================
 # Tender AI — FAYL YUKLASH uchidan-uchiga sinovi (HAQIQIY HTTP)
 # =============================================================================
-#     e2e-fayl.sh <url> <login> <parol> [--ai] [--proksi] \n#                 [--begona <login> <parol>]
+#     e2e-fayl.sh <url> <login> <parol> (--ai | --ai-yoq)
+#                 [--proksi] [--begona <login> <parol>]
+#
+# AI REJIMI MAJBURIY AYTILADI. `--ai` PULLIK model chaqiradi;
+# `--ai-yoq` uni ataylab o'tkazadi. Ikkalasi ham berilmasa skript
+# BOSHLANMAYDI -- bayroqni unutish yashil bermasligi uchun.
 #
 # MISOL:
-#     e2e-fayl.sh https://staging.example.uz/api broker 'parol' --ai
-#     e2e-fayl.sh http://127.0.0.1:8000 zztest 'parol'
+#     e2e-fayl.sh http://localhost:8091/api zze2e_a 'parol' \
+#                 --ai-yoq --proksi --begona zze2e_b 'parol'
 #
 # NEGA BU SKRIPT BOR. `_tests/yuklama_test.py` `TestClient` bilan
 # yuradi: u ASGI ilovasini TO'G'RIDAN-TO'G'RI chaqiradi va tarmoqqa
@@ -32,13 +37,24 @@ LOGIN="${2:?login kerak}"
 PAROL="${3:?parol kerak}"
 shift 3
 
-AI=0
+# AI REJIMI UCH HOLATLI, IKKI EMAS.
+#
+# Ilgari `--ai` berilmasa bo'lim `fail` chaqirardi, ya'ni PULLIK
+# tekshiruv AMALDA MAJBURIY edi va relizni tasdiqlash uchun har safar
+# pul sarflanardi. Endi u ATAYLAB ixtiyoriy.
+#
+# Lekin "bayroqni unutish" YASHIL bermasligi kerak. Shuning uchun
+# rejim ANIQ aytiladi: `--ai` yoki `--ai-yoq`. Ikkalasi ham
+# berilmasa skript boshlanmaydi. Ya'ni "unutish" -> XATO,
+# "ataylab o'chirish" -> ruxsat etilgan tanlov.
+AI=""
 PROKSI=0
 B_LOGIN=""
 B_PAROL=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --ai) AI=1; shift ;;
+        --ai-yoq) AI=0; shift ;;
         # Oldida teskari proksi TURISHI SHART deb e'lon qiladi:
         # ilovaning 413 i XATO deb sanaladi.
         --proksi) PROKSI=1; shift ;;
@@ -47,16 +63,28 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+if [ -z "$AI" ]; then
+    echo "XATO: AI rejimi AYTILMAGAN. \`--ai\` (PULLIK chaqiruv) yoki" >&2
+    echo "      \`--ai-yoq\` bering. Bayroqni unutish YASHIL bermaydi." >&2
+    exit 2
+fi
+
 URL="${URL%/}"
 ISH="$(mktemp -d)"
 trap 'rm -rf "$ISH"' EXIT
 
 OTDI=0
 YIQILDI=0
+# UCHINCHI HOLAT. Loyihaning umumiy qoidasi: o'lchanmagan narsa
+# NOLGA ham, O'TDIGA ham teng emas. `--ai-yoq` bilan o'tkazilgan
+# bo'lim shu yerda sanaladi va yakuniy hukmga TA'SIR QILMAYDI,
+# lekin xulosada KO'RINADI.
+OLCHANMADI=0
 log()  { printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 ok()   { OTDI=$((OTDI+1));   printf '  [OK  ] %s\n' "$*"; }
 fail() { YIQILDI=$((YIQILDI+1)); printf '  [XATO] %s\n' "$*"; }
 check() { if [ "$1" = "1" ]; then ok "$2"; else fail "$2 ${3:+-- $3}"; fi; }
+olchanmadi() { OLCHANMADI=$((OLCHANMADI+1)); printf '  [O.LCH] %s\n' "$*"; }
 
 # JSON MAYDONINI PYTHON BILAN OLAMIZ.
 #
@@ -107,8 +135,42 @@ log "sinov fayli: $(wc -c < "$ISH/zz_e2e.txt") bayt  sha=${SHA_KUTILGAN:0:16}"
 echo
 
 # =============================================================================
+# 0. MANZIL VA SOG'LIQ — kirishdan OLDIN
+# =============================================================================
+# NEGA SHU YERDA. Noto'g'ri manzil (masalan `/api` ikki marta) barcha
+# keyingi shartlarni yiqitadi va sabab "login yiqildi" bo'lib
+# ko'rinadi. O'LCHANGAN CHALG'ISH: staging oldida nginx `/api`
+# prefiksi bilan turadi, ya'ni to'g'ri manzil `.../api`, lekin
+# so'rovlar `$URL/auth/login` deb yasaladi — prefiks IKKI MARTA
+# yozilsa `404` keladi va u xuddi "endpoint yo'q" kabi ko'rinadi.
+echo "--- 0. Manzil va sog'liq ---"
+case "$URL" in
+    */api/api|*/api/api/*)
+        fail "manzilda \`/api\` IKKI MARTA: $URL"
+        echo "Manzil noto'g'ri, davom etib bo'lmaydi." >&2; exit 1 ;;
+esac
+
+KOD="$(curl -sS -o "$ISH/sogliq.json" -w '%{http_code}' "$URL/health" || echo 000)"
+check "$([ "$KOD" = "200" ] && echo 1 || echo 0)" "/health -> 200" "$KOD"
+if [ "$KOD" != "200" ]; then
+    echo "Manzil javob bermadi ($URL/health -> $KOD)." >&2
+    echo "Prefiksni tekshiring: staging da u \`http://localhost:8091/api\`." >&2
+    exit 1
+fi
+
+KOD="$(curl -sS -o "$ISH/tayyor.json" -w '%{http_code}' "$URL/ready" || echo 000)"
+check "$([ "$KOD" = "200" ] && echo 1 || echo 0)" "/ready -> 200" "$KOD"
+
+# TOKENSIZ `/auth/me` — 401. Bu bir vaqtning o'zida ikki narsani
+# ko'rsatadi: endpoint BOR va u himoyalangan.
+KOD="$(curl -sS -o /dev/null -w '%{http_code}' "$URL/auth/me" || echo 000)"
+check "$([ "$KOD" = "401" ] && echo 1 || echo 0)" \
+      "tokensiz /auth/me -> 401" "$KOD"
+
+# =============================================================================
 # 1. KIRISH
 # =============================================================================
+echo
 echo "--- 1. Kirish ---"
 KOD="$(curl -sS -o "$ISH/login.json" -w '%{http_code}' \
     -c "$ISH/cookies" -H 'Content-Type: application/json' \
@@ -125,6 +187,42 @@ check "$(grep -qi '"token"' "$ISH/login.json" && echo 0 || echo 1)" \
       "sessiya tokeni TANADA qaytmaydi (HttpOnly cookie)"
 
 K=(-b "$ISH/cookies" -c "$ISH/cookies" -H "X-CSRF-Token: $CSRF")
+
+# KIM KIRDI. `/auth/me` sessiya cookie'si haqiqatan ishlayotganini
+# ko'rsatadi: login javobi 200 bo'lishi cookie'ning KEYINGI so'rovda
+# qabul qilinishini isbotlamaydi.
+KOD="$(curl -sS "${K[@]}" -o "$ISH/me.json" -w '%{http_code}' "$URL/auth/me")"
+check "$([ "$KOD" = "200" ] && echo 1 || echo 0)" "/auth/me -> 200" "$KOD"
+ME="$(jsonf username < "$ISH/me.json" 2>/dev/null || true)"
+[ -n "$ME" ] || ME="$(jsonf account.username < "$ISH/me.json" 2>/dev/null || true)"
+check "$([ "$ME" = "$LOGIN" ] && echo 1 || echo 0)" \
+      "/auth/me KIRGAN hisobni qaytaradi" "$ME"
+
+# CSRF HIMOYASI — SALBIY SINOV.
+#
+# Token BERILISHI uni MAJBURLASHNI isbotlamaydi. O'zgartiruvchi
+# so'rov `X-CSRF-Token` SIZ yuboriladi va u RAD ETILISHI kerak.
+# Shartnoma (`api/main.py`): cookie bilan kirilgan, metod
+# o'zgartiruvchi va yo'l istisno emas -> `AUTH_CSRF_MISMATCH` -> 403.
+#
+# 401 EMAS: 401 "kim ekaning noma'lum" degani bo'lardi va u
+# sessiyaning O'ZI ishlamayotganini yashirardi.
+KOD="$(curl -sS -o /dev/null -w '%{http_code}' \
+    -b "$ISH/cookies" -H 'Content-Type: application/json' \
+    -d '{"doc_type":"guarantee_letter","name":"ZZE2E CSRF"}' \
+    "$URL/company/documents")"
+check "$([ "$KOD" = "403" ] && echo 1 || echo 0)" \
+      "CSRF sarlavhasisiz o'zgartirish -> 403" "$KOD"
+
+# NOTO'G'RI CSRF ham rad etilsin: bo'sh sarlavha bilan o'tib
+# ketmasin.
+KOD="$(curl -sS -o /dev/null -w '%{http_code}' \
+    -b "$ISH/cookies" -H 'Content-Type: application/json' \
+    -H 'X-CSRF-Token: zze2e-notogri-token' \
+    -d '{"doc_type":"guarantee_letter","name":"ZZE2E CSRF"}' \
+    "$URL/company/documents")"
+check "$([ "$KOD" = "403" ] && echo 1 || echo 0)" \
+      "NOTO'G'RI CSRF tokeni -> 403" "$KOD"
 
 # =============================================================================
 # 2. KOMPANIYA HUJJATI
@@ -357,15 +455,30 @@ PYSSE
     check "$(grep -q 'zz_e2e.txt' "$ISH/ajratilgan.txt" && echo 1 || echo 0)" \
           "iqtibos YUKLANGAN faylga ishora qiladi"
 else
-    # SKIP JIM EMAS. Bu bo'lim PULLIK model chaqiradi, shuning uchun
-    # ATAYLAB ixtiyoriy — lekin o'lchanmagani AYTILADI.
-    fail "AI javobi va IQTIBOS O'LCHANMADI — \`--ai\` bering (PULLIK chaqiruv)"
+    # SKIP JIM EMAS, lekin YIQILISH ham emas.
+    #
+    # Ilgari bu yerda `fail` turardi, ya'ni pullik chaqiruvsiz E2E
+    # HECH QACHON o'tmasdi va relizni tasdiqlash har safar pul
+    # sarflardi. Reliz BUTUNLIGI esa modelning javobiga bog'liq
+    # emas: u yuklash, chegara, cookie, CSRF va ijarachi
+    # izolyatsiyasi bilan o'lchanadi.
+    #
+    # O'tkazilgani UCHINCHI holat sifatida sanaladi va yakuniy
+    # xulosada ko'rinadi -- "o'tdi" deb yozilmaydi.
+    olchanmadi "AI javobi va IQTIBOS — ATAYLAB o'tkazildi (\`--ai-yoq\`, PULLIK)"
 fi
 
 # =============================================================================
 echo
 echo "=============================================================="
-printf 'NATIJA: %d o%s, %d yiqildi\n' "$OTDI" "'tdi" "$YIQILDI"
+printf 'NATIJA: %d o%s, %d yiqildi, %d o%s\n' \
+    "$OTDI" "'tdi" "$YIQILDI" "$OLCHANMADI" "'lchanmadi"
+if [ "$AI" = "1" ]; then
+    echo "AI E2E: YURDI (pullik chaqiruv qilindi)"
+else
+    echo "AI E2E: YURMADI — ixtiyoriy pullik tekshiruv o'chirilgan."
+    echo "        Bu ASOSIY tekshiruvning yiqilishi EMAS."
+fi
 echo "=============================================================="
 echo "DIQQAT: bu BRAUZER sinovi EMAS. Tugma bosish, fayl tanlash"
 echo "dialogi va UI holati (Processing -> Ready) SINALMADI."

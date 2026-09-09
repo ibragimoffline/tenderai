@@ -258,7 +258,7 @@ qulflangan.
 
 ---
 
-## 5c. Staging E2E darvozasi — **majburiy**
+## 5c. Staging E2E darvozasi — **asosiy qism majburiy**
 
 `deploy.sh` staging da `.verified` **yozishdan oldin**
 `deploy/bin/e2e-fayl.sh` ni yurgizadi. Yiqilsa — orqaga qaytarish,
@@ -269,29 +269,76 @@ beryaptimi" degan savolga javob beradi. Fayl yuklash oqimini —
 proksi tana chegarasi, `Content-Disposition`, cookie/CSRF,
 `StreamingResponse`, ijarachi chegarasi — u **umuman** tekshirmaydi.
 `_tests/yuklama_test.py` ham tekshirmaydi: u `TestClient` bilan
-yuradi va tarmoqqa **chiqmaydi**, ya'ni Caddy yo'lda **turmaydi**.
+yuradi va tarmoqqa **chiqmaydi**, ya'ni proksi yo'lda **turmaydi**.
 
-```
-E2E_URL=https://staging.example.uz/api
-E2E_LOGIN=          E2E_PAROL=
-E2E_BEGONA_LOGIN=   E2E_BEGONA_PAROL=
-```
+### Ikki qatlam: ASOSIY va AI
 
-**Ikki hisob shart:** ijarachi chegarasi bitta hisob bilan
-o'lchanmaydi. **Sozlanmagani "o'tdi" emas** — `deploy.sh` `:?`
-bilan to'xtaydi.
+| | Nima o'lchanadi | Majburiymi | Narxi |
+|---|---|---|---|
+| **ASOSIY** | manzil, `/health`, `/ready`, kirish, `/auth/me`, CSRF majburlash, fayl yuklash va bayt tengligi, tana chegarasi (qaysi qatlam to'xtatgani), chat fayli, **ijarachi chegarasi** | **ha** | **0** |
+| **AI** | model javobi va iqtibos zanjiri (fayl → bo'lak → javob) | yo'q | **pullik chaqiruv** |
 
-> **Narxi:** `--ai` doim beriladi, ya'ni har staging joylashtiruvida
-> **bitta pullik model chaqiruvi** bo'ladi. Ataylab: iqtibos zanjiri
-> (fayl → bo'lak → javob) eng qimmat invariant va uni o'lchamasdan
-> "reliz tayyor" deb bo'lmaydi.
+Ilgari `--ai` **doim** berilardi va shu sababli reliz butunligi har
+joylashtiruvda pullik model chaqiruviga bog'liq edi. Reliz
+butunligi esa yuqoridagi asosiy ro'yxat bilan o'lchanadi —
+ularning hech biri pul talab qilmaydi.
 
-Qo'lda ham yurgizsa bo'ladi:
+**AI rejimi aniq aytiladi.** `--ai` yoki `--ai-yoq`; ikkalasi ham
+berilmasa skript **boshlanmaydi**. Ya'ni bayroqni *unutish* xato,
+*ataylab o'chirish* esa ruxsat etilgan tanlov. `deploy.sh` rejimni
+`E2E_AI_ENABLED` dan oladi (standart: **0 — o'chirilgan**).
+
+**Ijarachi chegarasi bunga kirmaydi:** `--begona` berilmasa E2E
+hamon **yiqiladi**. Ikkita hisob shart — chegara bitta hisob bilan
+o'lchanmaydi.
+
+### Sozlash — parol chatga ham, jurnalga ham tushmaydi
 
 ```bash
-deploy/bin/e2e-fayl.sh https://staging.example.uz/api \
-    broker 'parol' --begona broker2 'parol2' --ai
+sudo deploy/bin/e2e-hisob-sozla.sh
 ```
+
+Skript `zze2e_a` va `zze2e_b` hisoblarini (ikki **boshqa**
+kompaniya) yaratadi yoki parolini yangilaydi, parolni **o'zi**
+yasaydi va muhit fayliga yozadi. Parol hech qayerda chop
+etilmaydi, argumentga tushmaydi (`ps` da ko'rinmaydi) va buyruq
+tarixiga kirmaydi. Faqat `staging`.
+
+```
+E2E_URL=http://localhost:8091/api     # staging oldida nginx, `/api` prefiksi
+E2E_LOGIN=zze2e_a     E2E_PAROL=...
+E2E_BEGONA_LOGIN=zze2e_b   E2E_BEGONA_PAROL=...
+E2E_AI_ENABLED=0      # ixtiyoriy pullik qatlam
+```
+
+**Sozlanmagani "o'tdi" emas.** `deploy.sh` majburiy qiymatlarni
+**relizni boshlashdan oldin**, hammasini birdaniga tekshiradi va
+faqat **nomlarini** chiqaradi (`E2E_CONFIG_MISSING:`) — qiymatlar
+hech qachon chop etilmaydi.
+
+Qo'lda:
+
+```bash
+deploy/bin/e2e-fayl.sh http://localhost:8091/api \
+    zze2e_a 'parol' --begona zze2e_b 'parol2' --ai-yoq --proksi
+```
+
+### Reliz jonli, lekin muhrsiz qolsa
+
+`deploy.sh` almashtirishdan keyin uzilib qolsa reliz ishlab
+turadi, `.verified` esa yozilmaydi. Aynan shu kod uchun qayta
+joylashtirish ma'nosiz — u yangi katalog yasaydi va ishlaydigan
+xizmatni qayta ko'taradi. O'rniga:
+
+```bash
+sudo deploy/bin/tasdiqla-joriy.sh staging
+```
+
+U joriy relizning SHA sini manifestidan oladi, manifest
+checksumini tekshiradi, sog'liq va **asosiy** E2E ni yurgizadi va
+faqat hammasi o'tganda muhrni atomar yozadi. Muhrga **faqat 40
+belgili SHA** tushadi — `main`, `staging` yoki katalog nomi
+**hech qachon**.
 
 Batafsil: [`docs/fayl_yuklash.md`](fayl_yuklash.md) §9b.
 

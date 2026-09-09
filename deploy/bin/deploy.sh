@@ -424,13 +424,29 @@ if [ "$MUHIT" = "staging" ]; then
     log "uchidan-uchiga sinov (haqiqiy HTTP)"
     # E2E qiymatlari 4a-bo'limda, RELIZDAN OLDIN tekshirilgan.
 
-    # `--ai` DOIM beriladi: iqtibos zanjiri (fayl -> bo'lak -> javob)
-    # eng qimmat invariant va uni o'lchamasdan "reliz tayyor" deb
-    # bo'lmaydi. Narxi bitta savol -- joylashtiruv chastotasida bu
-    # sezilarli emas, buzilgan iqtibos esa sezilarli.
+    # AI ATAYLAB IXTIYORIY.
+    #
+    # Ilgari `--ai` DOIM berilardi, sababi "iqtibos zanjiri eng qimmat
+    # invariant". Zanjir haqiqatan qimmat, lekin xulosa noto'g'ri edi:
+    # undan RELIZ BUTUNLIGI har joylashtiruvda PULLIK model
+    # chaqiruviga bog'lanib qoldi. Reliz butunligi esa yuklash,
+    # chegara, cookie, CSRF va ijarachi izolyatsiyasi bilan
+    # o'lchanadi -- bularning hech biri pul talab qilmaydi.
+    #
+    # Standart: O'CHIRILGAN. Yoqish uchun ANIQ `E2E_AI_ENABLED=1`
+    # kerak. Hisob-kitob xulqi JIMGINA o'zgarmasin: rejim har doim
+    # ANIQ uzatiladi va jurnalga yoziladi.
+    if [ "${E2E_AI_ENABLED:-0}" = "1" ]; then
+        E2E_AI_REJIM="--ai"
+        log "AI E2E: YOQILGAN (E2E_AI_ENABLED=1) — PULLIK chaqiruv bo'ladi"
+    else
+        E2E_AI_REJIM="--ai-yoq"
+        log "AI E2E: o'chirilgan (ixtiyoriy, pullik). Yoqish: E2E_AI_ENABLED=1"
+    fi
     if ! "${YANGI}/deploy/bin/e2e-fayl.sh" "$E2E_URL" \
             "$E2E_LOGIN" "$E2E_PAROL" \
-            --begona "$E2E_BEGONA_LOGIN" "$E2E_BEGONA_PAROL" --ai --proksi; then
+            --begona "$E2E_BEGONA_LOGIN" "$E2E_BEGONA_PAROL" \
+            "$E2E_AI_REJIM" --proksi; then
         log "E2E YIQILDI — orqaga qaytarilmoqda"
         if [ -n "$ESKI" ] && [ -d "$ESKI" ] && [ "$ESKI" != "$JORIY" ]; then
             ln -sfn "$ESKI" "$JORIY"
@@ -441,9 +457,14 @@ if [ "$MUHIT" = "staging" ]; then
     fi
     log "E2E o'tdi"
 
-    # REF EMAS, SHA. `.verified` ning butun ma'nosi "AYNAN SHU kod
-    # tekshirildi" -- shox nomi buni ifodalay olmaydi.
-    printf '%s' "$SHA" > "${ILDIZ}/.verified"
+    # MUHRNI YAGONA YOZUVCHI YOZADI.
+    #
+    # Ilgari bu yerda to'g'ridan-to'g'ri `printf > .verified` turardi.
+    # Ikkinchi yozuvchi (`tasdiqla-joriy.sh`) paydo bo'lgach ikki
+    # nusxa ASTA-SEKIN AJRALARDI -- bu loyihada manifest bilan
+    # allaqachon bir marta yuz bergan. Endi shartlar (40 belgili SHA,
+    # `current` bilan moslik, atomar yozuv) BITTA joyda.
+    "${YANGI}/deploy/bin/tasdiq-yoz.sh" "$ILDIZ" "$SHA"
     log "staging tasdigi yozildi: $SHA  ($REF)"
 fi
 

@@ -370,11 +370,18 @@ def test_e2e_darvozasi():
     # `TASDIQ=` ta'rifida ham bor va ikkalasi ham fayl BOSHIDA.
     # Ilgari shu shart aynan shuning uchun yiqilgan edi -- skaner
     # NASRni o'qidi, KODni emas. Solishtiriladigan narsa YOZUV AMALI.
-    yozuv = '> "${ILDIZ}/.verified"'
-    check("`.verified` yozuvi topildi", yozuv in d)
+    #
+    # MUHR ENDI YAGONA YOZUVCHI ORQALI. Ilgari bu yerda
+    # `> "${ILDIZ}/.verified"` qidirilardi. Ikkinchi yozuvchi
+    # (`tasdiqla-joriy.sh`) paydo bo'lgach yozuv umumiy skriptga
+    # ko'chdi -- shart esa AYNAN O'SHA: muhr E2E dan KEYIN.
+    yozuv = "tasdiq-yoz.sh"
+    check("muhrni yagona yozuvchi yozadi", yozuv in d)
     check("E2E `.verified` YOZUVIDAN OLDIN yuradi",
           "e2e-fayl.sh" in d and yozuv in d
           and d.index("e2e-fayl.sh") < d.index(yozuv))
+    check("deploy.sh muhrni O'ZI yozmaydi",
+          '> "${ILDIZ}/.verified"' not in d)
     # SOZLANMAGANI 'O'TDI' EMAS -- va tekshiruv RELIZDAN OLDIN
     # bo'lishi kerak.
     #
@@ -419,8 +426,15 @@ def test_e2e_darvozasi():
     e = oqi("bin", "e2e-fayl.sh")
     check("skript `--begona` siz YIQILADI",
           "ijarachi chegarasi O'LCHANMADI" in e)
-    check("skript `--ai` siz YIQILADI",
-          "IQTIBOS O'LCHANMADI" in e)
+    # AI ENDI IXTIYORIY — LEKIN JIM EMAS.
+    #
+    # Ilgari shart "skript `--ai` siz YIQILADI" edi, ya'ni pullik
+    # chaqiruv har relizda MAJBURIY. Xossa o'zgardi: pullik
+    # tekshiruvni O'TKAZIB YUBORISH mumkin, lekin uni UNUTIB
+    # YUBORISH mumkin emas. Rejim ANIQ aytilishi shart.
+    check("skript rejim aytilmasa BOSHLANMAYDI",
+          "AI rejimi AYTILMAGAN" in e)
+    check("`--ai-yoq` — ATAYLAB o'tkazish yo'li", "--ai-yoq" in e)
     check("skript javob va iqtibosni AJRATADI",
           "citation" in e and "token" in e and "ajratilgan" in e)
     check("skript 413 ni QATLAM bo'yicha ajratadi",
@@ -1560,11 +1574,23 @@ def test_ozgarmas_tasdiq():
     d = oqi("bin", "deploy.sh")
 
     check("SHA `rev-parse` bilan hal qilinadi", "rev-parse --verify" in d)
-    check("tasdiqqa REF emas, SHA yoziladi",
-          'printf \'%s\' "$SHA" > "${ILDIZ}/.verified"' in d,
-          "`$REF` yozilsa shox nomi saqlanadi va tenglik ma'nosiz")
+    # YOZUV UMUMIY SKRIPTGA KO'CHDI, XOSSA O'ZGARMADI. Ilgari bu
+    # yerda `printf '%s' "$SHA" > .verified` naqshi qidirilardi.
+    # Ikkinchi yozuvchi (`tasdiqla-joriy.sh`) paydo bo'lgach yozuv
+    # `tasdiq-yoz.sh` ga chiqarildi -- shart esa AYNAN O'SHA:
+    # muhrga SHA tushadi, REF emas.
+    check("tasdiqqa REF emas, SHA uzatiladi",
+          'tasdiq-yoz.sh" "$ILDIZ" "$SHA"' in d,
+          "`$REF` uzatilsa shox nomi saqlanadi va tenglik ma'nosiz")
     check("REF endi tasdiqqa YOZILMAYDI",
-          'printf \'%s\' "$REF" > "${ILDIZ}/.verified"' not in d)
+          'tasdiq-yoz.sh" "$ILDIZ" "$REF"' not in d
+          and 'printf \'%s\' "$REF" > "${ILDIZ}/.verified"' not in d)
+    # Va yozuvchining O'ZI shox nomini rad etadi.
+    t = oqi("bin", "tasdiq-yoz.sh")
+    check("yozuvchi 40 belgili SHA ni MAJBURIY qiladi",
+          '[ "${#SHA}" -eq 40 ]' in t)
+    check("yozuvchi o'n oltilik bo'lmagan qiymatni rad etadi",
+          "*[!0-9a-f]*" in t)
     check("production tenglikni SHA da tekshiradi",
           '"$TASDIQLANGAN" != "$SHA"' in d)
     check("eski format (shox nomi) RAD ETILADI", "ESKI FORMATDA" in d)
@@ -2810,6 +2836,209 @@ def test_faza2_staging_konteyneri():
           "XT_DB_DSN_OWNER" in h)
 
 
+# =====================================================================
+# 8d. ASOSIY / PULLIK E2E BO'LINISHI
+# =====================================================================
+def test_e2e_asosiy_pullik():
+    bolim("8d. E2E: asosiy (majburiy) va AI (pullik, ixtiyoriy)")
+    e = oqi("bin", "e2e-fayl.sh")
+    d = oqi("bin", "deploy.sh")
+
+    # --- REJIM ANIQ AYTILADI ---
+    # "Bayroqni unutish" YASHIL bermasligi kerak: ilgari `--ai` siz
+    # bo'lim `fail` berardi, ya'ni pullik chaqiruv AMALDA majburiy
+    # edi. Uni shunchaki `skip` ga aylantirish teskari nuqson
+    # tug'dirardi -- unutilgan bayroq jimgina o'tib ketardi.
+    check("`--ai-yoq` rejimi bor", "--ai-yoq" in e)
+    check("rejim aytilmasa skript BOSHLANMAYDI",
+          "AI rejimi AYTILMAGAN" in e)
+
+    # --- ASOSIY TEKSHIRUVLAR PULLIK EMAS ---
+    # Bu ro'yxat "reliz butunligi" ning ta'rifi. Har biri kodda
+    # BO'LISHI shart, aks holda tasdiq ma'nosini yo'qotadi.
+    for nom, naqsh in (
+            ("/health", '"$URL/health"'),
+            ("/ready", '"$URL/ready"'),
+            ("tokensiz /auth/me -> 401", "tokensiz /auth/me"),
+            ("kirgandan keyin /auth/me", '"$URL/auth/me"'),
+            ("CSRF sarlavhasisiz -> 403", "CSRF sarlavhasisiz"),
+            ("NOTO'G'RI CSRF -> 403", "NOTO'G'RI CSRF"),
+            ("ijarachi chegarasi", "BEGONA kompaniya hujjatni"),
+            ("tokensiz -> 401", "tokensiz -> 401"),
+    ):
+        check(f"asosiy tekshiruv bor: {nom}", naqsh in e)
+
+    # --- IJARACHI CHEGARASI MAJBURIY QOLADI ---
+    # AI ixtiyoriy bo'lgani BU bo'limga TARQALMASLIGI kerak.
+    # `--begona` berilmasa bu HAMON yiqilish, `o'lchanmadi` EMAS.
+    i_beg = e.index("ijarachi chegarasi O'LCHANMADI")
+    qism = e[max(0, i_beg - 200):i_beg + 80]
+    check("`--begona` siz E2E YIQILADI (o'lchanmadi EMAS)",
+          "fail " in qism and "olchanmadi " not in qism)
+
+    # --- AI YIQILISHI FAQAT SO'RALGANDA TO'SADI ---
+    # `--ai-yoq` da bo'lim `olchanmadi` ga tushadi va u YIQILDI
+    # sanog'iga QO'SHILMAYDI; `--ai` da esa oddiy `check` yuradi,
+    # ya'ni yiqilsa reliz to'xtaydi.
+    check("AI o'tkazilsa `olchanmadi` deb sanaladi",
+          "olchanmadi \"AI javobi" in e)
+    check("`olchanmadi` YIQILDI ni oshirmaydi",
+          "olchanmadi() { OLCHANMADI=$((OLCHANMADI+1))" in e)
+    check("xulosada uchinchi holat ko'rinadi", "OLCHANMADI" in e
+          and "o%s\\n' \\" in e or "o'lchanmadi" in e)
+
+    # --- JOYLASHTIRISH STANDARTDA PULLIK CHAQIRMAYDI ---
+    check("deploy.sh `E2E_AI_ENABLED` ni o'qiydi", "E2E_AI_ENABLED" in d)
+    check("standart qiymat O'CHIRILGAN", "${E2E_AI_ENABLED:-0}" in d)
+    check("deploy.sh `--ai` ni SHARTSIZ bermaydi",
+          '--ai --proksi' not in d)
+    check("rejim jurnalga yoziladi", "AI E2E:" in d)
+
+
+# =====================================================================
+# 8e. `.verified` MUHRI — SHARTNOMA
+# =====================================================================
+def _tasdiq_muhit(tmp, sha_manifest):
+    """Sun'iy `ILDIZ`: `current` -> reliz, manifestda berilgan sha."""
+    reliz = os.path.join(tmp, "releases", "r1")
+    os.makedirs(reliz, exist_ok=True)
+    io.open(os.path.join(reliz, ".kuzatilgan-manifest"), "w",
+            encoding="utf-8").write(
+        "# tenderai-kuzatilgan-manifest v1\n# sha: %s\n" % sha_manifest)
+    joriy = os.path.join(tmp, "current")
+    if os.path.islink(joriy):
+        os.unlink(joriy)
+    os.symlink(reliz, joriy)
+    return tmp
+
+
+def test_tasdiq_muhri():
+    bolim("8e. `.verified` muhri — 40 belgili SHA, atomar")
+    skript = os.path.join(D, "bin", "tasdiq-yoz.sh")
+    check("yagona yozuvchi mavjud", os.path.isfile(skript))
+    if not os.path.isfile(skript):
+        return
+
+    HAQ = "29ce20ace8b891ec351b8e1bc88681b1458768d1"
+    BOSHQA = "0123456789abcdef0123456789abcdef01234567"
+
+    def yur(ildiz, sha):
+        return subprocess.run(["bash", skript, ildiz, sha],
+                              capture_output=True, text=True).returncode
+
+    with tempfile.TemporaryDirectory() as tmp:
+        _tasdiq_muhit(tmp, HAQ)
+        # SHOX NOMI HECH QACHON YOZILMAYDI. O'lchangan nuqson:
+        # faylda `main` turardi va u qaysi kod tekshirilganini
+        # aytmasdi.
+        for yomon in ("main", "staging", "latest", "20260909-050102-main"):
+            check(f"'{yomon}' RAD ETILADI", yur(tmp, yomon) != 0)
+        check("qisqa sha RAD ETILADI", yur(tmp, HAQ[:12]) != 0)
+        check("o'n oltilik bo'lmagan RAD ETILADI",
+              yur(tmp, "z" * 40) != 0)
+        # `current` BOSHQA kodni ko'rsatsa muhr yozilmaydi -- aks
+        # holda muhr tekshirilmagan kodni tasdiqlagan bo'lardi.
+        check("`current` bilan MOS KELMASA rad etiladi",
+              yur(tmp, BOSHQA) != 0)
+        check("muhr fayli YARATILMAGAN",
+              not os.path.exists(os.path.join(tmp, ".verified")))
+        # Baxtli yo'l.
+        check("to'g'ri SHA yoziladi", yur(tmp, HAQ) == 0)
+        mazmun = io.open(os.path.join(tmp, ".verified"),
+                         encoding="utf-8").read()
+        check("mazmun aynan SHA + qator oxiri", mazmun == HAQ + "\n",
+              repr(mazmun[:60]))
+
+    # Yozuv ATOMAR bo'lsin: yarim yozilgan muhr "ehtimol
+    # tasdiqlangan" degan ma'noga ega bo'lardi, bunday ma'no yo'q.
+    t = oqi("bin", "tasdiq-yoz.sh")
+    check("atomar: mktemp + mv", "mktemp" in t and "mv -f" in t)
+    check("vaqtinchalik fayl AYNI KATALOGDA", '"${ILDIZ}/.verified.XXXXXX"' in t)
+
+    # `deploy.sh` endi muhrni O'ZI yozmaydi.
+    d = oqi("bin", "deploy.sh")
+    check("deploy.sh yagona yozuvchini chaqiradi", "tasdiq-yoz.sh" in d)
+    check("deploy.sh muhrni to'g'ridan YOZMAYDI",
+          'printf \'%s\' "$SHA" > "${ILDIZ}/.verified"' not in d)
+
+
+# =====================================================================
+# 8f. JORIY RELIZNI TASDIQLASH
+# =====================================================================
+def test_tasdiqla_joriy():
+    bolim("8f. `tasdiqla-joriy.sh` — qayta joylashtirmasdan tasdiq")
+    v = oqi("bin", "tasdiqla-joriy.sh")
+    check("SHA relizning MANIFESTIDAN olinadi",
+          "# sha: " in v and ".kuzatilgan-manifest" in v)
+    check("katalog NOMI ishlatilmaydi", "readlink -f" in v)
+    check("manifest CHECKSUMI tekshiriladi", "sha256sum" in v)
+    # Asbob relizning O'ZIDAN olinadi: aks holda muhr "S kommiti
+    # T asbobi bilan tekshirildi" degan ma'noga ega bo'lardi va T
+    # hech qayerda yozilmasdi.
+    check("E2E RELIZNING o'zidan yurgiziladi",
+          '${RELIZ}/deploy/bin/e2e-fayl.sh' in v)
+    check("bo'linishdan OLDINGI reliz RAD ETILADI",
+          "--ai-yoq" in v and "OLDINGI" in v)
+    check("sog'liq ham tekshiriladi", "health-check.sh" in v)
+    check("standart holda PULLIK chaqiruv YO'Q",
+          "${E2E_AI_ENABLED:-0}" in v)
+    # Sozlama YO'Q bo'lsa faqat NOMLAR chiqadi.
+    check("yetishmagan sozlama NOM bo'yicha", "E2E_CONFIG_MISSING" in v)
+    check("qiymatlar chop etilmasligi aytilgan",
+          "CHOP ETILMAYDI" in v)
+    check("muhrni yagona yozuvchi yozadi", "tasdiq-yoz.sh" in v)
+    # Muhr E2E dan KEYIN yoziladi.
+    check("muhr E2E dan KEYIN", v.index("e2e-fayl.sh") < v.index("tasdiq-yoz.sh"))
+
+
+# =====================================================================
+# 8g. E2E HISOBLARI — SIR CHIQMAYDI
+# =====================================================================
+def test_e2e_hisoblari():
+    bolim("8g. Staging E2E hisoblari — parol chiqmaydi")
+    h = oqi("bin", "e2e-hisob-sozla.sh")
+    check("faqat staging", 'MUHIT" = "staging"' in h)
+    check("root talab qilinadi", 'id -u' in h)
+    check("nomlar ANIQ va o'zgarmas",
+          'A_LOGIN="zze2e_a"' in h and 'B_LOGIN="zze2e_b"' in h)
+    check("ikki BOSHQA kompaniya",
+          "ZZE2E Kompaniya A" in h and "ZZE2E Kompaniya B" in h)
+    # Parol argumentga TUSHMAYDI: `ps` da ko'rinardi.
+    check("parol STDIN orqali beriladi",
+          "printf '%s\\n%s\\n'" in h)
+    check("parol skript ichida yasaladi", "secrets.token_urlsafe" in h)
+    check("parol EKRANGA bosilmaydi", "CHOP ETILMADI" in h)
+    check("muhit fayliga ATOMAR yoziladi",
+          "mktemp" in h and "mv -f" in h)
+    check("rejim va egalik NUSXALANADI",
+          "--reference" in h)
+    # Git ga tushmasin.
+    gi = _oqi_ildiz(".gitignore")
+    check("skript parolni faylga yozmaydi (faqat muhit fayli)",
+          "/etc/tenderai/" in h)
+    check(".env Git da kuzatilmaydi", ".env" in gi)
+
+
+# =====================================================================
+# 8h. `public.app_user` DIAGNOSTIKASI
+# =====================================================================
+def test_eski_app_user_diagnostikasi():
+    bolim("8h. 0085 dan keyin `public.app_user` yo'qligi KUTILGAN")
+    b = oqi("bin", "darvoza-baza.sh")
+    check("avval MAVJUDLIGI tekshiriladi",
+          "ESKI_BOR=" in b and "to_regclass('public.app_user')" in b)
+    check("yo'qligi KUTILGAN holat deb aytiladi",
+          "KUTILGAN holat" in b)
+    # Jadval qayta yaratilmasin: uning yo'qligi 0085 ning MAQSADI.
+    check("jadval QAYTA YARATILMAYDI",
+          "CREATE TABLE public.app_user" not in b)
+    # Mavjud bo'lgandagi to'liq inventar SAQLANIB QOLSIN: u hali
+    # migratsiya qilinmagan o'rnatmalar uchun kerak.
+    for naqsh in ("eski qatorlar", "MOSLASHMAGAN", "IKKILANGAN",
+                  "FK: "):
+        check(f"mavjud bo'lsa inventar saqlangan: {naqsh}", naqsh in b)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -2849,6 +3078,11 @@ def main():
     test_darvoza_toliq_daraxt()
     test_0071_tasdigi()
     test_faza2_staging_konteyneri()
+    test_e2e_asosiy_pullik()
+    test_tasdiq_muhri()
+    test_tasdiqla_joriy()
+    test_e2e_hisoblari()
+    test_eski_app_user_diagnostikasi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

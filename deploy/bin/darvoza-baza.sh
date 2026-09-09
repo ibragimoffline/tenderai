@@ -517,44 +517,62 @@ tekshir)
     #
     # FAQAT SANOQ VA METAMA'LUMOT. Xesh, token, parol CHIQMAYDI.
     echo "--- eski public.app_user inventari ---"
-    psql "$XT_DB_DSN" -v ON_ERROR_STOP=1 -qtA -c \
-        "SELECT '  mavjud: ' || (to_regclass('public.app_user') IS NOT NULL)::text" 2>&1 | sed 's/^/  /'
-    psql "$XT_DB_DSN" -qtA -c \
-        "SELECT '  eski qatorlar: ' || count(*)::text FROM public.app_user" 2>&1 | sed 's/^/  /'
-    psql "$XT_DB_DSN" -qtA -c \
-        "SELECT '  erp qatorlar  : ' || count(*)::text FROM erp.app_user" 2>&1 | sed 's/^/  /'
-    echo "  --- kimlik solishtiruvi (username bo'yicha) ---"
-    psql "$XT_DB_DSN" -qtA -c \
-        "SELECT '  moslashgan   : ' || count(*)::text
-           FROM public.app_user l JOIN erp.app_user e
-             ON lower(e.username) = lower(l.username)" 2>&1 | sed 's/^/  /'
-    psql "$XT_DB_DSN" -qtA -c \
-        "SELECT '  MOSLASHMAGAN : ' || count(*)::text
-           FROM public.app_user l
-          WHERE NOT EXISTS (SELECT 1 FROM erp.app_user e
-                             WHERE lower(e.username) = lower(l.username))" 2>&1 | sed 's/^/  /'
-    psql "$XT_DB_DSN" -qtA -c \
-        "SELECT '  IKKILANGAN   : ' || count(*)::text FROM (
-            SELECT lower(l.username) u FROM public.app_user l
-              JOIN erp.app_user e ON lower(e.username) = lower(l.username)
-             GROUP BY 1 HAVING count(*) > 1) q" 2>&1 | sed 's/^/  /'
-    echo "  --- bog'liqliklar ---"
-    psql "$XT_DB_DSN" -qtA -c \
-        "SELECT '  FK: ' || src.relname || '.' || c.conname
-           FROM pg_constraint c
-           JOIN pg_class t ON t.oid = c.confrelid
-           JOIN pg_class src ON src.oid = c.conrelid
-           JOIN pg_namespace n ON n.oid = t.relnamespace
-          WHERE c.contype = 'f' AND n.nspname='public' AND t.relname='app_user'" 2>&1 | sed 's/^/  /'
-    psql "$XT_DB_DSN" -qtA -c \
-        "SELECT '  bog''liq obyekt: ' || COALESCE(string_agg(DISTINCT dep.relname, ', '), '-')
-           FROM pg_depend d
-           JOIN pg_rewrite r ON r.oid = d.objid
-           JOIN pg_class dep ON dep.oid = r.ev_class
-           JOIN pg_class src ON src.oid = d.refobjid
-           JOIN pg_namespace n ON n.oid = src.relnamespace
-          WHERE n.nspname='public' AND src.relname='app_user'
-            AND dep.relname <> 'app_user'" 2>&1 | sed 's/^/  /'
+    # 0085 QO'LLANGACH JADVAL YO'Q BO'LADI — VA BU KUTILGAN HOLAT.
+    #
+    # Ilgari bu blok jadval mavjudligidan QAT'I NAZAR undan
+    # o'qirdi va 0085 dan keyin har yurishda quyidagini chiqarardi:
+    #     ERROR:  relation "public.app_user" does not exist
+    # Diagnostikaning maqsadi holatni KO'RSATISH, xato matni bilan
+    # e'tiborni chalg'itish emas: soxta qizil bilan yashab
+    # o'rganilsa, HAQIQIY qizil ham e'tibordan qoladi.
+    #
+    # Jadval QAYTA YARATILMAYDI. Uning yo'qligi -- 0085 ning
+    # maqsadi, tuzatiladigan kamchilik emas.
+    ESKI_BOR="$(psql "$XT_DB_DSN" -qtA -c \
+        "SELECT (to_regclass('public.app_user') IS NOT NULL)::text" 2>/dev/null)"
+    echo "  mavjud: ${ESKI_BOR:-nomalum}"
+    if [ "$ESKI_BOR" != "true" ]; then
+        echo "  (0085 qo'llangan — eski auth jadvali YO'Q. KUTILGAN holat.)"
+        psql "$XT_DB_DSN" -qtA -c \
+            "SELECT '  erp qatorlar  : ' || count(*)::text FROM erp.app_user" 2>&1 | sed 's/^/  /'
+    else
+        psql "$XT_DB_DSN" -qtA -c \
+            "SELECT '  eski qatorlar: ' || count(*)::text FROM public.app_user" 2>&1 | sed 's/^/  /'
+        psql "$XT_DB_DSN" -qtA -c \
+            "SELECT '  erp qatorlar  : ' || count(*)::text FROM erp.app_user" 2>&1 | sed 's/^/  /'
+        echo "  --- kimlik solishtiruvi (username bo'yicha) ---"
+        psql "$XT_DB_DSN" -qtA -c \
+            "SELECT '  moslashgan   : ' || count(*)::text
+               FROM public.app_user l JOIN erp.app_user e
+                 ON lower(e.username) = lower(l.username)" 2>&1 | sed 's/^/  /'
+        psql "$XT_DB_DSN" -qtA -c \
+            "SELECT '  MOSLASHMAGAN : ' || count(*)::text
+               FROM public.app_user l
+              WHERE NOT EXISTS (SELECT 1 FROM erp.app_user e
+                                 WHERE lower(e.username) = lower(l.username))" 2>&1 | sed 's/^/  /'
+        psql "$XT_DB_DSN" -qtA -c \
+            "SELECT '  IKKILANGAN   : ' || count(*)::text FROM (
+                SELECT lower(l.username) u FROM public.app_user l
+                  JOIN erp.app_user e ON lower(e.username) = lower(l.username)
+                 GROUP BY 1 HAVING count(*) > 1) q" 2>&1 | sed 's/^/  /'
+        echo "  --- bog'liqliklar ---"
+        psql "$XT_DB_DSN" -qtA -c \
+            "SELECT '  FK: ' || src.relname || '.' || c.conname
+               FROM pg_constraint c
+               JOIN pg_class t ON t.oid = c.confrelid
+               JOIN pg_class src ON src.oid = c.conrelid
+               JOIN pg_namespace n ON n.oid = t.relnamespace
+              WHERE c.contype = 'f' AND n.nspname='public' AND t.relname='app_user'" 2>&1 | sed 's/^/  /'
+        psql "$XT_DB_DSN" -qtA -c \
+            "SELECT '  bog''liq obyekt: ' || COALESCE(string_agg(DISTINCT dep.relname, ', '), '-')
+               FROM pg_depend d
+               JOIN pg_rewrite r ON r.oid = d.objid
+               JOIN pg_class dep ON dep.oid = r.ev_class
+               JOIN pg_class src ON src.oid = d.refobjid
+               JOIN pg_namespace n ON n.oid = src.relnamespace
+              WHERE n.nspname='public' AND src.relname='app_user'
+                AND dep.relname <> 'app_user'" 2>&1 | sed 's/^/  /'
+    fi
 
     echo "TEKSHIR: PASS — besh invariant ham o'tdi"
     ;;
