@@ -14,6 +14,41 @@
 # ishlamaydi.
 # =============================================================================
 
+# ============================================================================
+# USUL — ikkitasidan biri. Ikkalasi ham AYNI shartnomani bajaradi:
+# bitta argument, qat'iy validatsiya, uzoqda checksum tekshiruvi.
+#
+#   ssh  — ikkinchi Linux mezbon (scp; uzoqda `sha256sum`)
+#   s3   — S3 ga mos ombor (rclone; B2, R2, Hetzner, AWS)
+#
+# `s3` uchun `rclone` KERAK va u ataylab oldindan o'rnatilmagan:
+# manzil tanlanmagan bo'lsa vosita ham kerak emas.
+# ============================================================================
+USUL=ssh
+
+# ----------------------------------------------------------------------------
+# USUL=s3 uchun
+# ----------------------------------------------------------------------------
+# `rclone.conf` FAQAT root o'qiydigan faylda (0600 root:root) va
+# muhit faylida EMAS: ilova unga tegmaydi.
+#   S3_REMOTE   — `rclone.conf` dagi remote nomi
+#   S3_BUCKET   — chelak nomi (faqat zaxira uchun ajratilgan)
+#   S3_PREFIKS  — obyekt kaliti prefiksi (muhit nomi tavsiya etiladi)
+#
+# KALIT TOR HUQUQLI BO'LSIN. Tavsiya: `PutObject` + `ListBucket` +
+# `GetObject`, `DeleteObject` SIZ. Saqlash muddati chelakning
+# lifecycle qoidasi bilan, BOSHQA hisob ostida qo'llanadi -- manba
+# mezbon buzilsa zaxirani o'chira olmasin.
+# TLS majburiy (rclone S3 uchun standart holda HTTPS ishlatadi).
+#
+# S3_REMOTE=zaxira
+# S3_BUCKET=tenderai-zaxira
+# S3_PREFIKS=production
+# RCLONE_CONF=/etc/tenderai/rclone.conf
+
+# ----------------------------------------------------------------------------
+# USUL=ssh uchun
+# ----------------------------------------------------------------------------
 # Uzoq mezbon. BOSHQA MASHINA bo'lishi shart: ayni mashinadagi
 # ikkinchi disk ham "tashqi nusxa" emas -- mezbon buzilganda
 # (shifrlovchi dastur, buzilgan hisob) u ham yo'qoladi.

@@ -183,4 +183,33 @@ if [ "$muammo" -ne 0 ]; then
     xato "TIKLASH MASHQI OTMADI"
 fi
 
+# --- TIKLASH ISBOTI — MASHINA O'QIYDIGAN DALIL -------------------------------
+# NEGA KERAK. "Tiklash mashqi bor" degan xulosa jurnalda qoladi va
+# jurnalni hech kim o'qimaydi. Joylashtirishdan oldingi tekshiruv
+# esa DALIL so'rashi kerak: mashq HAQIQATAN yurganmi, QACHON, va
+# u ZAXIRANING QAYSI nusxasidan olinganmi.
+#
+# `uzoq=` maydoni ATAYLAB ajratilgan. Mahalliy diskdagi nusxadan
+# tiklash mexanizmni isbotlaydi, LEKIN "disk yo'qolsa tiklanadi"
+# degan da'voni isbotlamaydi. Ikkinchisi uchun tiklash UZOQ
+# nusxadan olinishi kerak. Ishlab chiqarish tekshiruvi aynan shuni
+# talab qiladi (`oldindan-tekshir.sh`).
+ISBOT="${KATALOG:-$(dirname "$ZAXIRA")}/.tiklash-isboti"
+{
+    echo "# tenderai tiklash isboti v1"
+    echo "sana=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "muhit=${MUHIT}"
+    echo "zaxira=$(basename "$ZAXIRA")"
+    echo "zaxira_sha256=$(sha256sum "$ZAXIRA" | cut -d' ' -f1)"
+    echo "rto_s=${DAVOM}"
+    echo "jadval=${N_JADVAL}"
+    echo "migratsiya=${N_MIGR}"
+    # MANBA: mahalliy nusxami yoki uzoqdan olib kelinganmi.
+    # `TIKLASH_MANBA=uzoq` ni faqat uzoq nusxadan tiklaydigan
+    # yo'l qo'yadi -- bu skript o'zi TAXMIN QILMAYDI.
+    echo "uzoq=${TIKLASH_MANBA:-mahalliy}"
+} > "$ISBOT"
+chmod 640 "$ISBOT" 2>/dev/null || true
+log "tiklash isboti yozildi: $ISBOT (uzoq=${TIKLASH_MANBA:-mahalliy})"
+
 log "TIKLASH MASHQI OTDI. RTO=${DAVOM}s, zaxira=$(basename "$ZAXIRA")"

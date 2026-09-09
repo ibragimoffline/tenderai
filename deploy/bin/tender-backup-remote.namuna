@@ -34,8 +34,21 @@
 # --- BUTUNLIK UZOQDA TEKSHIRILADI --------------------------------------------
 # "Nusxa ko'chdi" degan xulosa "nusxa BUTUN" degani emas: uzilgan
 # o'tkazma ham 0 qaytarishi mumkin. Shuning uchun nusxadan keyin
-# uzoqdagi faylning sha256 i o'qiladi va MAHALLIY bilan
+# uzoqdagi nusxaning sha256 i o'qiladi va MAHALLIY bilan
 # solishtiriladi. Farq bo'lsa -- XATO.
+#
+# --- IKKI USUL, BITTA SHARTNOMA ----------------------------------------------
+# `USUL=ssh` -- ikkinchi Linux mezbon (scp + uzoqda `sha256sum`).
+# `USUL=s3`  -- S3 ga mos ombor (`rclone`; B2, R2, Hetzner, AWS).
+#
+# NEGA BITTA SKRIPT, IKKITA EMAS. Xavfsizlik-kritik qism -- argument
+# validatsiyasi (mutlaq yo'l, `..` yo'q, manba ildizi ichida, tor
+# alifbo). Ikki nusxada u ASTA-SEKIN AJRALARDI va bittasida yopilgan
+# teshik ikkinchisida ochiq qolardi. Shuning uchun tekshiruv BITTA
+# joyda, faqat O'TKAZMA usuli ajraladi.
+#
+# `s3` uchun `rclone` KERAK va u ataylab OLDINDAN O'RNATILMAYDI:
+# manzil tanlanmagan bo'lsa vosita ham kerak emas.
 # =============================================================================
 set -euo pipefail
 
@@ -93,54 +106,92 @@ esac
 # shellcheck disable=SC1090
 . "$SOZLAMA"
 
-for k in UZOQ_HOST UZOQ_USER UZOQ_YOL SSH_KALIT; do
-    eval "v=\${${k}:-}"
-    [ -n "$v" ] || xato "$SOZLAMA da '$k' bo'sh"
-done
-UZOQ_PORT="${UZOQ_PORT:-22}"
-BILINGAN="${SSH_KNOWN_HOSTS:-/etc/tenderai/backup-known_hosts}"
+USUL="${USUL:-ssh}"
+case "$USUL" in ssh|s3) ;; *) xato "USUL '$USUL' noma'lum — 'ssh' yoki 's3'" ;; esac
 
-[ -f "$SSH_KALIT" ] || xato "SSH kaliti yo'q: $SSH_KALIT"
-K_REJIM="$(stat -c '%a' "$SSH_KALIT")"
-case "$K_REJIM" in
-    600|400) ;;
-    *) xato "SSH kaliti rejimi $K_REJIM — 600 bo'lishi kerak" ;;
-esac
-# MEZBON KALITI OLDINDAN ISHONILGAN BO'LSIN. `StrictHostKeyChecking`
-# o'chirilsa, o'rtadagi odam zaxirani qabul qilib olardi va biz
-# buni BILMASDIK.
-[ -s "$BILINGAN" ] || xato "known_hosts YO'Q yoki bo'sh: $BILINGAN
-   To'ldiring: ssh-keyscan -p ${UZOQ_PORT} <host> > $BILINGAN"
-
-SSH_ARG=(-i "$SSH_KALIT" -p "$UZOQ_PORT"
-         -o BatchMode=yes
-         -o StrictHostKeyChecking=yes
-         -o UserKnownHostsFile="$BILINGAN"
-         -o IdentitiesOnly=yes
-         -o ConnectTimeout=20)
-
-# --- 3) NUSXA -----------------------------------------------------------------
-# Sana bo'yicha katalog: uzoq tomonda saqlash muddatini qo'llash
+# Sana bo'yicha prefiks: uzoq tomonda saqlash muddatini qo'llash
 # oson bo'lsin va bitta katalog cheksiz o'smasin.
 SANA="$(date '+%Y/%m/%d')"
-MAQSAD="${UZOQ_YOL%/}/${SANA}"
-UZOQ="${UZOQ_USER}@${UZOQ_HOST}"
-
-log "manzil: ${UZOQ}:${MAQSAD}/${NOM}"
-ssh "${SSH_ARG[@]}" "$UZOQ" "mkdir -p -- '${MAQSAD}'" \
-    || xato "uzoqda katalog yasalmadi (kalit yoki huquq?)"
-
-scp "${SSH_ARG[@]}" -p -- "$HAQIQIY" "${UZOQ}:${MAQSAD}/${NOM}" >/dev/null \
-    || xato "nusxa ko'chmadi"
-
-# --- 4) BUTUNLIK — UZOQDA O'LCHANADI ------------------------------------------
 MAHALLIY_SHA="$(sha256sum "$HAQIQIY" | cut -d' ' -f1)"
-UZOQ_SHA="$(ssh "${SSH_ARG[@]}" "$UZOQ" \
-    "sha256sum -- '${MAQSAD}/${NOM}' 2>/dev/null | cut -d' ' -f1" || true)"
-[ -n "$UZOQ_SHA" ] || xato "uzoqdagi fayl O'QILMADI — nusxa tasdiqlanmadi"
+
+if [ "$USUL" = "ssh" ]; then
+    for k in UZOQ_HOST UZOQ_USER UZOQ_YOL SSH_KALIT; do
+        eval "v=\${${k}:-}"
+        [ -n "$v" ] || xato "$SOZLAMA da '$k' bo'sh (USUL=ssh)"
+    done
+    UZOQ_PORT="${UZOQ_PORT:-22}"
+    BILINGAN="${SSH_KNOWN_HOSTS:-/etc/tenderai/backup-known_hosts}"
+
+    [ -f "$SSH_KALIT" ] || xato "SSH kaliti yo'q: $SSH_KALIT"
+    K_REJIM="$(stat -c '%a' "$SSH_KALIT")"
+    case "$K_REJIM" in
+        600|400) ;;
+        *) xato "SSH kaliti rejimi $K_REJIM — 600 bo'lishi kerak" ;;
+    esac
+    # MEZBON KALITI OLDINDAN ISHONILGAN BO'LSIN.
+    # `StrictHostKeyChecking` o'chirilsa, o'rtadagi odam zaxirani
+    # qabul qilib olardi va biz buni BILMASDIK.
+    [ -s "$BILINGAN" ] || xato "known_hosts YO'Q yoki bo'sh: $BILINGAN
+   To'ldiring: ssh-keyscan -p ${UZOQ_PORT} <host> > $BILINGAN"
+
+    SSH_ARG=(-i "$SSH_KALIT" -p "$UZOQ_PORT"
+             -o BatchMode=yes
+             -o StrictHostKeyChecking=yes
+             -o UserKnownHostsFile="$BILINGAN"
+             -o IdentitiesOnly=yes
+             -o ConnectTimeout=20)
+
+    MAQSAD="${UZOQ_YOL%/}/${SANA}"
+    UZOQ="${UZOQ_USER}@${UZOQ_HOST}"
+    log "manzil: ssh ${UZOQ}:${MAQSAD}/${NOM}"
+    ssh "${SSH_ARG[@]}" "$UZOQ" "mkdir -p -- '${MAQSAD}'" \
+        || xato "uzoqda katalog yasalmadi (kalit yoki huquq?)"
+    scp "${SSH_ARG[@]}" -p -- "$HAQIQIY" "${UZOQ}:${MAQSAD}/${NOM}" >/dev/null \
+        || xato "nusxa ko'chmadi"
+
+    # BUTUNLIK UZOQDA HISOBLANADI: baytlar o'sha yerda o'qiladi,
+    # ya'ni "yozildi" emas, "SAQLANDI" isbotlanadi.
+    UZOQ_SHA="$(ssh "${SSH_ARG[@]}" "$UZOQ" \
+        "sha256sum -- '${MAQSAD}/${NOM}' 2>/dev/null | cut -d' ' -f1" || true)"
+else
+    # --- S3 GA MOS OMBOR (rclone) --------------------------------------
+    for k in S3_REMOTE S3_BUCKET; do
+        eval "v=\${${k}:-}"
+        [ -n "$v" ] || xato "$SOZLAMA da '$k' bo'sh (USUL=s3)"
+    done
+    RCLONE="${RCLONE_BIN:-rclone}"
+    command -v "$RCLONE" >/dev/null \
+        || xato "\`$RCLONE\` topilmadi. USUL=s3 uchun rclone kerak.
+   U ATAYLAB oldindan o'rnatilmagan: manzil tanlanmagan bo'lsa
+   vosita ham kerak emas."
+    RCLONE_CONF="${RCLONE_CONF:-/etc/tenderai/rclone.conf}"
+    [ -f "$RCLONE_CONF" ] || xato "rclone sozlamasi yo'q: $RCLONE_CONF"
+    C_EGA="$(stat -c '%U' "$RCLONE_CONF")"; C_REJIM="$(stat -c '%a' "$RCLONE_CONF")"
+    [ "$C_EGA" = "root" ] || xato "$RCLONE_CONF egasi '$C_EGA' — root bo'lishi kerak"
+    case "$C_REJIM" in 600|400) ;; *) xato "$RCLONE_CONF rejimi $C_REJIM — 600 kerak" ;; esac
+
+    OBYEKT="${S3_BUCKET%/}/${S3_PREFIKS:-tenderai}/${SANA}/${NOM}"
+    MANZIL="${S3_REMOTE}:${OBYEKT}"
+    log "manzil: s3 ${MANZIL}"
+    RC=("$RCLONE" --config "$RCLONE_CONF" --retries 3 --low-level-retries 5)
+    "${RC[@]}" copyto -- "$HAQIQIY" "$MANZIL" >/dev/null \
+        || xato "nusxa ko'chmadi (kalit, chelak yoki huquq?)"
+
+    # BUTUNLIK: obyekt QAYTA O'QILADI va hash MAHALLIY hisoblanadi.
+    #
+    # ETag/MD5 ga tayanilmaydi: ko'p qismli yuklashda ETag faylning
+    # sha256 i EMAS va provayderlar orasida farq qiladi. Qayta o'qish
+    # esa `PART C5` talab qiladigan "uzoqdan olib kelish" ni ham
+    # bajaradi -- ya'ni bitta amal ikki narsani isbotlaydi:
+    # obyekt BOR va baytlar BUTUN.
+    UZOQ_SHA="$("${RC[@]}" cat -- "$MANZIL" 2>/dev/null | sha256sum | cut -d' ' -f1 || true)"
+fi
+
+# --- 4) BUTUNLIK — SOLISHTIRISH ----------------------------------------------
+[ -n "$UZOQ_SHA" ] || xato "uzoqdagi nusxa O'QILMADI — nusxa tasdiqlanmadi"
 [ "$UZOQ_SHA" = "$MAHALLIY_SHA" ] || xato "CHECKSUM MOS EMAS:
    mahalliy: $MAHALLIY_SHA
    uzoq    : $UZOQ_SHA
    Nusxa BUZUQ — zaxira himoyalangan deb hisoblanmasin."
 
-log "OK: ${NOM} (${MAHALLIY_SHA:0:16}…) tasdiqlandi"
+log "OK: ${NOM} (${MAHALLIY_SHA:0:16}…) ${USUL} orqali tasdiqlandi"

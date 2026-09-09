@@ -1175,7 +1175,7 @@ def test_mashq():
         # ISHLATILMASLIGI kerak, mashqda ham.
         penv = os.path.join(baza, "production.env")
         pzaxira = os.path.join(baza, "zaxira")
-        os.makedirs(os.path.join(pzaxira, "production"), exist_ok=True)
+        _zaxira_urugi(os.path.join(pzaxira, "production"))
         io.open(penv, "w", encoding="utf-8", newline=chr(10)).write(
             chr(10).join([
                 "APP_ENV=production",
@@ -1365,6 +1365,26 @@ def _izohsiz(matn):
                       if not q.lstrip().startswith("#"))
 
 
+def _zaxira_urugi(katalog, uzoq="ha"):
+    """Mashq uchun YANGI zaxira va TIKLASH ISBOTI yasaydi.
+
+    `oldindan-tekshir.sh` ishlab chiqarishda uchtasini talab qiladi:
+    zaxira fayli BOR, u YANGI, va tiklash mashqi UZOQ nusxadan
+    o'tgan. Mashq muhitida ular bo'lmasa skript (to'g'ri ravishda)
+    to'sadi va mashq o'zi ko'rmoqchi bo'lgan narsaga YETIB
+    BORMASDI.
+    """
+    os.makedirs(katalog, exist_ok=True)
+    dump = os.path.join(katalog, "tenderai-zz-20260909-000000.dump")
+    io.open(dump, "w", encoding="utf-8").write("zz")
+    io.open(os.path.join(katalog, ".tiklash-isboti"), "w",
+            encoding="utf-8", newline=chr(10)).write(chr(10).join([
+                "# tenderai tiklash isboti v1",
+                "sana=2026-09-09T00:00:00Z", "zaxira=" + os.path.basename(dump),
+                "rto_s=5", "jadval=59", "migratsiya=87",
+                "uzoq=" + uzoq, ""]))
+
+
 def _joriy_user():
     """Sinovni yurgizayotgan foydalanuvchi nomi.
 
@@ -1400,7 +1420,7 @@ def _oldindan_qur(baza, posix=None, ozgartir=None, caddy_ozgartir=None):
     # katalog ham yasaladi, aks holda mashq soxta to'siq berardi.
     zaxira = os.path.join(baza, "zaxira")
     for m in ("staging", "production"):
-        os.makedirs(os.path.join(zaxira, m), exist_ok=True)
+        _zaxira_urugi(os.path.join(zaxira, m))
     # YUKLASH ILDIZI. `oldindan-tekshir.sh` katalog MAVJUDLIGINI
     # talab qiladi (yo'q katalog -> `500 STORAGE_WRITE_FAILED`), va
     # u `TENDERAI_ILDIZ/var` ostida bo'lishi shart. Namunadagi
@@ -1623,7 +1643,10 @@ def test_oldindan_tekshiruv():
         kod, chiq = yurgiz("production", ey, cy)
         check("zaxira: ICHKI katalog yo'qligi ushlanadi",
               "zaxira katalogi yo'q" in chiq and "production" in chiq)
-        os.makedirs(os.path.join(zx, "production"), exist_ok=True)
+        # Katalogning O'ZI yetarli emas: ishlab chiqarishda YANGI
+        # zaxira va UZOQ nusxadan olingan tiklash isboti ham
+        # talab qilinadi. Mashq shu holatni to'liq yasaydi.
+        _zaxira_urugi(os.path.join(zx, "production"))
         kod, chiq = yurgiz("production", ey, cy)
         check("zaxira: ichki katalog bo'lsa O'TADI",
               "zaxira katalogi yoziladi" in chiq and kod == 0, f"kod={kod}")
@@ -3683,6 +3706,117 @@ def test_dsn_tashxisi():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+# =====================================================================
+# 8q. ZAXIRA YANGILIGI VA TIKLASH ISBOTI — HAQIQATAN TO'SADI
+# =====================================================================
+def test_zaxira_yangiligi_va_isbot():
+    bolim("8q. Ishlab chiqarish: yangi zaxira + UZOQ tiklash isboti")
+    bash = _mashq_bash()
+    if not bash:
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_zx_")
+    try:
+        N = chr(10)
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        psql = os.path.join(qutі, "psql")
+        io.open(psql, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N + "echo 1" + N + "exit 0" + N)
+        os.chmod(psql, 0o755)
+
+        # QURISH va YURGIZISH AJRATILGAN. Ilgari `yurgiz()` har
+        # chaqiruvda fikstuani QAYTA yasardi va sinovning o'z
+        # mutatsiyasini (isbotni o'chirish, zaxirani eskirtirish)
+        # ustidan yozib yuborardi -- ya'ni sinov hech qachon
+        # o'zi qo'ygan holatni o'lchamasdi.
+        def qur(muhit, baza_dir):
+            return _oldindan_qur(
+                baza_dir, lambda x: _posix_yol(bash, x),
+                lambda t: t.replace("APP_ENV=production", f"APP_ENV={muhit}"))
+
+        def yurgiz(muhit, ey, cy, baza_dir):
+            e = dict(os.environ)
+            e["TENDERAI_ENVFILE"] = _posix_yol(bash, ey)
+            e["TENDERAI_CADDYFILE"] = _posix_yol(bash, cy)
+            e["TENDERAI_ILDIZ"] = _posix_yol(
+                bash, os.path.join(baza_dir, "ildiz"))
+            e["TENDERAI_USER"] = _joriy_user()
+            e["TENDERAI_ROOT"] = _joriy_user()
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 _posix_yol(bash, qutі),
+                 "deploy/bin/oldindan-tekshir.sh", muhit],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=180)
+            return (r.stdout or "") + (r.stderr or "")
+
+        def zx_yolі(b, muhit):
+            return os.path.join(b, "zaxira", muhit)
+
+        def holat(nom, muhit="production"):
+            b = os.path.join(baza, nom)
+            ey, cy = qur(muhit, b)
+            return b, ey, cy
+
+        # --- A) HAMMASI JOYIDA -> TO'SIQ YO'Q ---
+        b1, e1, c1 = holat("a")
+        chiq = yurgiz("production", e1, c1, b1)
+        check("A: yangi zaxira + uzoq isbot -> TO'SIQ yo'q",
+              "tiklash isboti:" in chiq and "uzoq=ha" in chiq,
+              [q for q in chiq.splitlines() if "isbot" in q][:1])
+
+        # --- B) ZAXIRA ESKI -> TO'SIQ ---
+        # "Zaxira sozlangan" degan xulosa "zaxira YANGI" degani emas.
+        b2, e2, c2 = holat("b")
+        eski_vaqt = time.time() - 40 * 3600
+        for f in os.listdir(zx_yolі(b2, "production")):
+            if f.endswith(".dump"):
+                os.utime(os.path.join(zx_yolі(b2, "production"), f),
+                         (eski_vaqt, eski_vaqt))
+        chiq = yurgiz("production", e2, c2, b2)
+        check("B: 40 soatlik zaxira TO'SADI",
+              "soat oldin olingan" in chiq,
+              [q for q in chiq.splitlines() if "soat oldin" in q][:1])
+
+        # --- C) ISBOT YO'Q -> TO'SIQ ---
+        # Zaxira olinishi uni TIKLAB bo'lishini isbotlamaydi.
+        b3, e3, c3 = holat("c")
+        os.remove(os.path.join(zx_yolі(b3, "production"), ".tiklash-isboti"))
+        chiq = yurgiz("production", e3, c3, b3)
+        check("C: tiklash isboti yo'q -> TO'SIQ",
+              "TIKLASH ISBOTI YO'Q" in chiq)
+
+        # --- D) ISBOT MAHALLIY NUSXADAN -> TO'SIQ ---
+        # ENG MUHIM SHART. Mahalliy mashq mexanizmni isbotlaydi,
+        # lekin "disk yo'qolsa tiklanadi" degan da'voni EMAS.
+        b4, e4, c4 = holat("d")
+        _zaxira_urugi(zx_yolі(b4, "production"), uzoq="mahalliy")
+        chiq = yurgiz("production", e4, c4, b4)
+        check("D: MAHALLIY nusxadan olingan mashq TO'SADI",
+              "MAHALLIY nusxadan olingan" in chiq,
+              [q for q in chiq.splitlines() if "MAHALLIY" in q][:1])
+
+        # --- E) ISBOT ESKI -> TO'SIQ ---
+        b5, e5, c5 = holat("e")
+        eski9 = time.time() - 9 * 86400
+        os.utime(os.path.join(zx_yolі(b5, "production"), ".tiklash-isboti"),
+                 (eski9, eski9))
+        chiq = yurgiz("production", e5, c5, b5)
+        check("E: 9 kunlik isbot TO'SADI", "tiklash isboti ESKI" in chiq)
+
+        # --- F) STAGING DA BULAR FAQAT OGOHLANTIRISH ---
+        # Staging sinov maydoni: ma'lumoti yo'qolsa qayta yasaladi.
+        b6, e6, c6 = holat("f", "staging")
+        os.remove(os.path.join(zx_yolі(b6, "staging"), ".tiklash-isboti"))
+        chiq = yurgiz("staging", e6, c6, b6)
+        check("F: staging da isbot yo'qligi TO'SMAYDI",
+              "tiklash isboti yo'q" in chiq
+              and "TIKLASH ISBOTI YO'Q" not in chiq)
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -3735,6 +3869,7 @@ def main():
     test_pgvector_kaskadi()
     test_meta_migratsiya_sorovi()
     test_dsn_tashxisi()
+    test_zaxira_yangiligi_va_isbot()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

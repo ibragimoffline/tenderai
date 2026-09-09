@@ -519,6 +519,83 @@ else
     fi
 fi
 
+# --- ZAXIRA YANGILIGI VA TIKLASH ISBOTI --------------------------------------
+# NEGA. "Zaxira sozlangan" degan xulosa "zaxira BOR va U ISHLAYDI"
+# degani emas. Uchta boshqa savol:
+#
+#   1. oxirgi zaxira QACHON olingan?          (yangilik)
+#   2. undan HAQIQATAN tiklab bo'ldimi?        (mashq)
+#   3. mashq UZOQ nusxadan olindimi?           (himoya doirasi)
+#
+# Uchinchisi ayniqsa muhim: mahalliy diskdagi nusxadan tiklash
+# MEXANIZMNI isbotlaydi, lekin "disk yo'qolsa tiklanadi" degan
+# da'voni ISBOTLAMAYDI. Ishlab chiqarish uchun aynan ikkinchisi
+# kerak.
+#
+# CHEGARALAR timerlardan kelib chiqadi: zaxira kunlik, mashq
+# haftalik. Kechikish uchun kichik zaxira vaqti qo'shilgan.
+ZAXIRA_YANGILIK_SOAT=30
+ISBOT_MUDDAT_KUN=8
+ISBOT_FAYL="${ZAXIRA_YOL}/.tiklash-isboti"
+
+if [ -d "$ZAXIRA_YOL" ]; then
+    OXIRGI="$(ls -1t "$ZAXIRA_YOL"/*.dump 2>/dev/null | head -1 || true)"
+    if [ -z "$OXIRGI" ]; then
+        if [ "$MUHIT" = "production" ]; then
+            tosiq "zaxira fayli YO'Q ($ZAXIRA_YOL) — joylashtirishdan oldin
+   ishlab chiqarish bazasining YANGI nusxasi bo'lishi shart."
+        else
+            ogoh "zaxira fayli yo'q ($ZAXIRA_YOL)"
+        fi
+    else
+        YOSH_S=$(( $(date +%s) - $(stat -c %Y "$OXIRGI") ))
+        YOSH_SOAT=$(( YOSH_S / 3600 ))
+        if [ "$YOSH_SOAT" -gt "$ZAXIRA_YANGILIK_SOAT" ]; then
+            if [ "$MUHIT" = "production" ]; then
+                tosiq "oxirgi zaxira ${YOSH_SOAT} soat oldin olingan
+   (chegara ${ZAXIRA_YANGILIK_SOAT} soat). Joylashtirishdan oldin yangi
+   zaxira oling: systemctl start tenderai-backup@${MUHIT}.service"
+            else
+                ogoh "oxirgi zaxira ${YOSH_SOAT} soat oldin"
+            fi
+        else
+            ok "oxirgi zaxira: ${YOSH_SOAT} soat oldin"
+        fi
+    fi
+
+    # --- TIKLASH ISBOTI ---
+    if [ ! -f "$ISBOT_FAYL" ]; then
+        if [ "$MUHIT" = "production" ]; then
+            tosiq "TIKLASH ISBOTI YO'Q ($ISBOT_FAYL).
+   Zaxira olinishi uni TIKLAB bo'lishini isbotlamaydi.
+   Yurgizing: systemctl start tenderai-restore-test@${MUHIT}.service"
+        else
+            ogoh "tiklash isboti yo'q ($ISBOT_FAYL)"
+        fi
+    else
+        I_YOSH_KUN=$(( ( $(date +%s) - $(stat -c %Y "$ISBOT_FAYL") ) / 86400 ))
+        I_UZOQ="$(sed -n 's/^uzoq=//p' "$ISBOT_FAYL" | head -1)"
+        I_RTO="$(sed -n 's/^rto_s=//p' "$ISBOT_FAYL" | head -1)"
+        if [ "$I_YOSH_KUN" -gt "$ISBOT_MUDDAT_KUN" ]; then
+            if [ "$MUHIT" = "production" ]; then
+                tosiq "tiklash isboti ESKI: ${I_YOSH_KUN} kun (chegara ${ISBOT_MUDDAT_KUN}).
+   Eski mashqqa tayanib bo'lmaydi — o'shandan beri sxema ham,
+   zaxira yo'li ham o'zgargan bo'lishi mumkin."
+            else
+                ogoh "tiklash isboti ${I_YOSH_KUN} kunlik"
+            fi
+        elif [ "$MUHIT" = "production" ] && [ "$I_UZOQ" != "ha" ]; then
+            # MAHALLIY MASHQ YETARLI EMAS.
+            tosiq "tiklash mashqi MAHALLIY nusxadan olingan (uzoq=${I_UZOQ:-?}).
+   Bu mexanizmni isbotlaydi, lekin \"disk yo'qolsa tiklanadi\" degan
+   da'voni ISBOTLAMAYDI. Ishlab chiqarish uchun mashq UZOQ nusxadan
+   olinishi shart."
+        else
+            ok "tiklash isboti: ${I_YOSH_KUN} kun oldin, RTO=${I_RTO:-?}s, uzoq=${I_UZOQ:-?}"
+        fi
+    fi
+fi
+
 # Nosozlik xabari hech kimga bormasa, `systemd` xizmatni qayta
 # ko'taradi va buni HECH KIM BILMAYDI (docs/deploy.md §12c).
 if ! bor ALERT_TELEGRAM_CHAT && ! bor ALERT_EMAIL; then
