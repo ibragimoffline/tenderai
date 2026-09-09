@@ -1158,6 +1158,9 @@ def test_mashq():
         # --- deploy.sh: PRODUCTION DARVOZASI -----------------------------
         pildiz = os.path.join(baza, "opt", "production")
         os.makedirs(os.path.join(pildiz, "releases"))
+        # Yuklash ildizi MAVJUD bo'lsin: `oldindan-tekshir.sh` yo'q
+        # katalogni to'siq deb sanaydi.
+        os.makedirs(os.path.join(pildiz, "var", "uploads"), exist_ok=True)
 
         # PRODUCTION uchun ALOHIDA muhit fayli. Sabab: `deploy.sh`
         # endi `oldindan-tekshir.sh` ni chaqiradi va u `APP_ENV` ni
@@ -1197,7 +1200,8 @@ def test_mashq():
         prepo = os.path.join(baza, "mashq-repo.git")
         _mashq_repo(prepo, "v1.2.3")
 
-        pmuhit = {"TENDERAI_ILDIZ": _posix_yol(bash, pildiz),
+        pmuhit = {"TENDERAI_USER": _joriy_user(),
+                  "TENDERAI_ILDIZ": _posix_yol(bash, pildiz),
                   "TENDERAI_STAGING_ILDIZ": _posix_yol(bash, ildiz),
                   "TENDERAI_ENVFILE": _posix_yol(bash, penv),
                   "TENDERAI_REPO": _posix_yol(bash, prepo),
@@ -1336,6 +1340,20 @@ def test_joylashuv_izchilligi():
 # Bu bo'lim 16-bo'lim uslubida: skript O'QILMAYDI, YURGIZILADI.
 # =============================================================================
 
+def _joriy_user():
+    """Sinovni yurgizayotgan foydalanuvchi nomi.
+
+    Mashqda kataloglarni AYNAN SHU foydalanuvchi yasaydi, haqiqiy
+    mezbonda esa egasi `tenderai` bo'lishi shart. Egalik tekshiruvi
+    o'z kuchida qoladi -- faqat kutilgan rol muhitdan olinadi.
+    """
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:                                   # noqa: BLE001
+        return os.environ.get("USER") or "root"
+
+
 def _oldindan_qur(baza, posix=None, ozgartir=None, caddy_ozgartir=None):
     r"""Mashq uchun muhit fayli va Caddyfile yasaydi (namunadan).
 
@@ -1358,7 +1376,16 @@ def _oldindan_qur(baza, posix=None, ozgartir=None, caddy_ozgartir=None):
     zaxira = os.path.join(baza, "zaxira")
     for m in ("staging", "production"):
         os.makedirs(os.path.join(zaxira, m), exist_ok=True)
+    # YUKLASH ILDIZI. `oldindan-tekshir.sh` katalog MAVJUDLIGINI
+    # talab qiladi (yo'q katalog -> `500 STORAGE_WRITE_FAILED`), va
+    # u `TENDERAI_ILDIZ/var` ostida bo'lishi shart. Namunadagi
+    # haqiqiy yo'l mashq muhitida yo'q, shuning uchun almashtiriladi
+    # -- aks holda mashq SOXTA to'siq berardi.
+    ildiz = os.path.join(baza, "ildiz")
+    os.makedirs(os.path.join(ildiz, "var", "uploads"), exist_ok=True)
     almash = [
+        ("UPLOAD_ROOT=/opt/tenderai/production/var/uploads",
+         "UPLOAD_ROOT=" + posix(os.path.join(ildiz, "var", "uploads"))),
         ("APP_PUBLIC_URL=https://tender.example.uz",
          "APP_PUBLIC_URL=https://tender.mycompany.uz"),
         ('XT_DB_DSN="dbname=tenderai_production user=tai_service '
@@ -1439,6 +1466,17 @@ def test_oldindan_tekshiruv():
             e = dict(os.environ)
             e["TENDERAI_ENVFILE"] = _posix_yol(bash, envfile)
             e["TENDERAI_CADDYFILE"] = _posix_yol(bash, caddyfile)
+            # ILDIZ muhit fayli yonidan olinadi: `_oldindan_qur()`
+            # uni aynan shu yerda yasaydi. Xom namuna uchun bu
+            # katalog YO'Q va bu TO'G'RI -- xom namuna baribir
+            # joylashtirilmasligi kerak.
+            e["TENDERAI_ILDIZ"] = _posix_yol(
+                bash, os.path.join(os.path.dirname(envfile), "ildiz"))
+            # XIZMAT ROLI. Haqiqiy mezbonda u `tenderai`, mashqda esa
+            # kataloglarni SINOV yurgizayotgan foydalanuvchi yasaydi.
+            # `TENDERAI_ILDIZ` bilan AYNI naqsh: yo'l ham, rol ham
+            # muhitdan olinadi va standart qiymati o'zgarmaydi.
+            e["TENDERAI_USER"] = _joriy_user()
             yol = shim_p
             r = subprocess.run(
                 [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
@@ -3099,6 +3137,104 @@ def test_yuklash_ildizi():
           "keyingi joylashtiruvda" in o or "YO'QOLARDI" in o)
 
 
+# =====================================================================
+# 8j. `UPLOAD_ROOT` SHARTLARI — HAR BIRI ALOHIDA YURGIZILADI
+# =====================================================================
+def test_yuklash_ildizi_shartlari():
+    bolim("8j. `UPLOAD_ROOT`: har bir shart HAQIQATAN to'sadi")
+    skript = os.path.join(D, "bin", "oldindan-tekshir.sh")
+    bash = _mashq_bash()
+    if not bash or not os.path.isfile(skript):
+        check("mashq muhiti bor", False, "skript YURGIZILMADI")
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_uproot_")
+    try:
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        N = chr(10)
+        psql = os.path.join(qutі, "psql")
+        io.open(psql, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N + "echo 1" + N + "exit 0" + N)
+        os.chmod(psql, 0o755)
+
+        ildiz = os.path.join(baza, "ildiz")
+        os.makedirs(os.path.join(ildiz, "var"), exist_ok=True)
+        os.makedirs(os.path.join(ildiz, "releases", "r1"), exist_ok=True)
+        zaxira = os.path.join(baza, "zaxira")
+        os.makedirs(os.path.join(zaxira, "staging"), exist_ok=True)
+        envfile = os.path.join(baza, "muhit.env")
+
+        def yurgiz(uproot, user=None):
+            io.open(envfile, "w", encoding="utf-8", newline=N).write(N.join([
+                "APP_ENV=staging", "API_PORT=8011", "API_DOCS=0",
+                "AUTH_COOKIE_SECURE=0", "TRUST_PROXY=1", "CORS_ORIGINS=",
+                "APP_PUBLIC_URL=http://localhost:8091",
+                "VITE_API_BASE=/api",
+                'XT_DB_DSN="dbname=t user=tai_app password=p1 host=127.0.0.1"',
+                'XT_DB_DSN_OWNER="dbname=t user=postgres password=p2 host=127.0.0.1"',
+                "BACKUP_DIR=" + _posix_yol(bash, zaxira),
+                "UPLOAD_ROOT=" + uproot, ""]))
+            e = dict(os.environ)
+            e["TENDERAI_ENVFILE"] = _posix_yol(bash, envfile)
+            e["TENDERAI_ILDIZ"] = _posix_yol(bash, ildiz)
+            e["TENDERAI_USER"] = user or _joriy_user()
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 _posix_yol(bash, qutі),
+                 "deploy/bin/oldindan-tekshir.sh", "staging"],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=180)
+            return (r.stdout or "") + (r.stderr or "")
+
+        def tosadi(nom, uproot, belgi, user=None):
+            chiq = yurgiz(uproot, user)
+            satr = [q for q in chiq.splitlines()
+                    if "[TO'SIQ]" in q and "UPLOAD_ROOT" in q]
+            check(nom, bool(satr) and any(belgi in q for q in satr),
+                  (satr[0][:110] if satr else "TO'SIQ YO'Q"))
+
+        var_up = os.path.join(ildiz, "var", "uploads")
+        p_var_up = _posix_yol(bash, var_up)
+
+        # Har bir shart ALOHIDA. Bittasi ishlab, qolgani ishlamasa
+        # ham "UPLOAD_ROOT tekshiriladi" degan xulosa chiqardi.
+        tosadi("bo'sh qiymat to'sadi", "", "bo'sh")
+        tosadi("nisbiy yo'l to'sadi", "var/uploads", "nisbiy")
+        # RELIZ KATALOGI: har joylashtiruv yangi katalog yasaydi,
+        # ya'ni u yerdagi fayllar keyingisida YO'QOLARDI.
+        tosadi("RELIZ katalogi to'sadi",
+               _posix_yol(bash, os.path.join(ildiz, "releases", "r1",
+                                             ".runtime", "uploads")),
+               "RELIZ")
+        # QUMDON: `ProtectSystem=strict` + `ReadWritePaths` dan
+        # tashqarida yozib bo'lmaydi.
+        tosadi("qumdondan tashqari yo'l to'sadi",
+               "/zz-yoq-katalog/uploads", "qumdondan")
+        tosadi("MAVJUD BO'LMAGAN katalog to'sadi", p_var_up, "YO'Q")
+
+        os.makedirs(var_up, exist_ok=True)
+        chiq = yurgiz(p_var_up)
+        check("to'g'ri sozlamada TO'SIQ yo'q",
+              not [q for q in chiq.splitlines()
+                   if "[TO'SIQ]" in q and "UPLOAD_ROOT" in q],
+              chiq[-200:])
+        check("bo'sh joy ham o'lchanadi", "bo'sh joy" in chiq)
+
+        # HAMMA UCHUN YOZILADIGAN BO'LMASIN: serverdagi har qanday
+        # foydalanuvchi yuklangan hujjatni almashtira olardi.
+        os.chmod(var_up, 0o777)
+        tosadi("777 rejim to'sadi", p_var_up, "HAMMA")
+        os.chmod(var_up, 0o755)
+
+        # EGALIK: xizmat roli yoza olishi shart. `-w` YETARLI EMAS --
+        # u tekshiruvni yurgizayotgan foydalanuvchi uchun javob
+        # berardi (odatda root), xizmat uchun emas.
+        tosadi("BEGONA egalik to'sadi", p_var_up, "egasi",
+               user="zz_boshqa_rol")
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -3144,6 +3280,7 @@ def main():
     test_e2e_hisoblari()
     test_eski_app_user_diagnostikasi()
     test_yuklash_ildizi()
+    test_yuklash_ildizi_shartlari()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

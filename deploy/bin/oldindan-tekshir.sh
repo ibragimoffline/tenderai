@@ -236,7 +236,15 @@ done
 UPROOT="$(qiy UPLOAD_ROOT)"
 # ILDIZ `deploy.sh` bilan BIR XIL qoidada aniqlanadi -- aks holda
 # tekshiruv haqiqiy joylashtiruvdan boshqa yo'lni o'lchardi.
-YOZILADIGAN="${TENDERAI_ILDIZ:-/opt/tenderai/${MUHIT}}/var"
+ILDIZ_YOL="${TENDERAI_ILDIZ:-/opt/tenderai/${MUHIT}}"
+YOZILADIGAN="${ILDIZ_YOL}/var"
+XIZMAT_USER="${TENDERAI_USER:-tenderai}"
+#: Bo'sh joy chegaralari. Disk yuklangan fayllar, baza dumpi va
+#: zaxira saqlanishi bilan BO'LINADI, ya'ni "yuklashga joy bor" degan
+#: savol yolg'iz turmaydi.
+DISK_TOSIQ_GB=2
+DISK_OGOH_GB=10
+
 if [ -z "$UPROOT" ]; then
     tosiq "UPLOAD_ROOT bo'sh — yuklangan fayllar reliz katalogiga tushardi,
    u esa systemd qumdonida FAQAT O'QILADIGAN (ProtectSystem=strict).
@@ -244,15 +252,51 @@ if [ -z "$UPROOT" ]; then
    Qo'ying: UPLOAD_ROOT=${YOZILADIGAN}/uploads"
 elif [ "${UPROOT#/}" = "$UPROOT" ]; then
     tosiq "UPLOAD_ROOT nisbiy yo'l ('$UPROOT') — ish katalogiga bog'liq bo'ladi"
-elif [ "${UPROOT#${YOZILADIGAN}/}" = "$UPROOT" ]; then
+elif [ "$UPROOT" != "${UPROOT#*/releases/}" ] \
+     || [ "$UPROOT" != "${UPROOT%/releases}" ]; then
+    # RELIZ KATALOGI O'ZGARMAS. Har joylashtiruv yangi katalog
+    # yasaydi, ya'ni u yerdagi fayllar keyingisida YO'QOLARDI.
+    tosiq "UPLOAD_ROOT RELIZ katalogi ichida: $UPROOT
+   Har joylashtiruv yangi katalog yasaydi — fayllar YO'QOLARDI.
+   Reliz daraxti o'zgarmas bo'lishi kerak."
+elif [ "${UPROOT#${YOZILADIGAN}/}" = "$UPROOT" ] && [ "$UPROOT" != "$YOZILADIGAN" ]; then
     # Qumdon ro'yxatidan tashqarida bo'lsa yozib bo'lmaydi.
     tosiq "UPLOAD_ROOT qumdondan TASHQARIDA: $UPROOT
    systemd faqat '${YOZILADIGAN}' ga yozishga ruxsat beradi
    (ReadWritePaths). Boshqa joy 500 beradi."
-elif [ -d "$UPROOT" ] && [ ! -w "$UPROOT" ]; then
-    ogoh "UPLOAD_ROOT mavjud, lekin bu foydalanuvchi uchun yozilmaydi: $UPROOT"
+elif [ ! -d "$UPROOT" ]; then
+    tosiq "UPLOAD_ROOT katalogi YO'Q: $UPROOT
+   Yasang: sudo install -d -o ${XIZMAT_USER} -g ${XIZMAT_USER} -m 0755 '$UPROOT'"
 else
-    ok "UPLOAD_ROOT=$UPROOT (qumdon ichida)"
+    # --- MAVJUD KATALOG: EGASI, REJIMI, BO'SH JOYI ------------------
+    UP_EGA="$(stat -c '%U' "$UPROOT" 2>/dev/null || echo '?')"
+    UP_REJIM="$(stat -c '%a' "$UPROOT" 2>/dev/null || echo '?')"
+    UP_XATO=""
+    # Xizmat roli yoza olishi SHART. Egalik tekshiriladi, `-w` emas:
+    # `-w` TEKSHIRUVNI YURGIZAYOTGAN foydalanuvchi uchun javob
+    # beradi (odatda root), xizmat uchun emas.
+    [ "$UP_EGA" = "$XIZMAT_USER" ] || UP_XATO="egasi '$UP_EGA' — '${XIZMAT_USER}' bo'lishi kerak"
+    # HAMMA UCHUN YOZILADIGAN BO'LMASIN: serverdagi har qanday
+    # foydalanuvchi yuklangan hujjatni almashtira olardi.
+    case "$UP_REJIM" in
+        *[2367]) UP_XATO="${UP_XATO:+$UP_XATO; }rejim $UP_REJIM — HAMMA uchun yoziladi" ;;
+    esac
+    if [ -n "$UP_XATO" ]; then
+        tosiq "UPLOAD_ROOT ($UPROOT): $UP_XATO"
+    else
+        ok "UPLOAD_ROOT=$UPROOT (qumdon ichida, $UP_EGA, $UP_REJIM)"
+    fi
+
+    BOSH_GB="$(df -BG --output=avail "$UPROOT" 2>/dev/null | tail -1 | tr -dc '0-9')"
+    if [ -z "$BOSH_GB" ]; then
+        ogoh "bo'sh joy O'LCHANMADI: $UPROOT"
+    elif [ "$BOSH_GB" -lt "$DISK_TOSIQ_GB" ]; then
+        tosiq "diskda ${BOSH_GB} GB bo'sh joy — zaxira dumpi ham shu diskda"
+    elif [ "$BOSH_GB" -lt "$DISK_OGOH_GB" ]; then
+        ogoh "diskda ${BOSH_GB} GB bo'sh joy (${DISK_OGOH_GB} GB dan kam)"
+    else
+        ok "bo'sh joy: ${BOSH_GB} GB"
+    fi
 fi
 
 # Ilova roli EGA bo'lmasin: `tai_app` da DDL huquqi ATAYLAB yo'q

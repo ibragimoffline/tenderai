@@ -264,6 +264,50 @@ barobardan **kichik** bo'lishi shart.
 
 ---
 
+## 7d. `UPLOAD_ROOT` qayerda turadi
+
+**Qoida:** yuklangan fayllar **reliz daraxtidan tashqarida**, lekin
+systemd qumdoni ruxsat bergan yo'lda.
+
+```
+/opt/tenderai/<muhit>/var/uploads      egasi tenderai:tenderai, 0755
+```
+
+**Nega aynan shu yo'l, `/var/lib/tenderai` emas.** Birlik shabloni
+(`tenderai-api@.service`) allaqachon shunday yozilgan:
+
+```
+ProtectSystem=strict
+ReadWritePaths=/opt/tenderai/%i/var
+```
+
+Ya'ni `var/` — bu loyihaning **mavjud** doimiy holat katalogi (unda
+`hf` va `cache` ham turadi) va u qumdonda **allaqachon** ruxsat
+etilgan. `/var/lib/tenderai` ga o'tish birlik shablonini
+o'zgartirishni talab qilardi — shablon esa **ikkala muhitga**
+umumiy, ya'ni production xizmatini ham qayta yuklash kerak
+bo'lardi. Yangi yo'lning hech qanday ustunligi yo'q, xatari esa
+bor. `ProtectSystem=strict` **o'z kuchida qoladi**.
+
+**Nega reliz katalogi yaramaydi.** Har joylashtiruv yangi katalog
+yasaydi (`releases/<vaqt>-<ref>`), ya'ni u yerdagi fayllar
+keyingi relizda **yo'qolardi**. Bundan tashqari reliz daraxti
+qumdonda **faqat o'qiladigan** — yozish `500
+STORAGE_WRITE_FAILED` beradi.
+
+**O'lchangan (2026-09-09, staging):** 06:41–06:42 da yozilgan
+fayllar `20260909-065405` reliziga o'tilgandan va xizmat
+07:01:04 da qayta ko'tarilgandan keyin ham joyida.
+
+**Qo'riqchi.** `oldindan-tekshir.sh` quyidagilarning har birini
+alohida **to'sadi**: qiymat bo'sh; nisbiy yo'l; reliz katalogi
+ichida; qumdondan tashqarida; katalog mavjud emas; egasi xizmat
+roli emas; rejim hamma uchun yoziladigan. Diskda bo'sh joy ham
+o'lchanadi. Har bir shart `_tests/deploy_test.py` §8j da
+**yurgizib** tekshiriladi.
+
+---
+
 ## 8. Sozlamalar
 
 | o'zgaruvchi | standart | izoh |
