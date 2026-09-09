@@ -288,6 +288,27 @@ berilmasa skript **boshlanmaydi**. Ya'ni bayroqni *unutish* xato,
 *ataylab o'chirish* esa ruxsat etilgan tanlov. `deploy.sh` rejimni
 `E2E_AI_ENABLED` dan oladi (standart: **0 — o'chirilgan**).
 
+### Chekka chegarasi (`client_max_body_size` / `max_size`)
+
+E2E `--proksi` bilan yurganda **proksi** 30 MB ni to'xtatishini va
+20 MB ni **o'tkazishini** talab qiladi. Ya'ni chekka chegarasi
+ilovaning `MAX_UPLOAD_MB` idan **yuqori**, sinov hajmidan **past**
+bo'lishi kerak:
+
+| Qatlam | Qiymat | Nima uchun |
+|---|---|---|
+| ilova (`MAX_UPLOAD_MB`) | 25 MB | tushunarli `FILE_TOO_LARGE` xatosi |
+| chekka (proksi) | **26 MB** | kattaroq tana ilovaga **yetib bormaydi** |
+
+`deploy/caddy/Caddyfile` da `max_size 26MB`. Bu serverda 80/443 ni
+nginx egallagan (sabab `tender-nginx` izohida), shuning uchun ayni
+qiymat `client_max_body_size 26m` bo'lishi kerak.
+
+**O'lchangan siljish (2026-09-09):** `tenderai-staging` va `tenderai`
+bloklarida `32m` turgan edi — sinov hajmidan **yuqori**, ya'ni 30 MB
+li tana nginx tomonidan to'liq buferlanib ilovaga uzatilardi va
+faqat o'sha yerda rad etilardi. Asosiy E2E buni to'sadi.
+
 **Ijarachi chegarasi bunga kirmaydi:** `--begona` berilmasa E2E
 hamon **yiqiladi**. Ikkita hisob shart — chegara bitta hisob bilan
 o'lchanmaydi.
