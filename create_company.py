@@ -3,7 +3,14 @@ KOMPANIYA hisobini yaratish / parolini almashtirish — buyruq qatoridan.
 
     .venv/Scripts/python.exe create_company.py alfa "Alfa Savdo MChJ"
     .venv/Scripts/python.exe create_company.py alfa --password   # parol almashtirish
+    .venv/Scripts/python.exe create_company.py alfa --faolsizlantir
+    .venv/Scripts/python.exe create_company.py alfa --faollashtir
     .venv/Scripts/python.exe create_company.py --list
+
+HISOB O'CHIRILMAYDI. Audit yozuvlari va `yuklama` qatorlari unga ishora
+qiladi, o'chirish ularni yetim qoldirardi. Yopish uchun
+`--faolsizlantir`, qaytarish uchun `--faollashtir` -- ya'ni amal
+QAYTARILADIGAN. `--list` yopilganini `(faol emas)` deb ko'rsatadi.
 
 NEGA HODIM EMAS: tender-ai ga KOMPANIYA kiradi. Hodim hisoblari ERP da va
 ular uchun alohida skript bor (`tender erp/create_user.py`). Auth-1 da bu
@@ -86,6 +93,17 @@ def main() -> int:
     ap.add_argument("--parol-stdin", action="store_true",
                     help="parolni STDIN dan olish (skriptlar uchun; "
                          "argumentga tushmaydi)")
+    # FAOLLIK. Hisob O'CHIRILMAYDI (modul sarlavhasidagi qoida):
+    # audit yozuvlari va `yuklama` qatorlari unga ishora qiladi,
+    # o'chirish ularni yetim qoldirardi. Shuning uchun yagona
+    # to'g'ri amal -- `active` bayrog'ini almashtirish, va u
+    # QAYTARILADIGAN.
+    faol = ap.add_mutually_exclusive_group()
+    faol.add_argument("--faolsizlantir", action="store_true",
+                      help="hisobni yopish (`active=false`); "
+                           "o'chirmaydi, qaytariladi")
+    faol.add_argument("--faollashtir", action="store_true",
+                      help="yopilgan hisobni qaytarish (`active=true`)")
     a = ap.parse_args()
 
     db.init_pool()
@@ -108,6 +126,37 @@ def main() -> int:
         if not a.username:
             ap.print_help()
             return 1
+
+        if a.faolsizlantir or a.faollashtir:
+            if not a.username:
+                print("Foydalanuvchi nomi kerak.")
+                return 1
+            cur = db.query_one(auth.ACC_BY_NAME_SQL,
+                               {"username": a.username.strip().lower()})
+            if not cur:
+                print(f"'{a.username}' topilmadi.")
+                return 1
+            yangi_faol = bool(a.faollashtir)
+            if bool(cur["active"]) == yangi_faol:
+                print(f"'{a.username}' allaqachon "
+                      f"{'faol' if yangi_faol else 'faol emas'}.")
+                return 0
+            # MAVJUD QIYMATLAR ANIQ UZATILADI.
+            #
+            # `auth.update_account()` `company_name` va `active` uchun
+            # joriy qiymatga qaytadi, `email` uchun esa QAYTMAYDI:
+            #   "email": data.get("email")
+            # Ya'ni faqat `active` uzatilsa EMAIL O'CHIB KETARDI --
+            # faollikni almashtirish hech qachon boshqa maydonni
+            # yo'qotmasligi kerak.
+            auth.update_account(cur["id"], {
+                "company_name": cur["company_name"],
+                "email": cur["email"],
+                "active": yangi_faol})
+            print(f"'{a.username}': "
+                  f"{'faollashtirildi' if yangi_faol else 'faolsizlantirildi'}"
+                  f" (o'chirilmadi).")
+            return 0
 
         if a.password:
             cur = db.query_one(auth.ACC_BY_NAME_SQL,

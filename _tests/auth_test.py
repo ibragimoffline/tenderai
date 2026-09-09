@@ -724,8 +724,96 @@ def test_db():
                 eq("view ga yozib bo'lmaydi", ins["is_insertable_into"], "NO")
 
 
+def test_faollik_cli():
+    """`create_company.py --faolsizlantir/--faollashtir` — BAZASIZ.
+
+    NEGA MUHIM. Hisob O'CHIRILMAYDI (modul qoidasi): audit yozuvlari
+    va `yuklama` qatorlari unga ishora qiladi. Ya'ni faollik
+    bayrog'i -- hisobni yopishning YAGONA to'g'ri yo'li, va u
+    boshqa maydonlarni yo'qotmasligi shart.
+
+    O'LCHANGAN TUZOQ. `auth.update_account()` `company_name` va
+    `active` uchun joriy qiymatga qaytadi, `email` uchun esa
+    QAYTMAYDI:
+
+        "email": data.get("email")
+
+    Ya'ni faqat `active` uzatilsa EMAIL O'CHIB KETADI. Shuning
+    uchun bu yerda CLI ning UZATGAN yuklamasi tekshiriladi, natija
+    emas -- baza kerak bo'lmaydi va shart aniq bo'ladi.
+    """
+    head("Faollik bayrog'i (CLI, bazasiz)")
+    import importlib.util as _iu
+    _sp = _iu.spec_from_file_location(
+        "zz_create_company", os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "create_company.py"))
+    cc = _iu.module_from_spec(_sp)
+    _sp.loader.exec_module(cc)
+
+    HISOB = {"id": 77, "username": "zzfaol_sinov", "active": True,
+             "company_name": "ZZ Kompaniya", "email": "zz@example.uz"}
+    yozildi = {}
+
+    def soxta_query_one(sql, params=None):
+        return dict(HISOB)
+
+    def soxta_update(account_id, data):
+        yozildi["id"] = account_id
+        yozildi["data"] = dict(data)
+        return {}
+
+    asl = (cc.db.query_one, cc.auth.update_account, cc.db.init_pool,
+           cc.db.close_pool, cc.auth.schema_ready, sys.argv)
+    try:
+        cc.db.query_one = soxta_query_one
+        cc.auth.update_account = soxta_update
+        cc.db.init_pool = lambda *a, **k: None
+        cc.db.close_pool = lambda *a, **k: None
+        cc.auth.schema_ready = lambda: True
+
+        sys.argv = ["create_company.py", "zzfaol_sinov", "--faolsizlantir"]
+        eq("faolsizlantirish chiqish kodi", cc.main(), 0)
+        eq("to'g'ri hisob yangilandi", yozildi.get("id"), 77)
+        d = yozildi.get("data") or {}
+        eq("active=False uzatildi", d.get("active"), False)
+        # ASOSIY SHART: qo'shni maydonlar YO'QOLMAYDI.
+        eq("email SAQLANADI", d.get("email"), "zz@example.uz")
+        eq("company_name SAQLANADI", d.get("company_name"), "ZZ Kompaniya")
+
+        # QAYTARILADIGAN bo'lsin: yopish -- o'chirish emas.
+        yozildi.clear()
+        HISOB["active"] = False
+        sys.argv = ["create_company.py", "zzfaol_sinov", "--faollashtir"]
+        eq("faollashtirish chiqish kodi", cc.main(), 0)
+        eq("active=True uzatildi", (yozildi.get("data") or {}).get("active"),
+           True)
+
+        # IDEMPOTENT: holat allaqachon to'g'ri bo'lsa YOZILMAYDI.
+        # Aks holda har chaqiruv `updated_at` ni surib, auditni
+        # ma'nosiz shovqin bilan to'ldirardi.
+        yozildi.clear()
+        HISOB["active"] = False
+        sys.argv = ["create_company.py", "zzfaol_sinov", "--faolsizlantir"]
+        eq("takroriy faolsizlantirish kodi", cc.main(), 0)
+        check(not yozildi, "allaqachon yopiq bo'lsa BAZAGA YOZILMAYDI",
+              str(yozildi))
+
+        # Ikkalasi BIRGA berilmasin.
+        sys.argv = ["create_company.py", "zz", "--faolsizlantir",
+                    "--faollashtir"]
+        try:
+            cc.main()
+            check(False, "ikkala bayroq birga -> XATO")
+        except SystemExit as e:
+            check(e.code != 0, "ikkala bayroq birga -> XATO", f"kod={e.code}")
+    finally:
+        (cc.db.query_one, cc.auth.update_account, cc.db.init_pool,
+         cc.db.close_pool, cc.auth.schema_ready, sys.argv) = asl
+
+
 if __name__ == "__main__":
     test_parol()
+    test_faollik_cli()
     try:
         test_db()
     except Exception as e:                     # noqa: BLE001
