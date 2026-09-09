@@ -3833,6 +3833,129 @@ def test_zaxira_yangiligi_va_isbot():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+# =====================================================================
+# 8r. `baza-holat.sh` — FAQAT O'QISH va SILJISHNI TOPADI
+# =====================================================================
+def test_baza_holat():
+    bolim("8r. `baza-holat.sh`: o'zgartirmaydi, siljishni topadi")
+    b = oqi("bin", "baza-holat.sh")
+    check("skript mavjud", bool(b))
+
+    # ENG MUHIM XOSSA: bu asbob ISHLAB CHIQARISH bazasiga qaraydi.
+    # O'zgartira oladigan bironta amal bo'lmasligi kerak -- "faqat
+    # qarayapman" degan NIYAT yetarli emas.
+    kod = _izohsiz(b)
+    for amal in ("ALTER", "DROP", "GRANT", "REVOKE", "INSERT",
+                 "UPDATE", "DELETE", "TRUNCATE", "CREATE"):
+        check(f"o'zgartiruvchi amal yo'q: {amal}",
+              not re.search(r"\b" + amal + r"\b", kod, re.I))
+    # XATAR `:?` NING O'ZIDA EMAS, XABARDAGI APOSTROFDA.
+    # `${1:?foydalanish: ...}` butunlay xavfsiz; `${V:?bo'sh}` esa
+    # bash uchun tirnoq ochadi va skript SINTAKSIS xatosi bilan
+    # yiqiladi. Loyihada `backup.sh` da bir marta tuzatilgan, va
+    # men uni shu faylda QAYTA kiritgan edim.
+    xatarli = re.findall(r"\$\{[A-Za-z_][A-Za-z0-9_]*:\?[^}]*'[^}]*\}", kod)
+    check("apostrofli `${VAR:?...}` yo'q", not xatarli, str(xatarli[:2]))
+
+    bash = _mashq_bash()
+    if not bash:
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_bh_")
+    try:
+        N = chr(10)
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        idsh = os.path.join(qutі, "id")
+        io.open(idsh, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N
+            + '[ "$1" = "-u" ] && echo 0 || exec /usr/bin/id "$@"' + N)
+        os.chmod(idsh, 0o755)
+        env = os.path.join(baza, "muhit.env")
+        io.open(env, "w", encoding="utf-8", newline=N).write(
+            "APP_ENV=production" + N
+            + 'XT_DB_DSN_OWNER="dbname=zz user=tai_owner host=127.0.0.1"' + N)
+
+        def shim_psql(app_user="false", ortiq="0", sukut="0", svc_super="false"):
+            # So'rov MATNIGA qarab javob beradigan qo'g'irchoq.
+            # Shu bilan skriptning SILJISH mantig'i haqiqatan
+            # yurgiziladi -- matn skaneri emas.
+            io.open(os.path.join(qutі, "psql"), "w", encoding="utf-8",
+                    newline=N).write(N.join([
+                "#!/bin/sh",
+                'sql="$*"',
+                'case "$sql" in',
+                "  *information_schema.tables*) echo 1 ;;",
+                "  *max\\(migratsiya_id\\)*) echo 0085_auth_eski_tozalash ;;",
+                "  *boshlandi*) echo 0 ;;",
+                "  *holat=\\'xato\\'*) echo 0 ;;",
+                "  *migratsiya_id*=*) echo ok ;;",
+                "  *holat*IN*) echo 87 ;;",
+                "  *to_regclass*) echo " + app_user + " ;;",
+                "  *information_schema.schemata*) echo 1 ;;",
+                "  *pg_default_acl*) echo " + sukut + " ;;",
+                "  *NOT\\ IN*) echo " + ortiq + " ;;",
+                "  *relname\\ IN*) echo 5 ;;",
+                "  *aclexplode*) echo '    v erp.v_stock -> SELECT' ;;",
+                "  *rolsuper*)",
+                "     case \"$sql\" in *tai_service*) echo " + svc_super
+                + " ;; *tai_owner*) echo true ;; *) echo false ;; esac ;;",
+                "  *rolcreatedb*) echo false ;;",
+                "  *rolcreaterole*) echo false ;;",
+                "  *rolcanlogin*)",
+                "     case \"$sql\" in *tai_app*) echo false ;; *) echo true ;; esac ;;",
+                "  *) echo 0 ;;",
+                "esac", "exit 0", ""]))
+            os.chmod(os.path.join(qutі, "psql"), 0o755)
+
+        def yur():
+            e = dict(os.environ)
+            e["TENDERAI_ENVFILE"] = _posix_yol(bash, env)
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 _posix_yol(bash, qutі),
+                 "deploy/bin/baza-holat.sh", "production"],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=120)
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+        # --- A) TOZA HOLAT -> kod 0 ---
+        shim_psql()
+        kod_a, chiq = yur()
+        check("A: toza holatda SILJISH yo'q", "SILJISH YO'Q" in chiq,
+              chiq[-160:])
+        check("A: chiqish kodi 0", kod_a == 0, f"kod={kod_a}")
+
+        # --- B) public.app_user QAYTGAN -> siljish ---
+        shim_psql(app_user="true")
+        kod_b, chiq = yur()
+        check("B: public.app_user borligi SILJISH", "HAMON MAVJUD" in chiq)
+        check("B: chiqish kodi 1", kod_b == 1, f"kod={kod_b}")
+
+        # --- C) ERP da ORTIQCHA obyekt -> siljish ---
+        shim_psql(ortiq="3")
+        kod_c, chiq = yur()
+        check("C: ortiqcha ERP obyekti SILJISH",
+              "ORTIQCHA SELECT obyekt: 3" in chiq)
+        check("C: chiqish kodi 1", kod_c == 1)
+
+        # --- D) SUKUT HUQUQ qaytgan -> siljish ---
+        # O'zini QAYTA TIKLAYDIGAN siljish: bir martalik REVOKE
+        # yetarli emas edi.
+        shim_psql(sukut="2")
+        _kod, chiq = yur()
+        check("D: xatarli sukut huquq SILJISH",
+              "XATARLI SUKUT HUQUQ" in chiq)
+
+        # --- E) ILOVA ROLI IMTIYOZLI -> siljish ---
+        shim_psql(svc_super="true")
+        _kod, chiq = yur()
+        check("E: tai_service SUPERUSER bo'lsa SILJISH",
+              "tai_service SUPERUSER" in chiq)
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -3886,6 +4009,7 @@ def main():
     test_meta_migratsiya_sorovi()
     test_dsn_tashxisi()
     test_zaxira_yangiligi_va_isbot()
+    test_baza_holat()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)
