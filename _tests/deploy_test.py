@@ -3480,6 +3480,93 @@ def test_tiklash_metasi():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+# =====================================================================
+# 8n. BOG'LIQ TEKSHIRUV KASKADLI SOXTA QIZIL BERMASIN
+# =====================================================================
+def test_pgvector_kaskadi():
+    bolim("8n. pgvector: o'lchanmagani YIQILGAN emas")
+    o = oqi("bin", "oldindan-tekshir.sh")
+    check("egalik ulanishi ESLAB QOLINADI", "EGA_ULANDI" in o)
+    check("ulanmasa pgvector TEKSHIRILMADI deb belgilanadi",
+          "pgvector TEKSHIRILMADI" in o)
+
+    bash = _mashq_bash()
+    if not bash:
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_pgv_")
+    try:
+        N = chr(10)
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+
+        # `psql` SHIMI: ILOVA roli ulanadi, EGALIK roli ULANMAYDI.
+        # Aynan production da o'lchangan holat.
+        psql = os.path.join(qutі, "psql")
+        io.open(psql, "w", encoding="utf-8", newline=N).write(N.join([
+            "#!/bin/sh",
+            'for a in "$@"; do',
+            '  case "$a" in *tai_owner*|*EGALIK*) exit 1 ;; esac',
+            "done",
+            "echo 1", "exit 0", ""]))
+        os.chmod(psql, 0o755)
+
+        ildiz = os.path.join(baza, "ildiz")
+        os.makedirs(os.path.join(ildiz, "var", "uploads"), exist_ok=True)
+        orama = os.path.join(ildiz, "bin", "tender-backup-remote")
+        os.makedirs(os.path.dirname(orama), exist_ok=True)
+        io.open(orama, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N + "exit 0" + N)
+        os.chmod(orama, 0o755)
+        zaxira = os.path.join(baza, "zaxira")
+        os.makedirs(os.path.join(zaxira, "production"), exist_ok=True)
+
+        env = os.path.join(baza, "muhit.env")
+        io.open(env, "w", encoding="utf-8", newline=N).write(N.join([
+            "APP_ENV=production", "API_PORT=8000", "API_DOCS=0",
+            "AUTH_COOKIE_SECURE=1", "TRUST_PROXY=1", "CORS_ORIGINS=",
+            "APP_PUBLIC_URL=https://zz.mycompany.uz",
+            "VITE_API_BASE=/api",
+            'XT_DB_DSN="dbname=t user=tai_app password=p1 host=127.0.0.1"',
+            'XT_DB_DSN_OWNER="dbname=t user=tai_owner password=p2 host=127.0.0.1"',
+            "BACKUP_DIR=" + _posix_yol(bash, zaxira),
+            "UPLOAD_ROOT=" + _posix_yol(bash, os.path.join(ildiz, "var", "uploads")),
+            "BACKUP_REMOTE_CMD='" + _posix_yol(bash, orama) + " {fayl}'",
+            ""]))
+
+        e = dict(os.environ)
+        e["TENDERAI_ENVFILE"] = _posix_yol(bash, env)
+        e["TENDERAI_ILDIZ"] = _posix_yol(bash, ildiz)
+        e["TENDERAI_USER"] = _joriy_user()
+        e["TENDERAI_ROOT"] = _joriy_user()
+        r = subprocess.run(
+            [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+             _posix_yol(bash, qutі),
+             "deploy/bin/oldindan-tekshir.sh", "production"],
+            cwd=ROOT, env=e, capture_output=True, text=True, timeout=180)
+        chiq = (r.stdout or "") + (r.stderr or "")
+
+        check("egalik DSN i ULANMADI deb aytiladi",
+              "XT_DB_DSN_OWNER ULANMADI" in chiq)
+        # ASOSIY SHART: pgvector YOLG'ON "yo'q" deb e'lon
+        # QILINMAYDI. Ishlab chiqarishda bu operatorni mavjud
+        # kengaytmani "yaratishga" yuborardi.
+        check("pgvector YO'Q deb YOLG'ON aytilmaydi",
+              "pgvector YO'Q" not in chiq,
+              [q for q in chiq.splitlines() if "pgvector" in q][:1])
+        check("pgvector TEKSHIRILMADI deb belgilanadi",
+              "pgvector TEKSHIRILMADI" in chiq)
+        # Uchinchi holat TO'SIQ sanog'iga qo'shilmaydi, lekin
+        # KO'RINADI -- jim o'tmaydi.
+        check("u `tekshirilmadi` bo'limida ko'rinadi",
+              "tekshirilmadi: " in chiq)
+        check("joylashtirish baribir TO'XTAYDI (ulanish to'sig'i)",
+              r.returncode == 1, f"kod={r.returncode}")
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -3529,6 +3616,7 @@ def main():
     test_tashqi_nusxa_orama()
     test_tashqi_nusxa_orama_yurgiziladi()
     test_tiklash_metasi()
+    test_pgvector_kaskadi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

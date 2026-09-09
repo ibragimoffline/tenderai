@@ -330,23 +330,41 @@ fi
 # `pg_hba` da ruxsat yo'qligi) FAQAT ulanib ko'rilganda chiqadi.
 bolim "4. BAZAGA ULANISH"
 if command -v psql >/dev/null 2>&1; then
+    EGA_ULANDI=0
     for D in XT_DB_DSN XT_DB_DSN_OWNER; do
         V="$(qiy "$D")"
         [ -n "$V" ] || continue
         if PGCONNECT_TIMEOUT=5 psql "$V" -tAc 'select 1' >/dev/null 2>&1; then
             ok "$D ulanadi"
+            [ "$D" = "XT_DB_DSN_OWNER" ] && EGA_ULANDI=1
         else
             tosiq "$D ULANMADI (host, rol, parol yoki pg_hba)"
         fi
     done
     # pgvector — migratsiyalar va RAG shunga tayanadi.
-    if [ -n "$(qiy XT_DB_DSN_OWNER)" ]; then
-        if PGCONNECT_TIMEOUT=5 psql "$(qiy XT_DB_DSN_OWNER)" -tAc \
+    #
+    # BOG'LIQ TEKSHIRUV, MUSTAQIL EMAS. So'rov AYNAN
+    # `XT_DB_DSN_OWNER` orqali yuriydi. Ulanish yiqilganda so'rov
+    # ham bo'sh qaytadi va natija "pgvector YO'Q" bo'lib ko'rinardi.
+    #
+    # O'LCHANGAN CHALG'ISH (2026-09-09, production preflighti):
+    # egalik DSN i ulanmadi va hisobot ikkita MUSTAQIL to'siq
+    # ko'rsatdi -- ulanish va pgvector. Ikkinchisi esa YOLG'ON edi:
+    # ishlab chiqarish bazasi tirik va RAG ishlayapti, ya'ni
+    # kengaytma O'RNATILGAN. Operator `CREATE EXTENSION vector`
+    # izidan ketardi -- mavjud narsani "yo'q" deb.
+    #
+    # O'LCHANMAGAN NARSA YIQILGAN EMAS. Uchinchi holat ishlatiladi.
+    if [ -z "$(qiy XT_DB_DSN_OWNER)" ]; then
+        :
+    elif [ "$EGA_ULANDI" != "1" ]; then
+        yoq "pgvector TEKSHIRILMADI — so'rov XT_DB_DSN_OWNER orqali yuriydi,
+   u esa ulanmadi. Avval ulanishni tuzating, keyin qayta yurgizing."
+    elif PGCONNECT_TIMEOUT=5 psql "$(qiy XT_DB_DSN_OWNER)" -tAc \
              "select 1 from pg_extension where extname='vector'" 2>/dev/null | grep -q 1; then
-            ok "pgvector o'rnatilgan"
-        else
-            tosiq "pgvector YO'Q — CREATE EXTENSION vector (docs/deploy.md §4)"
-        fi
+        ok "pgvector o'rnatilgan"
+    else
+        tosiq "pgvector YO'Q — CREATE EXTENSION vector (docs/deploy.md §4)"
     fi
 else
     yoq "psql yo'q — DSN lar HAQIQATAN ulanishi tekshirilmadi"
