@@ -1161,6 +1161,11 @@ def test_mashq():
         # Yuklash ildizi MAVJUD bo'lsin: `oldindan-tekshir.sh` yo'q
         # katalogni to'siq deb sanaydi.
         os.makedirs(os.path.join(pildiz, "var", "uploads"), exist_ok=True)
+        p_orama = os.path.join(pildiz, "bin", "tender-backup-remote")
+        os.makedirs(os.path.dirname(p_orama), exist_ok=True)
+        io.open(p_orama, "w", encoding="utf-8", newline=chr(10)).write(
+            "#!/bin/sh" + chr(10) + "exit 0" + chr(10))
+        os.chmod(p_orama, 0o755)
 
         # PRODUCTION uchun ALOHIDA muhit fayli. Sabab: `deploy.sh`
         # endi `oldindan-tekshir.sh` ni chaqiradi va u `APP_ENV` ni
@@ -1189,6 +1194,11 @@ def test_mashq():
                 # `oldindan-tekshir.sh` to'sadi va mashq tasdiq
                 # darvozasiga YETIB BORMASDI.
                 "UPLOAD_ROOT=" + _posix_yol(bash, pildiz) + "/var/uploads",
+                # ISHLAB CHIQARISHDA TASHQI NUSXA MAJBURIY: zaxira
+                # bitta diskda -- zaxira emas. Mashqda ham shunday,
+                # aks holda mashq tasdiq darvozasiga YETIB BORMASDI.
+                "BACKUP_REMOTE_CMD='" + _posix_yol(bash, p_orama)
+                + " {fayl}'",
                 "",
             ]))
         # HAQIQIY BARE REPO — `deploy.sh` endi `$REF` ni KOMMITGA
@@ -1201,6 +1211,7 @@ def test_mashq():
         _mashq_repo(prepo, "v1.2.3")
 
         pmuhit = {"TENDERAI_USER": _joriy_user(),
+                  "TENDERAI_ROOT": _joriy_user(),
                   "TENDERAI_ILDIZ": _posix_yol(bash, pildiz),
                   "TENDERAI_STAGING_ILDIZ": _posix_yol(bash, ildiz),
                   "TENDERAI_ENVFILE": _posix_yol(bash, penv),
@@ -1340,6 +1351,20 @@ def test_joylashuv_izchilligi():
 # Bu bo'lim 16-bo'lim uslubida: skript O'QILMAYDI, YURGIZILADI.
 # =============================================================================
 
+def _izohsiz(matn):
+    """Faqat KOD qatorlari (`#` bilan boshlanadiganlar tashlanadi).
+
+    NEGA. Bu faylda skanerlar bir necha marta IZOHNI kod deb
+    o'qigan. Eng qimmat holat teskarisi edi -- taqiqlangan naqsh
+    izohda tilga olinsa, sinov uni BUZILISH deb sanardi va
+    to'g'ri kod qizil bo'lardi. Izoh esa aynan shu qarorni
+    TUSHUNTIRISH uchun yoziladi: "`eval` OLIB TASHLANDI" degan
+    izoh `eval` so'zini o'z ichiga oladi.
+    """
+    return "\n".join(q for q in matn.splitlines()
+                      if not q.lstrip().startswith("#"))
+
+
 def _joriy_user():
     """Sinovni yurgizayotgan foydalanuvchi nomi.
 
@@ -1383,7 +1408,24 @@ def _oldindan_qur(baza, posix=None, ozgartir=None, caddy_ozgartir=None):
     # -- aks holda mashq SOXTA to'siq berardi.
     ildiz = os.path.join(baza, "ildiz")
     os.makedirs(os.path.join(ildiz, "var", "uploads"), exist_ok=True)
+    # TASHQI NUSXA O'RAMASI. Ishlab chiqarishda `BACKUP_REMOTE_CMD`
+    # MAJBURIY (zaxira bitta diskda -- zaxira emas), shuning uchun
+    # mashq muhitida ham belgilangan o'rama bo'lishi kerak. Namunada
+    # u ATAYLAB bo'sh: manzil har o'rnatmada boshqacha va namunaga
+    # haqiqiy manzil yozilmaydi.
+    orama = os.path.join(ildiz, "bin", "tender-backup-remote")
+    os.makedirs(os.path.dirname(orama), exist_ok=True)
+    io.open(orama, "w", encoding="utf-8", newline=N).write(
+        "#!/bin/sh" + N + "exit 0" + N)
+    os.chmod(orama, 0o755)
     almash = [
+        # ANIQ SATR. `BACKUP_REMOTE_CMD=` namunada IZOHLARDA ham
+        # uchraydi (`rclone copy {fayl} ...` misollari), shuning
+        # uchun qator boshi va oxiri bilan birga almashtiriladi.
+        # QIYMAT TIRNOQDA: unda bo'shliq bor va tirnoqsiz qiymatni
+        # skriptning o'z tekshiruvi (§1) to'g'ri rad etadi.
+        (N + "BACKUP_REMOTE_CMD=" + N,
+         N + "BACKUP_REMOTE_CMD='" + posix(orama) + " {fayl}'" + N),
         ("UPLOAD_ROOT=/opt/tenderai/production/var/uploads",
          "UPLOAD_ROOT=" + posix(os.path.join(ildiz, "var", "uploads"))),
         ("APP_PUBLIC_URL=https://tender.example.uz",
@@ -1477,6 +1519,7 @@ def test_oldindan_tekshiruv():
             # `TENDERAI_ILDIZ` bilan AYNI naqsh: yo'l ham, rol ham
             # muhitdan olinadi va standart qiymati o'zgarmaydi.
             e["TENDERAI_USER"] = _joriy_user()
+            e["TENDERAI_ROOT"] = _joriy_user()
             yol = shim_p
             r = subprocess.run(
                 [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
@@ -3235,6 +3278,208 @@ def test_yuklash_ildizi_shartlari():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+# =====================================================================
+# 8k. TASHQI NUSXA — QOBIQSIZ VA BELGILANGAN O'RAMA
+# =====================================================================
+def test_tashqi_nusxa_orama():
+    bolim("8k. `BACKUP_REMOTE_CMD`: qobiq yo'q, o'rama belgilangan")
+    b = oqi("bin", "backup.sh")
+
+    # `eval` OLIB TASHLANDI. U butun satrni QOBIQ sifatida o'qirdi,
+    # ya'ni fayl nomidagi yoki shablondagi metabelgi (`;`, `$(...)`)
+    # root nomidan BUYRUQQA aylanardi.
+    i_uzoq = b.index("BACKUP_REMOTE_CMD")
+    qism = b[i_uzoq:i_uzoq + 3000]
+    check("tashqi nusxa `eval` bilan YURGIZILMAYDI",
+          "eval " not in _izohsiz(qism))
+    check("argumentlar massiv bilan uzatiladi",
+          'ARGV+=' in qism and '"${ARGV[@]}"' in qism)
+    check("`{fayl}` MUSTAQIL argument bo'lishi shart",
+          '[ "$soz" = "{fayl}" ]' in b)
+    check("`{fayl}` yo'q bo'lsa XATO", "mustaqil" in qism or "TOPILDI" in qism)
+
+    # PREFLIGHT: ishlab chiqarishda MAJBURIY va shartnoma tekshiriladi.
+    o = oqi("bin", "oldindan-tekshir.sh")
+    check("production da bo'sh qiymat TO'SIQ",
+          'BACKUP_REMOTE_CMD bo\'sh — zaxira BITTA diskda' in o)
+    check("staging da faqat ogohlantirish",
+          'MUHIT" = "production"' in o)
+    check("birinchi so'z MUTLAQ yo'l bo'lishi shart",
+          "MUTLAQ yo'l emas" in o)
+    check("dastur BAJARILADIGAN bo'lsin", '[ ! -x "$BRC_BIN" ]' in o)
+    check("dastur egasi root bo'lsin", 'B_EGA" = "$ROOT_USER' in o)
+    check("dastur hamma uchun yozilmasin", "HAMMA uchun yoziladi" in o)
+
+    # O'RAMANING O'ZI.
+    w = oqi("bin", "tender-backup-remote.namuna")
+    check("o'rama mavjud", bool(w))
+    check("AYNAN BITTA argument", '[ "$#" -eq 1 ]' in w)
+    # UMUMIY O'TKAZGICH YO'Q: `"$@"` hech qayerga uzatilmaydi.
+    check("umumiy o'tkazgich yo'q", '"$@"' not in _izohsiz(w))
+    check("manzil SOZLAMADAN, argumentdan emas",
+          "backup-remote.conf" in w)
+    check("sozlama 0600 root talab qilinadi",
+          "600|400" in w and 'EGA" = "root"' in w)
+    check("kalit rejimi tekshiriladi", "SSH kaliti rejimi" in w)
+    # O'RTADAGI ODAM: mezbon kaliti oldindan ishonilgan bo'lsin.
+    check("StrictHostKeyChecking=yes", "StrictHostKeyChecking=yes" in w)
+    check("known_hosts MAJBURIY", "known_hosts YO'Q yoki bo'sh" in w)
+    # YOZISH-UCHUN-ONLY: manba mezbon buzilsa zaxira o'chmasin.
+    check("uzoqda hech narsa O'CHIRMAYDI",
+          " rm " not in _izohsiz(w) and "--delete" not in _izohsiz(w))
+    # BUTUNLIK UZOQDA: "nusxa ko'chdi" != "nusxa BUTUN".
+    check("uzoqdagi checksum O'QILADI", "UZOQ_SHA=" in w)
+    check("checksum SOLISHTIRILADI", 'UZOQ_SHA" = "$MAHALLIY_SHA' in w)
+    check("farq bo'lsa XATO", "CHECKSUM MOS EMAS" in w)
+    # MANBA ILDIZI: "istalgan faylni uzoqqa ko'chir" bo'lmasin.
+    check("manba ildizi cheklangan", "MANBA_ILDIZ" in w)
+    check("`..` rad etiladi", "yo'lda '..' bor" in w)
+    check("fayl nomi TOR alifboda", "[!A-Za-z0-9._-]" in w)
+
+    ex = _oqi_ildiz("deploy/env/backup-remote.conf.example")
+    check("sozlama namunasi bor", bool(ex))
+    check("namunada AYNI MASHINA yaramasligi aytilgan",
+          "BOSHQA MASHINA" in ex)
+    check("namunada yozish-uchun-only cheklovi ko'rsatilgan",
+          "rrsync" in ex or "FAQAT YOZISH" in ex)
+    check("saqlash muddati UZOQ tomonda", "UZOQ TOMONDA" in ex)
+
+
+# =====================================================================
+# 8l. TASHQI NUSXA O'RAMASI — HAQIQATAN YURGIZILADI
+# =====================================================================
+def test_tashqi_nusxa_orama_yurgiziladi():
+    bolim("8l. O'rama argumentlarni HAQIQATAN rad etadi")
+    bash = _mashq_bash()
+    w = os.path.join(D, "bin", "tender-backup-remote.namuna")
+    if not bash or not os.path.isfile(w):
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_bkremote_")
+    try:
+        N = chr(10)
+        # `id -u` SHIMI. O'rama root talab qiladi va sinov root
+        # emas -- lekin tekshirilayotgan narsa ARGUMENT
+        # VALIDATSIYASI, root sharti emas (u alohida tekshiriladi).
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        idsh = os.path.join(qutі, "id")
+        io.open(idsh, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N
+            + '[ "$1" = "-u" ] && echo 0 || exec /usr/bin/id "$@"' + N)
+        os.chmod(idsh, 0o755)
+
+        ildiz = os.path.join(baza, "zaxira")
+        os.makedirs(os.path.join(ildiz, "production"), exist_ok=True)
+        tashqari = os.path.join(baza, "tashqari")
+        os.makedirs(tashqari, exist_ok=True)
+        yaxshi = os.path.join(ildiz, "production", "tenderai-20260909.dump")
+        io.open(yaxshi, "w", encoding="utf-8").write("zz")
+        begona = os.path.join(tashqari, "begona.dump")
+        io.open(begona, "w", encoding="utf-8").write("zz")
+        yomon_nom = os.path.join(ildiz, "production", "yomon;nom.dump")
+        io.open(yomon_nom, "w", encoding="utf-8").write("zz")
+
+        conf = os.path.join(baza, "conf")
+        io.open(conf, "w", encoding="utf-8", newline=N).write(N.join([
+            "UZOQ_HOST=zzhost", "UZOQ_USER=zzuser", "UZOQ_YOL=/srv/zz",
+            "SSH_KALIT=" + _posix_yol(bash, os.path.join(baza, "kalit")), ""]))
+        os.chmod(conf, 0o600)
+
+        def yur(*argv):
+            e = dict(os.environ)
+            e["TENDER_BACKUP_REMOTE_CONF"] = _posix_yol(bash, conf)
+            e["TENDER_BACKUP_ILDIZ"] = _posix_yol(bash, ildiz)
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 _posix_yol(bash, qutі), _posix_yol(bash, w)]
+                + [_posix_yol(bash, a) if os.path.isabs(a) else a
+                   for a in argv],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=60)
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+        # HAR BIR SHART ALOHIDA. Bittasi ishlab qolgani ishlamasa
+        # ham "o'rama tekshiradi" degan xulosa chiqardi.
+        for nom, argv, belgi in (
+                ("argumentsiz", (), "BITTA argument"),
+                ("ikkita argument", ("a", "b"), "BITTA argument"),
+                ("nisbiy yo'l", ("zz.dump",), "MUTLAQ"),
+                ("`..` bor", ("/var/../etc/passwd",), "'..'"),
+                ("manba ildizidan tashqari", (begona,), "ichida emas"),
+                ("mavjud emas",
+                 (os.path.join(ildiz, "production", "yoq.dump"),),
+                 "oddiy fayl emas"),
+                ("nomda metabelgi", (yomon_nom,), "ruxsatsiz belgi"),
+        ):
+            kod, chiq = yur(*argv)
+            check(f"RAD ETADI: {nom}", kod != 0 and belgi in chiq,
+                  chiq.strip()[-90:])
+
+        # SOZLAMA EGASI: root bo'lmasa ishlamaydi. Sinov fayli
+        # sinov foydalanuvchisiniki, ya'ni bu shart shu yerda
+        # TABIIY ravishda yuradi.
+        kod, chiq = yur(yaxshi)
+        check("sozlama egasi root emas -> RAD", kod != 0 and "egasi" in chiq,
+              chiq.strip()[-90:])
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
+# =====================================================================
+# 8m. TIKLASH METAMA'LUMOTI — SIR CHIQMAYDI
+# =====================================================================
+def test_tiklash_metasi():
+    bolim("8m. Zaxira metama'lumoti: NOMLAR ha, QIYMATLAR yo'q")
+    b = oqi("bin", "backup.sh")
+    check("meta fayli yasaladi", 'META="${KATALOG}' in b)
+    check("meta ham checksumlanadi", 'sha256sum "$META"' in b)
+    check("meta ham UZOQQA ketadi", '"$META" "${META}.sha256"' in b)
+    check("relizning SHA si yoziladi", "reliz_sha=" in b)
+    check("tasdiq SHA si yoziladi", "tasdiq_sha=" in b)
+    check("migratsiya holati yoziladi", "migratsiya_jurnal" in b)
+
+    # ASOSIY SHART: `=` dan KEYINGISI TASHLANADI. Zaxira sirni
+    # ikkinchi joyga -- uzoq omborga, boshqa ma'muriyat ostiga --
+    # ko'chirmasligi kerak.
+    check("faqat NOM ajratiladi (qiymat kesiladi)",
+          "grep -oE '^[A-Za-z_][A-Za-z0-9_]*='" in b
+          and "sed 's/=$//'" in b)
+
+    # HAQIQATAN YURGIZIB tekshiramiz: naqsh to'g'ri yozilganini
+    # o'qib bilib bo'lmaydi.
+    bash = _mashq_bash()
+    if not bash:
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+    baza = tempfile.mkdtemp(prefix="tenderai_meta_")
+    try:
+        N = chr(10)
+        env = os.path.join(baza, "muhit.env")
+        io.open(env, "w", encoding="utf-8", newline=N).write(N.join([
+            "APP_ENV=production",
+            'XT_DB_DSN="dbname=t user=tai_service password=ZZSIR1 host=1"',
+            "TELEGRAM_BOT_TOKEN=123:ZZSIR2",
+            "OPENAI_API_KEY=sk-ZZSIR3",
+            "E2E_PAROL='ZZSIR4 bo'" + chr(39) + "'shliqli'",
+            "UPLOAD_ROOT=/opt/tenderai/production/var/uploads",
+            "# izoh: ZZSIR5", ""]))
+        r = subprocess.run(
+            [bash, "-c",
+             "grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' \"$1\" | sed 's/=$//' | sort -u",
+             "_", _posix_yol(bash, env)],
+            capture_output=True, text=True, timeout=60)
+        chiq = (r.stdout or "")
+        check("SIR CHIQMADI", "ZZSIR" not in chiq, chiq[:120])
+        for nom in ("XT_DB_DSN", "TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY",
+                    "UPLOAD_ROOT"):
+            check(f"nom bor: {nom}", nom in chiq)
+        # Izoh o'zgaruvchi NOMI emas.
+        check("izohdan nom yasalmaydi", "izoh" not in chiq)
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -3281,6 +3526,9 @@ def main():
     test_eski_app_user_diagnostikasi()
     test_yuklash_ildizi()
     test_yuklash_ildizi_shartlari()
+    test_tashqi_nusxa_orama()
+    test_tashqi_nusxa_orama_yurgiziladi()
+    test_tiklash_metasi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

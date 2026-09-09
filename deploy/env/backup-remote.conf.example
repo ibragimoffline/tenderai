@@ -1,0 +1,49 @@
+# =============================================================================
+# ZAXIRANING TASHQI MANZILI — `/etc/tenderai/backup-remote.conf`
+# =============================================================================
+# Bu faylni FAQAT `/usr/local/sbin/tender-backup-remote` o'qiydi.
+#
+#     sudo install -o root -g root -m 0600 \
+#          backup-remote.conf.example /etc/tenderai/backup-remote.conf
+#
+# NEGA MUHIT FAYLIDA EMAS. `/etc/tenderai/production.env` ni ILOVA ham
+# o'qiydi (`EnvironmentFile=`). Zaxira omborining kaliti ilovaga
+# KERAK EMAS, va kerak bo'lmagan joyda turgan sir -- ortiqcha yuza.
+#
+# REJIM 0600 root:root. O'rama buni TEKSHIRADI va boshqacha bo'lsa
+# ishlamaydi.
+# =============================================================================
+
+# Uzoq mezbon. BOSHQA MASHINA bo'lishi shart: ayni mashinadagi
+# ikkinchi disk ham "tashqi nusxa" emas -- mezbon buzilganda
+# (shifrlovchi dastur, buzilgan hisob) u ham yo'qoladi.
+UZOQ_HOST=zaxira.example.uz
+UZOQ_PORT=22
+
+# Hisob TOR huquqli bo'lsin. Tavsiya: uzoq tomonda
+# `~/.ssh/authorized_keys` da majburiy buyruq va cheklovlar:
+#
+#   command="/usr/local/bin/rrsync -wo /srv/tenderai",\
+#   no-agent-forwarding,no-port-forwarding,no-pty,no-X11-forwarding \
+#   ssh-ed25519 AAAA... tenderai-backup
+#
+# `-wo` = FAQAT YOZISH. Manba mezbon buzilsa ham zaxirani
+# O'CHIRA olmaydi.
+UZOQ_USER=tenderai-backup
+UZOQ_YOL=/srv/tenderai
+
+# FAQAT SHU ish uchun ajratilgan kalit (0600 root:root).
+# Boshqa hech qayerda ishlatilmasin.
+SSH_KALIT=/etc/tenderai/backup-key
+
+# Mezbon kaliti OLDINDAN ishonilgan bo'lsin. O'rama
+# `StrictHostKeyChecking=yes` bilan yuradi va bu faylsiz ishlamaydi:
+#
+#   ssh-keyscan -p 22 zaxira.example.uz > /etc/tenderai/backup-known_hosts
+#
+SSH_KNOWN_HOSTS=/etc/tenderai/backup-known_hosts
+
+# SAQLASH MUDDATI UZOQ TOMONDA. O'rama uzoqda hech narsa
+# O'CHIRMAYDI (yozish-uchun-only). Muddatni uzoq mezbonda,
+# BOSHQA hisob va BOSHQA kalit bilan qo'llang -- aks holda manba
+# mezbon buzilganda zaxira ham u bilan ketardi.

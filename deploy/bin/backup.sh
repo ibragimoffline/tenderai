@@ -210,6 +210,52 @@ else
     log "  fayl zaxirasi OLINMADI. Hali fayl yuklanmagan bo'lsa normal."
 fi
 
+# --- TIKLASH METAMA'LUMOTI — SIRSIZ -----------------------------------------
+# NEGA KERAK. Baza va fayllar tiklandi deylik — xizmat baribir
+# ko'tarilmaydi, chunki `APP_ENV`, `UPLOAD_ROOT`, `XT_DB_DSN` va
+# boshqalar YO'Q. Ular qayerdaligini eslab qolish "tiklash rejasi"
+# emas.
+#
+# NEGA QIYMATLAR EMAS, FAQAT NOMLAR. Muhit faylida baza paroli va
+# API kalitlari bor. Ularni zaxiraga qo'shish sirlarni yana bir
+# joyga -- uzoq omborga, boshqa ma'muriyat ostiga -- ko'chirardi.
+# Zaxira SIR SAQLAMAYDI: u "nima kerakligini" aytadi, "nima
+# ekanini" emas. Sirlar operatorning sir omboridan qaytariladi.
+#
+# TEKSHIRILADI: quyidagi ro'yxatga faqat NOM tushishini
+# `_tests/deploy_test.py` §8m qo'riqlaydi.
+META="${KATALOG}/tenderai-${MUHIT}-${STAMP}-meta.txt"
+{
+    echo "# tenderai tiklash metama'lumoti (SIRSIZ)"
+    echo "# muhit: ${MUHIT}"
+    echo "# sana : $(date '+%F %T %z')"
+    echo "# DIQQAT: bu yerda QIYMAT yo'q, faqat NOMLAR. Sirlar"
+    echo "#         operatorning sir omboridan qaytariladi."
+    echo
+    echo "## reliz"
+    RELIZ_YOL="$(readlink -f "${ILDIZ:-/opt/tenderai/$MUHIT}/current" 2>/dev/null || true)"
+    echo "reliz_yol=${RELIZ_YOL:-?}"
+    echo "reliz_sha=$(sed -n '2s/^# sha: *//p' "${RELIZ_YOL}/.kuzatilgan-manifest" 2>/dev/null || echo '?')"
+    echo "tasdiq_sha=$(cat "${ILDIZ:-/opt/tenderai/$MUHIT}/.verified" 2>/dev/null || echo '?')"
+    echo
+    echo "## migratsiya holati"
+    psql "$XT_DB_DSN_OWNER" -tAc \
+        "SELECT 'oxirgi_kalit=' || coalesce(max(kalit)::text,'?') ||
+                '  soni=' || count(*)::text FROM migratsiya_jurnal
+          WHERE holat = 'qollandi'" 2>/dev/null || echo "oxirgi_kalit=?"
+    echo
+    echo "## kerakli sozlama NOMLARI (qiymat YO'Q)"
+    # Faqat `NOM=` shaklidagi qatorlar, `=` dan KEYINGISI TASHLANADI.
+    grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$ENVFILE" 2>/dev/null \
+        | sed 's/=$//' | sort -u || true
+    echo
+    echo "## systemd birliklari"
+    systemctl list-unit-files "tenderai-*@${MUHIT}.*" --no-legend 2>/dev/null \
+        | awk '{print $1}' || true
+} > "$META"
+sha256sum "$META" > "${META}.sha256"
+log "tiklash metama'lumoti: $(basename "$META") ($(wc -l < "$META") qator, sirsiz)"
+
 # --- TASHQI NUSXA -----------------------------------------------------------
 # ZAXIRA BITTA DISKDA — ZAXIRA EMAS. Disk yo'qolsa (yoki shifrlovchi
 # dastur tegsa) zaxira ham u bilan ketadi.
@@ -232,13 +278,44 @@ if [ -n "${BACKUP_REMOTE_CMD:-}" ]; then
     # FAYL ARXIVI HAM UZOQQA KETADI. Aks holda baza uzoqda,
     # fayllar esa faqat mahalliy diskda qolardi — ya'ni disk
     # yo'qolganda hujjatlar ham yo'qolardi.
-    for f in "$FAYL" "${FAYL}.sha256"              ${FAYL_ARXIV:+"$FAYL_ARXIV" "${FAYL_ARXIV}.sha256"}; do
+    for f in "$FAYL" "${FAYL}.sha256" "$META" "${META}.sha256" \
+             ${FAYL_ARXIV:+"$FAYL_ARXIV" "${FAYL_ARXIV}.sha256"}; do
         [ -f "$f" ] || continue
-        BUYRUQ="${BACKUP_REMOTE_CMD//\{fayl\}/$f}"
-        log "tashqi nusxa: $BUYRUQ"
+        # QOBIQ ORQALI YURGIZILMAYDI.
+        #
+        # Ilgari bu yerda `eval "$BUYRUQ"` turardi. `eval` butun
+        # satrni QOBIQ sifatida o'qiydi, ya'ni fayl nomidagi yoki
+        # shablondagi har qanday metabelgi (`;`, `$(...)`, backtick)
+        # BUYRUQQA aylanardi. Zaxira yo'li root nomidan yuriydi, ya'ni
+        # bu eng qimmat joyda eng keng imkoniyat edi.
+        #
+        # Endi shablon BO'SHLIQ bo'yicha argumentlarga bo'linadi va
+        # `{fayl}` ALOHIDA argument sifatida almashadi. Qobiq
+        # umuman ishtirok etmaydi: quvur, yo'naltirish va o'rniga
+        # qo'yish ISHLAMAYDI -- va bu ATAYLAB.
+        #
+        # `{fayl}` MUSTAQIL so'z bo'lishi kerak (`{fayl}` ha,
+        # `pref{fayl}` yo'q): almashtirish argument ICHIDA
+        # bo'lganda yana qobiq qoidalariga qaytishga vasvasa
+        # tug'ilardi.
+        ARGV=()
+        TOPILDI=0
+        for soz in $BACKUP_REMOTE_CMD; do
+            if [ "$soz" = "{fayl}" ]; then
+                ARGV+=("$f"); TOPILDI=1
+            else
+                ARGV+=("$soz")
+            fi
+        done
+        if [ "$TOPILDI" != "1" ]; then
+            log "XATO: BACKUP_REMOTE_CMD da mustaqil \`{fayl}\` argumenti YO'Q"
+            log "  Namuna: BACKUP_REMOTE_CMD='/usr/local/sbin/tender-backup-remote {fayl}'"
+            exit 1
+        fi
+        log "tashqi nusxa: ${ARGV[0]} ... $(basename "$f")"
         # XATO YUTILMAYDI. Tashqi nusxa yiqilsa — zaxira HALI HAM
         # bitta diskda, ya'ni himoya yo'q. Buni bilib turish shart.
-        if ! eval "$BUYRUQ"; then
+        if ! "${ARGV[@]}"; then
             log "XATO: tashqi nusxa YIQILDI — zaxira faqat mahalliy diskda"
             exit 1
         fi

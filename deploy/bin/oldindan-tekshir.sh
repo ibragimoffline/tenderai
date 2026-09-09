@@ -435,10 +435,70 @@ else
 fi
 
 # ZAXIRA BITTA DISKDA — ZAXIRA EMAS (docs/deploy.md §12b).
-if bor BACKUP_REMOTE_CMD; then
-    ok "tashqi nusxa sozlangan"
+#
+# ISHLAB CHIQARISHDA MAJBURIY. `backup.sh` ning o'zi ham buni
+# talab qiladi va sozlanmagan bo'lsa 1 bilan tugaydi -- lekin u
+# joylashtiruvdan KEYIN, timer yurganda ishlaydi. Bu yerda
+# to'xtatish arzonroq.
+BRC="$(qiy BACKUP_REMOTE_CMD)"
+if [ -z "$BRC" ]; then
+    if [ "$MUHIT" = "production" ]; then
+        tosiq "BACKUP_REMOTE_CMD bo'sh — zaxira BITTA diskda.
+   Disk yo'qolsa (yoki shifrlovchi dastur tegsa) zaxira ham u bilan
+   ketadi, ya'ni himoya YO'Q. Ishlab chiqarishda bu SHART.
+   Sozlang: BACKUP_REMOTE_CMD='/usr/local/sbin/tender-backup-remote {fayl}'"
+    else
+        ogoh "BACKUP_REMOTE_CMD bo'sh — zaxira BITTA diskda, disk yo'qolsa u ham ketadi"
+    fi
 else
-    ogoh "BACKUP_REMOTE_CMD bo'sh — zaxira BITTA diskda, disk yo'qolsa u ham ketadi"
+    # `{fayl}` MUSTAQIL argument bo'lsin: `backup.sh` shablonni
+    # bo'shliq bo'yicha argumentlarga bo'ladi va qobiq ISHTIROK
+    # ETMAYDI. Argument ichidagi `{fayl}` almashmasdi.
+    BRC_OK=1
+    case " $BRC " in
+        *" {fayl} "*) ;;
+        *) tosiq "BACKUP_REMOTE_CMD da MUSTAQIL \`{fayl}\` argumenti yo'q: $BRC
+   U bo'shliq bilan ajratilgan alohida so'z bo'lishi kerak."
+           BRC_OK=0 ;;
+    esac
+    # BIRINCHI SO'Z — BAJARILADIGAN FAYL, qobiq satri emas.
+    BRC_BIN="${BRC%% *}"
+    if [ "$BRC_OK" = "1" ]; then
+        case "$BRC_BIN" in
+            /*) ;;
+            *) tosiq "BACKUP_REMOTE_CMD birinchi so'zi MUTLAQ yo'l emas: '$BRC_BIN'
+   Qobiq ISHLATILMAYDI (quvur, yo'naltirish, o'rniga qo'yish yo'q).
+   Belgilangan o'rama bering:
+     BACKUP_REMOTE_CMD='/usr/local/sbin/tender-backup-remote {fayl}'"
+               BRC_OK=0 ;;
+        esac
+    fi
+    if [ "$BRC_OK" = "1" ]; then
+        if [ ! -x "$BRC_BIN" ]; then
+            tosiq "BACKUP_REMOTE_CMD dasturi YO'Q yoki bajarilmaydi: $BRC_BIN"
+        else
+            # O'rama ROOT niki bo'lsin: uni boshqa foydalanuvchi
+            # tahrirlay olsa, zaxira yo'li o'sha foydalanuvchining
+            # kodini root nomidan yurgizardi.
+            # Kutilgan EGA. Haqiqiy mezbonda `root`; mashq muhitida
+            # fayllarni sinov foydalanuvchisi yasaydi, shuning uchun
+            # `TENDERAI_ILDIZ`/`TENDERAI_USER` bilan AYNI naqshda
+            # muhitdan olinadi. Standart qiymat o'zgarmaydi.
+            ROOT_USER="${TENDERAI_ROOT:-root}"
+            B_EGA="$(stat -c '%U' "$BRC_BIN" 2>/dev/null || echo '?')"
+            B_REJIM="$(stat -c '%a' "$BRC_BIN" 2>/dev/null || echo '?')"
+            B_XATO=""
+            [ "$B_EGA" = "$ROOT_USER" ] || B_XATO="egasi '$B_EGA' — '${ROOT_USER}' bo'lishi kerak"
+            case "$B_REJIM" in
+                *[2367]) B_XATO="${B_XATO:+$B_XATO; }rejim $B_REJIM — HAMMA uchun yoziladi" ;;
+            esac
+            if [ -n "$B_XATO" ]; then
+                tosiq "BACKUP_REMOTE_CMD dasturi ($BRC_BIN): $B_XATO"
+            else
+                ok "tashqi nusxa: $BRC_BIN ($B_EGA, $B_REJIM)"
+            fi
+        fi
+    fi
 fi
 
 # Nosozlik xabari hech kimga bormasa, `systemd` xizmatni qayta

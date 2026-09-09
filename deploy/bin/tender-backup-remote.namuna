@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# =============================================================================
+# TENDER-AI — ZAXIRANING TASHQI NUSXASI (belgilangan o'rama)
+# =============================================================================
+#     /usr/local/sbin/tender-backup-remote <fayl>
+#
+# `backup.sh` uni SHUNDAY chaqiradi:
+#     BACKUP_REMOTE_CMD='/usr/local/sbin/tender-backup-remote {fayl}'
+#
+# --- NEGA O'RAMA, "BUYRUQ SHABLONI" EMAS -------------------------------------
+# Ilgari `BACKUP_REMOTE_CMD` ixtiyoriy qobiq satri edi va u `eval`
+# bilan yurardi. Ikkita muammo:
+#
+#   1. `eval` -- butun satr qobiq sifatida o'qilardi. Zaxira yo'li
+#      root nomidan yuriydi, ya'ni bu eng qimmat joyda eng keng
+#      imkoniyat edi.
+#   2. Manzil va kalit MUHIT FAYLIDA turardi. Muhit fayli ilova
+#      uchun ham o'qiladi, ya'ni zaxira omborining kaliti kerak
+#      bo'lmagan joyda ko'rinardi.
+#
+# Endi manzil va kalit FAQAT shu o'rama o'qiydigan `0600 root:root`
+# faylda. Muhit faylida esa faqat o'rama YO'LI turadi -- u sir emas.
+#
+# --- YOPIQ SHARTNOMA ---------------------------------------------------------
+# BITTA argument: nusxalanadigan fayl. Boshqa hech narsa uzatilmaydi.
+# `"$@"` HECH QAYERGA yo'naltirilmaydi -- umumiy o'tkazgich yo'q.
+#
+# --- YOZISH, O'CHIRISH EMAS --------------------------------------------------
+# O'rama uzoqda HECH NARSA O'CHIRMAYDI. Sabab: manba mezbon buzilgan
+# holatda (shifrlovchi dastur, buzilgan hisob) o'chirish huquqi
+# zaxirani ham yo'q qiladi. Saqlash muddati UZOQ tomonda
+# boshqariladi -- boshqa hisob, boshqa kalit bilan.
+#
+# --- BUTUNLIK UZOQDA TEKSHIRILADI --------------------------------------------
+# "Nusxa ko'chdi" degan xulosa "nusxa BUTUN" degani emas: uzilgan
+# o'tkazma ham 0 qaytarishi mumkin. Shuning uchun nusxadan keyin
+# uzoqdagi faylning sha256 i o'qiladi va MAHALLIY bilan
+# solishtiriladi. Farq bo'lsa -- XATO.
+# =============================================================================
+set -euo pipefail
+
+SOZLAMA="${TENDER_BACKUP_REMOTE_CONF:-/etc/tenderai/backup-remote.conf}"
+#: Ruxsat etilgan MANBA ildizi. Boshqa joydan fayl yuborilmaydi:
+#: o'rama root nomidan yuradi va "istalgan faylni uzoqqa ko'chir"
+#: degan imkoniyat ma'lumot chiqarish yo'liga aylanardi.
+MANBA_ILDIZ="${TENDER_BACKUP_ILDIZ:-/var/backups/tenderai}"
+
+log()  { printf '[%s] tender-backup-remote: %s\n' "$(date '+%F %T')" "$*"; }
+xato() { printf '[%s] tender-backup-remote XATO: %s\n' "$(date '+%F %T')" "$*" >&2; exit 1; }
+
+[ "$(id -u)" = "0" ] || xato "root kerak."
+
+# --- 1) ARGUMENT — QAT'IY -----------------------------------------------------
+[ "$#" -eq 1 ] || xato "aynan BITTA argument kerak (fayl yo'li). Berilgan: $#"
+FAYL="$1"
+
+case "$FAYL" in
+    /*) ;;
+    *)  xato "yo'l MUTLAQ bo'lishi kerak: '$FAYL'" ;;
+esac
+case "$FAYL" in
+    *..*) xato "yo'lda '..' bor: '$FAYL'" ;;
+esac
+# MANBA ILDIZI ICHIDA bo'lsin. `readlink -f` simlink orqali
+# chiqib ketishni ham yopadi.
+HAQIQIY="$(readlink -f "$FAYL" 2>/dev/null || true)"
+[ -n "$HAQIQIY" ] || xato "yo'l aniqlanmadi: '$FAYL'"
+case "$HAQIQIY/" in
+    "${MANBA_ILDIZ%/}"/*) ;;
+    *) xato "fayl '${MANBA_ILDIZ}' ichida emas: $HAQIQIY" ;;
+esac
+[ -f "$HAQIQIY" ] || xato "oddiy fayl emas: $HAQIQIY"
+[ -r "$HAQIQIY" ] || xato "o'qilmaydi: $HAQIQIY"
+
+# FAYL NOMI — TOR ALIFBO. Nom uzoq tomonda buyruq qatoriga tushadi,
+# shuning uchun metabelgi UMUMAN bo'lmasin.
+NOM="$(basename "$HAQIQIY")"
+case "$NOM" in
+    *[!A-Za-z0-9._-]*) xato "fayl nomida ruxsatsiz belgi: '$NOM'" ;;
+    ""|.|..)           xato "fayl nomi yaroqsiz" ;;
+esac
+
+# --- 2) SOZLAMA ---------------------------------------------------------------
+[ -f "$SOZLAMA" ] || xato "sozlama YO'Q: $SOZLAMA
+   Namuna: deploy/env/backup-remote.conf.example"
+REJIM="$(stat -c '%a' "$SOZLAMA")"
+EGA="$(stat -c '%U' "$SOZLAMA")"
+[ "$EGA" = "root" ] || xato "$SOZLAMA egasi '$EGA' — root bo'lishi kerak"
+case "$REJIM" in
+    600|400) ;;
+    *) xato "$SOZLAMA rejimi $REJIM — 600 bo'lishi kerak (ichida kalit yo'li bor)" ;;
+esac
+# shellcheck disable=SC1090
+. "$SOZLAMA"
+
+for k in UZOQ_HOST UZOQ_USER UZOQ_YOL SSH_KALIT; do
+    eval "v=\${${k}:-}"
+    [ -n "$v" ] || xato "$SOZLAMA da '$k' bo'sh"
+done
+UZOQ_PORT="${UZOQ_PORT:-22}"
+BILINGAN="${SSH_KNOWN_HOSTS:-/etc/tenderai/backup-known_hosts}"
+
+[ -f "$SSH_KALIT" ] || xato "SSH kaliti yo'q: $SSH_KALIT"
+K_REJIM="$(stat -c '%a' "$SSH_KALIT")"
+case "$K_REJIM" in
+    600|400) ;;
+    *) xato "SSH kaliti rejimi $K_REJIM — 600 bo'lishi kerak" ;;
+esac
+# MEZBON KALITI OLDINDAN ISHONILGAN BO'LSIN. `StrictHostKeyChecking`
+# o'chirilsa, o'rtadagi odam zaxirani qabul qilib olardi va biz
+# buni BILMASDIK.
+[ -s "$BILINGAN" ] || xato "known_hosts YO'Q yoki bo'sh: $BILINGAN
+   To'ldiring: ssh-keyscan -p ${UZOQ_PORT} <host> > $BILINGAN"
+
+SSH_ARG=(-i "$SSH_KALIT" -p "$UZOQ_PORT"
+         -o BatchMode=yes
+         -o StrictHostKeyChecking=yes
+         -o UserKnownHostsFile="$BILINGAN"
+         -o IdentitiesOnly=yes
+         -o ConnectTimeout=20)
+
+# --- 3) NUSXA -----------------------------------------------------------------
+# Sana bo'yicha katalog: uzoq tomonda saqlash muddatini qo'llash
+# oson bo'lsin va bitta katalog cheksiz o'smasin.
+SANA="$(date '+%Y/%m/%d')"
+MAQSAD="${UZOQ_YOL%/}/${SANA}"
+UZOQ="${UZOQ_USER}@${UZOQ_HOST}"
+
+log "manzil: ${UZOQ}:${MAQSAD}/${NOM}"
+ssh "${SSH_ARG[@]}" "$UZOQ" "mkdir -p -- '${MAQSAD}'" \
+    || xato "uzoqda katalog yasalmadi (kalit yoki huquq?)"
+
+scp "${SSH_ARG[@]}" -p -- "$HAQIQIY" "${UZOQ}:${MAQSAD}/${NOM}" >/dev/null \
+    || xato "nusxa ko'chmadi"
+
+# --- 4) BUTUNLIK — UZOQDA O'LCHANADI ------------------------------------------
+MAHALLIY_SHA="$(sha256sum "$HAQIQIY" | cut -d' ' -f1)"
+UZOQ_SHA="$(ssh "${SSH_ARG[@]}" "$UZOQ" \
+    "sha256sum -- '${MAQSAD}/${NOM}' 2>/dev/null | cut -d' ' -f1" || true)"
+[ -n "$UZOQ_SHA" ] || xato "uzoqdagi fayl O'QILMADI — nusxa tasdiqlanmadi"
+[ "$UZOQ_SHA" = "$MAHALLIY_SHA" ] || xato "CHECKSUM MOS EMAS:
+   mahalliy: $MAHALLIY_SHA
+   uzoq    : $UZOQ_SHA
+   Nusxa BUZUQ — zaxira himoyalangan deb hisoblanmasin."
+
+log "OK: ${NOM} (${MAHALLIY_SHA:0:16}…) tasdiqlandi"
