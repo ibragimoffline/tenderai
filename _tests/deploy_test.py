@@ -3597,6 +3597,92 @@ def test_meta_migratsiya_sorovi():
         check(f"eski nom qaytmadi: {yomon}", yomon not in b)
 
 
+# =====================================================================
+# 8p. DSN TASHXISI — SIR CHIQMAYDI, QATLAM AJRATILADI
+# =====================================================================
+def test_dsn_tashxisi():
+    bolim("8p. `dsn-tashxis.sh`: qatlam ajratiladi, parol chiqmaydi")
+    d = oqi("bin", "dsn-tashxis.sh")
+    check("skript mavjud", bool(d))
+    check("hech narsa o'zgartirmaydi (faqat SELECT/SHOW)",
+          "ALTER " not in _izohsiz(d) and "UPDATE " not in _izohsiz(d)
+          and "CREATE " not in _izohsiz(d))
+    # PAROL BOSILMASIN: bosiladigan maydonlar ro'yxati YOPIQ.
+    check("faqat BOR/YO_Q deb aytiladi", "'BOR' if f.get('password')" in d)
+    for q in ("PG_HBA", "AUTHENTICATION", "ROLE_NOT_FOUND",
+              "DATABASE_NOT_FOUND", "TLS", "NETWORK", "DNS",
+              "SOCKET", "DSN_CONFIG", "ROLE_DISABLED"):
+        check(f"qatlam tasnifi bor: {q}", q in d)
+    # YORLIQ YETARLI EMAS degan izoh -- va uni qo'llab-quvvatlovchi
+    # dalillar.
+    check("rol/parol/hba ajratish dalillari so'raladi",
+          "rol bormi" in d and "parol turi" in d and "pg_hba_file_rules" in d)
+
+    bash = _mashq_bash()
+    if not bash:
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_dsn_")
+    try:
+        N = chr(10)
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        idsh = os.path.join(qutі, "id")
+        io.open(idsh, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N
+            + '[ "$1" = "-u" ] && echo 0 || exec /usr/bin/id "$@"' + N)
+        os.chmod(idsh, 0o755)
+        env = os.path.join(baza, "muhit.env")
+
+        SIR = "ZZSIRPAROL7788"
+
+        def yur(dsn):
+            io.open(env, "w", encoding="utf-8", newline=N).write(
+                "APP_ENV=staging" + N + "XT_DB_DSN_OWNER=" + dsn + N)
+            e = dict(os.environ)
+            e["TENDERAI_ENVFILE"] = _posix_yol(bash, env)
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 _posix_yol(bash, qutі),
+                 "deploy/bin/dsn-tashxis.sh", "staging"],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=120)
+            return (r.stdout or "") + (r.stderr or "")
+
+        # IKKALA SHAKL HAM: `kalit=qiymat` va URI. Bitta shaklda
+        # ishlashi ikkinchisida ham ishlashini isbotlamaydi.
+        for nom, dsn, kutilgan in (
+                ("kalit=qiymat",
+                 '"dbname=zzdb user=tai_owner password=%s '
+                 'host=10.255.255.1 port=5433"' % SIR, "NETWORK"),
+                ("URI",
+                 "postgresql://tai_owner:%s@10.255.255.1:5433/zzdb" % SIR,
+                 "NETWORK"),
+                ("DNS hal bo'lmadi",
+                 '"dbname=zzdb user=tai_owner password=%s '
+                 'host=zz-yoq.invalid"' % SIR, "DNS"),
+                ("bo'sh qiymat", "", "DSN_CONFIG"),
+        ):
+            chiq = yur(dsn)
+            check(f"{nom}: QATLAM={kutilgan}", f"QATLAM: {kutilgan}" in chiq,
+                  [q for q in chiq.splitlines() if "QATLAM" in q][:1])
+            # ENG MUHIM SHART.
+            check(f"{nom}: PAROL CHIQMADI", SIR not in chiq,
+                  "sir chiqishda topildi!")
+
+        # Tahlil qilingan maydonlar KO'RINADI (redaksiya "hammasini
+        # yashirish" emas -- tashxis uchun ular kerak).
+        chiq = yur('"dbname=zzdb user=tai_owner password=%s '
+                   'host=10.255.255.1 port=5433 sslmode=require"' % SIR)
+        for maydon in ("host       : 10.255.255.1", "port       : 5433",
+                       "db         : zzdb", "user       : tai_owner",
+                       "sslmode    : require", "password   : BOR"):
+            check(f"ko'rinadi: {maydon.split(':')[0].strip()}",
+                  maydon in chiq)
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -3648,6 +3734,7 @@ def main():
     test_tiklash_metasi()
     test_pgvector_kaskadi()
     test_meta_migratsiya_sorovi()
+    test_dsn_tashxisi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)
