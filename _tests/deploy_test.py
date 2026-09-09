@@ -3042,6 +3042,13 @@ def test_eski_app_user_diagnostikasi():
     # Jadval qayta yaratilmasin: uning yo'qligi 0085 ning MAQSADI.
     check("jadval QAYTA YARATILMAYDI",
           "CREATE TABLE public.app_user" not in b)
+    # 0084 dan keyin `tai_app` `erp.app_user` ni O'QIY OLMAYDI.
+    # Diagnostika uni SANAMASLIGI kerak: `permission denied`
+    # xavfsizlik tuzatishining ISHLAYOTGANI, nosozlik emas.
+    i_yoq = b.index("0085 qo'llangan")
+    i_else = b.index("    else", i_yoq)
+    check("jadval yo'q bo'lsa `erp.app_user` SANALMAYDI",
+          "FROM erp.app_user" not in b[i_yoq:i_else])
     # Mavjud bo'lgandagi to'liq inventar SAQLANIB QOLSIN: u hali
     # migratsiya qilinmagan o'rnatmalar uchun kerak.
     for naqsh in ("eski qatorlar", "MOSLASHMAGAN", "IKKILANGAN",

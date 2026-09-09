@@ -533,8 +533,15 @@ tekshir)
     echo "  mavjud: ${ESKI_BOR:-nomalum}"
     if [ "$ESKI_BOR" != "true" ]; then
         echo "  (0085 qo'llangan — eski auth jadvali YO'Q. KUTILGAN holat.)"
-        psql "$XT_DB_DSN" -qtA -c \
-            "SELECT '  erp qatorlar  : ' || count(*)::text FROM erp.app_user" 2>&1 | sed 's/^/  /'
+        # `erp.app_user` SANALMAYDI. Ikki sabab, ikkalasi ham
+        # o'lchangan:
+        #   1) solishtiradigan narsa yo'q -- inventarning butun
+        #      maqsadi ESKI va YANGI jadvalni taqqoslash edi;
+        #   2) 0084 dan keyin `tai_app` uni O'QIY OLMAYDI va
+        #      so'rov `permission denied` beradi. Bu XAVFSIZLIK
+        #      TUZATISHINING ISHLAYOTGANI, nosozlik emas -- uni
+        #      xato matni sifatida ko'rsatish yana soxta qizil
+        #      bo'lardi.
     else
         psql "$XT_DB_DSN" -qtA -c \
             "SELECT '  eski qatorlar: ' || count(*)::text FROM public.app_user" 2>&1 | sed 's/^/  /'
