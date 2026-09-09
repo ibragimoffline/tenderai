@@ -3004,8 +3004,13 @@ def test_e2e_hisoblari():
     check("ikki BOSHQA kompaniya",
           "ZZE2E Kompaniya A" in h and "ZZE2E Kompaniya B" in h)
     # Parol argumentga TUSHMAYDI: `ps` da ko'rinardi.
-    check("parol STDIN orqali beriladi",
-          "printf '%s\\n%s\\n'" in h)
+    # ARGUMENTGA TUSHMASIN: `ps` da har foydalanuvchiga ko'rinardi.
+    check("parol STDIN orqali beriladi", "--parol-stdin" in h
+          and "printf '%s\\n'" in h)
+    c = _oqi_ildiz("create_company.py")
+    check("`--parol-stdin` yo'li mavjud", '"--parol-stdin"' in c)
+    check("`getpass` ga tayanilmaydi (u /dev/tty dan o'qiydi)",
+          "_stdin_password" in c and "/dev/tty" in c)
     check("parol skript ichida yasaladi", "secrets.token_urlsafe" in h)
     check("parol EKRANGA bosilmaydi", "CHOP ETILMADI" in h)
     check("muhit fayliga ATOMAR yoziladi",

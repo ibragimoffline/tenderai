@@ -58,18 +58,22 @@ yangi_parol() {
 }
 
 # --- HISOB YARATISH YOKI PAROLNI YANGILASH -----------------------------------
-# Parol STDIN orqali beriladi: `getpass` terminal bo'lmasa stdin dan
-# o'qiydi. U ikki marta so'raydi, shuning uchun ikki marta yuboriladi.
+# Parol STDIN orqali beriladi (`--parol-stdin`).
+#
+# `getpass` ISHLATILMAYDI: u avval `/dev/tty` ni ochadi va terminal
+# bo'lsa AYNAN O'SHANDAN o'qiydi -- quvurdan berilgan parolni
+# ko'rmay operator oldida OSILIB qolardi. `--parol-stdin` esa
+# aniq va bir marta so'raydi.
 hisob_sozla() {
     local login="$1" kompaniya="$2" parol="$3" chiq
     if tender-kompaniya "$MUHIT" --list 2>/dev/null | grep -qE "^[[:space:]]*${login}[[:space:]]"; then
-        chiq="$(printf '%s\n%s\n' "$parol" "$parol" \
-                | tender-kompaniya "$MUHIT" "$login" --password 2>&1)" \
+        chiq="$(printf '%s\n' "$parol" \
+                | tender-kompaniya "$MUHIT" "$login" --password --parol-stdin 2>&1)" \
             || { echo "$chiq" | grep -vi parol >&2; xato "$login: parol yangilanmadi"; }
         echo "  $login — parol yangilandi"
     else
-        chiq="$(printf '%s\n%s\n' "$parol" "$parol" \
-                | tender-kompaniya "$MUHIT" "$login" "$kompaniya" 2>&1)" \
+        chiq="$(printf '%s\n' "$parol" \
+                | tender-kompaniya "$MUHIT" "$login" "$kompaniya" --parol-stdin 2>&1)" \
             || { echo "$chiq" | grep -vi parol >&2; xato "$login: yaratilmadi"; }
         echo "  $login — yaratildi ($kompaniya)"
     fi
@@ -95,6 +99,15 @@ env_yoz() {
         echo "E2E_PAROL=${1}"
         echo "E2E_BEGONA_LOGIN=${B_LOGIN}"
         echo "E2E_BEGONA_PAROL=${2}"
+        # PULLIK QATLAM — MAVJUD TANLOV SAQLANADI.
+        # Bu skript hisoblar uchun. Agar operator AI ni ataylab
+        # yoqib qo'ygan bo'lsa, uni JIMGINA o'chirish "hisob-kitob
+        # xulqini bildirmasdan o'zgartirish" bo'lardi. Shuning
+        # uchun qator YO'Q bo'lgandagina yoziladi.
+        if ! grep -qE '^E2E_AI_ENABLED=' "$ENVFILE"; then
+            echo "# Pullik AI E2E. 1 -> har tasdiqda model chaqiriladi."
+            echo "E2E_AI_ENABLED=0"
+        fi
     } >> "$vaqt"
     mv -f "$vaqt" "$ENVFILE"
 }
