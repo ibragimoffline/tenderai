@@ -457,6 +457,74 @@ tenderai-<muhit>-<stamp>-fayllar.tar.gz       yuklangan fayllar
 Ikkalasi ham `.sha256` bilan va ikkalasi ham `BACKUP_REMOTE_CMD`
 orqali uzoqqa ketadi.
 
+### Nima zaxiralanadi va qanday tartibda
+
+| # | Nima | Vosita | Tartib |
+|---|---|---|---|
+| 1 | PostgreSQL bazasi | `pg_dump -Fc` (`tai_owner`) | **birinchi** |
+| 2 | Yuklangan fayllar (`UPLOAD_ROOT`) | `tar -czf` | ikkinchi |
+| 3 | Tiklash metama'lumoti — **sirsiz** | matn fayli | uchinchi |
+
+**Tartib ataylab shunday.** Baza va fayllar **atomar** olinmaydi —
+buning uchun to'xtatish yoki fayl tizimi snapshoti kerak bo'lardi.
+Tartib esa qaysi nomuvofiqlik yuz berishini **tanlaydi**:
+
+- **baza avval** → oradagi yangi fayl arxivda **bor**, bazada
+  **yo'q** → *yetim fayl*. U hech qayerdan ko'rinmaydi va zarar
+  qilmaydi;
+- fayllar avval bo'lsa → bazada yozuv **bor**, fayl **yo'q** →
+  *singan havola*. Foydalanuvchi hujjatni ocholmaydi.
+
+Birinchisi arzon, ikkinchisi qimmat. Shuning uchun baza birinchi.
+
+**Tiklash oynasi (RPO):** zaxira kuniga bir marta olinadi (timer),
+ya'ni eng yomon holatda **24 soatlik** ma'lumot yo'qoladi.
+Nomuvofiqlik oynasi esa dump boshlanishi bilan `tar` tugashi
+orasidagi vaqt — odatda soniyalar.
+
+### Tiklash metama'lumoti — nomlar, qiymatlar emas
+
+Baza va fayllar tiklansa ham xizmat **ko'tarilmaydi**: `APP_ENV`,
+`UPLOAD_ROOT`, `XT_DB_DSN` va boshqalar kerak. Shuning uchun
+zaxiraga `*-meta.txt` qo'shiladi: reliz yo'li va SHA si, tasdiq
+SHA si, migratsiya holati, kerakli sozlama **nomlari** va systemd
+birliklari.
+
+**Qiymatlar yozilmaydi.** Muhit faylida baza paroli va API
+kalitlari bor; ularni zaxiraga qo'shish sirlarni **uzoq omborga**,
+boshqa ma'muriyat ostiga ko'chirardi. Sirlar operatorning sir
+omboridan qaytariladi. `_tests/deploy_test.py` §8m buni sun'iy
+sirlar bilan **yurgizib** tekshiradi.
+
+### Tashqi manzil — talablar
+
+`BACKUP_REMOTE_CMD` endi **qobiq satri emas**. `backup.sh` shablonni
+bo'shliq bo'yicha argumentlarga bo'ladi, `{fayl}` alohida argument
+sifatida almashadi va qobiq **umuman ishtirok etmaydi**.
+
+```
+BACKUP_REMOTE_CMD='/usr/local/sbin/tender-backup-remote {fayl}'
+```
+
+Manzil va kalit `0600 root:root` faylda
+(`deploy/env/backup-remote.conf.example`), **muhit faylida emas** —
+muhit faylini ilova ham o'qiydi va zaxira omborining kaliti unga
+kerak emas.
+
+Manzilga qo'yiladigan talablar:
+
+| Talab | Nega |
+|---|---|
+| **Boshqa mashina** | ayni mashinadagi ikkinchi disk ham yaramaydi: mezbon buzilganda (shifrlovchi dastur, buzilgan hisob) u ham ketadi |
+| Shifrlangan kanal | SSH; `StrictHostKeyChecking=yes` va oldindan to'ldirilgan `known_hosts` — aks holda o'rtadagi odam zaxirani qabul qilib olardi |
+| Tor huquqli hisob | `authorized_keys` da `command="rrsync -wo /srv/tenderai"` — **faqat yozish** |
+| Alohida kalit | faqat shu ish uchun, `0600 root:root` |
+| Saqlash muddati **uzoqda** | o'rama uzoqda hech narsa **o'chirmaydi**; o'chirish huquqi manba mezbon buzilganda zaxirani ham yo'q qilardi |
+
+**Nusxa "ko'chdi" ≠ nusxa "butun".** O'rama nusxadan keyin
+uzoqdagi faylning `sha256` ini o'qiydi va mahalliy bilan
+solishtiradi; farq bo'lsa — **xato**.
+
 **Bo'sh arxiv jim o'tmaydi.** `backup.sh` bazadagi faol `yuklama`
 soni bilan arxivdagi fayl sonini solishtiradi: bazada fayl bor-u
 arxiv bo'sh bo'lsa — **xato bilan to'xtaydi**. Aks holda noto'g'ri
