@@ -375,11 +375,35 @@ def test_e2e_darvozasi():
     check("E2E `.verified` YOZUVIDAN OLDIN yuradi",
           "e2e-fayl.sh" in d and yozuv in d
           and d.index("e2e-fayl.sh") < d.index(yozuv))
-    # SOZLANMAGANI 'O'TDI' EMAS. `:?` bilan bo'sh o'zgaruvchi
-    # skriptni TO'XTATADI.
+    # SOZLANMAGANI 'O'TDI' EMAS -- va tekshiruv RELIZDAN OLDIN
+    # bo'lishi kerak.
+    #
+    # ILGARI BU YERDA `f"{o}:?" in d` yozilgan edi, ya'ni sinov
+    # MEXANIZMNI qotirib qo'ygan. O'LCHANGAN NUQSON (2026-09-09):
+    # `:?` `set -u` bilan skriptni DARHOL o'ldiradi va u E2E
+    # qadamining o'zida turardi -- ya'ni `current` ALMASHGANDAN
+    # KEYIN. Natijada reliz almashdi, orqaga qaytish yurmadi,
+    # `.verified` yozilmadi: hukmsiz yarim holat. Sinov buni
+    # ko'rmadi, chunki u `:?` BORLIGINI tekshirardi, JOYINI emas.
+    #
+    # Shuning uchun endi XOSSA tekshiriladi: har bir qiymat
+    # nomma-nom sanaladi va tekshiruv ALMASHTIRISHDAN OLDIN
+    # joylashadi. Mexanizm (`:?` yoki `if`) ahamiyatsiz.
+    ALMASH = 'ln -sfn "$YANGI" "$JORIY"'
+    check("almashtirish amali topildi", ALMASH in d)
+    i_almash = d.index(ALMASH)
     for o in ("E2E_URL", "E2E_LOGIN", "E2E_PAROL",
               "E2E_BEGONA_LOGIN", "E2E_BEGONA_PAROL"):
-        check(f"`{o}` sozlanmagani XATO (`:?`)", f"{o}:?" in d)
+        joylar = [i for i in range(len(d))
+                  if d.startswith(o, i) and i < i_almash]
+        check(f"`{o}` ALMASHTIRISHDAN OLDIN tekshiriladi",
+              bool(joylar), "faqat almashtirishdan keyin uchraydi")
+    # Tekshiruv `xato` bilan tugasin: u chiqish kodini beradi va
+    # jurnalga sabab yozadi. `:?` esa xabarni stderr ga tashlab
+    # skriptni o'rtasidan uzardi.
+    check("E2E sozlamasi yetishmasa `xato` chaqiriladi",
+          "E2E sozlamasi yetishmaydi" in d
+          and d.index("E2E sozlamasi yetishmaydi") < i_almash)
     # `--begona` va `--ai` DOIM beriladi: ularsiz ijarachi
     # chegarasi va iqtibos zanjiri O'LCHANMAYDI.
     check("`--begona` DOIM beriladi", "--begona" in d)

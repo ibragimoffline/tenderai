@@ -163,6 +163,39 @@ set -a
 set +a
 export APP_ENV="$MUHIT"
 
+# --- 4a) E2E SOZLAMASI — RELIZDAN OLDIN TEKSHIRILADI ------------------------
+# O'LCHANGAN NUQSON (2026-09-09). Bu tekshiruv ilgari E2E qadamining
+# O'ZIDA, `: "${E2E_URL:?...}"` shaklida edi. `set -u` bilan bu
+# konstruksiya skriptni DARHOL o'ldiradi -- ya'ni:
+#
+#     current -> yangi reliz   (almashtirilgan)
+#     E2E                      (sozlanmagan -> skript o'ladi)
+#     orqaga qaytish           (YURMAYDI)
+#     .verified                (YOZILMAYDI)
+#
+# Natijada reliz almashgan, hukm esa YO'Q. Aynan shu holat yuzaga
+# keldi. Sozlanmagani "o'tdi" emas degan qaror TO'G'RI, lekin uning
+# JOYI noto'g'ri edi: sozlama nuqsoni relizni BOSHLANIShIDA
+# to'xtatishi kerak, o'rtasida uzmasligi.
+#
+# Hammasi BIRDANIGA sanaladi: birinchisida to'xtash operatorni
+# bittalab tuzatishga majburlardi.
+if [ "$MUHIT" = "staging" ]; then
+    E2E_YOQ=""
+    for _k in E2E_URL E2E_LOGIN E2E_PAROL E2E_BEGONA_LOGIN E2E_BEGONA_PAROL; do
+        eval "_v=\${${_k}:-}"
+        [ -n "$_v" ] || E2E_YOQ="${E2E_YOQ} ${_k}"
+    done
+    if [ -n "$E2E_YOQ" ]; then
+        xato "staging darvozasi uchun E2E sozlamasi yetishmaydi:${E2E_YOQ}
+   Ular \`$ENVFILE\` da bo'lishi kerak. Sozlanmagani O'TDI emas:
+   uchidan-uchiga sinov Caddy/proksi yo'lini va ijarachi chegarasini
+   o'lchaydigan YAGONA qadam.
+   E2E_BEGONA_* — IKKINCHI kompaniya hisobi; usiz chegara o'lchanmaydi.
+   Reliz BOSHLANMADI, hech narsa o'zgarmadi."
+    fi
+fi
+
 # --- 4b) EMBEDDING BOG'LIQLIKLARI — IXTIYORIY --------------------------------
 # `EMBED_PROVIDER=local` (STANDART qiymat) ishlashi uchun `torch` va
 # `sentence-transformers` kerak. Ular `requirements-api.txt` da yo'q va
@@ -389,11 +422,7 @@ fi
 # va u darvozani yolg'on qilardi. Bu yerda sozlanmagani XATO.
 if [ "$MUHIT" = "staging" ]; then
     log "uchidan-uchiga sinov (haqiqiy HTTP)"
-    : "${E2E_URL:?staging darvozasi uchun E2E_URL kerak (masalan https://staging.example.uz/api)}"
-    : "${E2E_LOGIN:?E2E_LOGIN kerak — sinov hisobi}"
-    : "${E2E_PAROL:?E2E_PAROL kerak}"
-    : "${E2E_BEGONA_LOGIN:?E2E_BEGONA_LOGIN kerak: ijarachi chegarasi shusiz OLCHANMAYDI}"
-    : "${E2E_BEGONA_PAROL:?E2E_BEGONA_PAROL kerak}"
+    # E2E qiymatlari 4a-bo'limda, RELIZDAN OLDIN tekshirilgan.
 
     # `--ai` DOIM beriladi: iqtibos zanjiri (fayl -> bo'lak -> javob)
     # eng qimmat invariant va uni o'lchamasdan "reliz tayyor" deb
