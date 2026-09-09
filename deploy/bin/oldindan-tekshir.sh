@@ -216,6 +216,45 @@ for D in XT_DB_DSN XT_DB_DSN_OWNER; do
     fi
 done
 
+# --- YUKLASH ILDIZI — QUMDON BILAN MOS BO'LSIN --------------------
+# O'LCHANGAN NUQSON (2026-09-09, birinchi haqiqiy asosiy E2E).
+# Fayl yuklash `STORAGE_WRITE_FAILED` bilan 500 qaytardi. Sabab
+# sozlamada emas, uning YO'QLIGIDA edi:
+#
+#     systemd:  ProtectSystem=strict
+#               ReadWritePaths=/opt/tenderai/<muhit>/var
+#     ilova  :  UPLOAD_ROOT sozlanmagan -> standart qiymat
+#               <reliz>/.runtime/uploads
+#
+# Ya'ni ilova o'zi uchun FAQAT O'QILADIGAN katalogga yozmoqchi
+# bo'lardi. Bu HECH QAYERDA ko'rinmasdi: `yuklama_test` qumdondan
+# TASHQARIDA (darvoza root sifatida) yuradi va o'sha katalogga
+# bemalol yozadi, ya'ni sinov YASHIL, ish vaqti esa SINGAN.
+#
+# Reliz katalogi ichi BARIBIR yaramaydi: har reliz yangi katalog,
+# ya'ni yuklangan fayllar keyingi joylashtiruvda YO'QOLARDI.
+UPROOT="$(qiy UPLOAD_ROOT)"
+# ILDIZ `deploy.sh` bilan BIR XIL qoidada aniqlanadi -- aks holda
+# tekshiruv haqiqiy joylashtiruvdan boshqa yo'lni o'lchardi.
+YOZILADIGAN="${TENDERAI_ILDIZ:-/opt/tenderai/${MUHIT}}/var"
+if [ -z "$UPROOT" ]; then
+    tosiq "UPLOAD_ROOT bo'sh — yuklangan fayllar reliz katalogiga tushardi,
+   u esa systemd qumdonida FAQAT O'QILADIGAN (ProtectSystem=strict).
+   Fayl yuklash 500 STORAGE_WRITE_FAILED beradi.
+   Qo'ying: UPLOAD_ROOT=${YOZILADIGAN}/uploads"
+elif [ "${UPROOT#/}" = "$UPROOT" ]; then
+    tosiq "UPLOAD_ROOT nisbiy yo'l ('$UPROOT') — ish katalogiga bog'liq bo'ladi"
+elif [ "${UPROOT#${YOZILADIGAN}/}" = "$UPROOT" ]; then
+    # Qumdon ro'yxatidan tashqarida bo'lsa yozib bo'lmaydi.
+    tosiq "UPLOAD_ROOT qumdondan TASHQARIDA: $UPROOT
+   systemd faqat '${YOZILADIGAN}' ga yozishga ruxsat beradi
+   (ReadWritePaths). Boshqa joy 500 beradi."
+elif [ -d "$UPROOT" ] && [ ! -w "$UPROOT" ]; then
+    ogoh "UPLOAD_ROOT mavjud, lekin bu foydalanuvchi uchun yozilmaydi: $UPROOT"
+else
+    ok "UPLOAD_ROOT=$UPROOT (qumdon ichida)"
+fi
+
 # Ilova roli EGA bo'lmasin: `tai_app` da DDL huquqi ATAYLAB yo'q
 # (`docs/xavfsizlik.md` C-1). Ikkalasi bir xil bo'lsa o'sha himoya
 # YO'Q, lekin hech narsa xato bermaydi.

@@ -1181,6 +1181,11 @@ def test_mashq():
                 'XT_DB_DSN="dbname=t user=tai_app password=p1 host=127.0.0.1"',
                 'XT_DB_DSN_OWNER="dbname=t user=postgres password=p2 host=127.0.0.1"',
                 "BACKUP_DIR=" + _posix_yol(bash, pzaxira),
+                # QUMDON QOIDASI MASHQDA HAM YURADI: `UPLOAD_ROOT`
+                # `ILDIZ/var` ostida bo'lishi shart, aks holda
+                # `oldindan-tekshir.sh` to'sadi va mashq tasdiq
+                # darvozasiga YETIB BORMASDI.
+                "UPLOAD_ROOT=" + _posix_yol(bash, pildiz) + "/var/uploads",
                 "",
             ]))
         # HAQIQIY BARE REPO — `deploy.sh` endi `$REF` ni KOMMITGA
@@ -3044,6 +3049,49 @@ def test_eski_app_user_diagnostikasi():
         check(f"mavjud bo'lsa inventar saqlangan: {naqsh}", naqsh in b)
 
 
+# =====================================================================
+# 8i. YUKLASH ILDIZI — systemd QUMDONI BILAN MOS
+# =====================================================================
+def test_yuklash_ildizi():
+    bolim("8i. `UPLOAD_ROOT` qumdon bilan mos bo'lsin")
+    o = oqi("bin", "oldindan-tekshir.sh")
+
+    # O'LCHANGAN NUQSON (2026-09-09). `ProtectSystem=strict` +
+    # `ReadWritePaths=/opt/tenderai/<muhit>/var` bilan xizmat uchun
+    # boshqa hamma joy FAQAT O'QILADIGAN. `UPLOAD_ROOT` sozlanmagani
+    # uchun ilova standart qiymatga -- `<reliz>/.runtime/uploads` ga
+    # yozmoqchi bo'lardi va `500 STORAGE_WRITE_FAILED` qaytarardi.
+    #
+    # SINOVLAR BUNI KO'RMAGAN: `yuklama_test` qumdondan TASHQARIDA
+    # yuradi va o'sha katalogga bemalol yozadi. Ya'ni bu nuqson
+    # faqat HAQIQIY HTTP yo'lida ko'rinadi -- shuning uchun uni
+    # ASOSIY E2E topdi.
+    check("UPLOAD_ROOT bo'sh bo'lsa TO'SIQ",
+          "UPLOAD_ROOT bo'sh" in o)
+    check("nisbiy yo'l TO'SIQ", "nisbiy yo'l" in o)
+    check("qumdondan tashqaridagi yo'l TO'SIQ",
+          "qumdondan TASHQARIDA" in o)
+    # Sabab TUSHUNTIRILSIN: "noto'g'ri" degan xabar operatorni
+    # sozlamani TO'G'RILASHGA olib bormaydi.
+    check("xabarda ProtectSystem aytiladi", "ProtectSystem" in o)
+    check("xabarda to'g'ri qiymat ko'rsatiladi", "/uploads" in o)
+
+    # Katalog EGASI: `root` yasasa xizmat yoza olmaydi va xato
+    # yana faqat foydalanuvchi fayl yuklaganda chiqardi.
+    d = oqi("bin", "deploy.sh")
+    check("deploy.sh yuklash ildizini yasaydi", "UPLOAD_ROOT" in d)
+    check("egasi ANIQ beriladi",
+          "install -d -o tenderai -g tenderai" in d)
+    b = oqi("bin", "bootstrap.sh")
+    check("bootstrap ham `var/uploads` yasaydi",
+          "var/uploads" in b)
+
+    # RELIZ KATALOGI YARAMAYDI: har reliz yangi katalog, ya'ni
+    # yuklangan fayllar keyingi joylashtiruvda yo'qolardi.
+    check("reliz katalogi ichi yaramasligi yozilgan",
+          "keyingi joylashtiruvda" in o or "YO'QOLARDI" in o)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -3088,6 +3136,7 @@ def main():
     test_tasdiqla_joriy()
     test_e2e_hisoblari()
     test_eski_app_user_diagnostikasi()
+    test_yuklash_ildizi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

@@ -163,6 +163,16 @@ set -a
 set +a
 export APP_ENV="$MUHIT"
 
+# --- 4a0) YUKLASH ILDIZI TAYYOR BO'LSIN --------------------------------------
+# Katalog `root` yasasa xizmat (`tenderai`) unga YOZA OLMAYDI va
+# xato faqat FOYDALANUVCHI fayl yuklaganda, `500` bo'lib chiqardi.
+# Shuning uchun egasi ANIQ beriladi -- `bootstrap.sh` dagi bilan
+# bir xil idioma.
+if [ -n "${UPLOAD_ROOT:-}" ] && [ ! -d "$UPLOAD_ROOT" ]; then
+    install -d -o tenderai -g tenderai -m 0755 "$UPLOAD_ROOT"
+    log "yuklash ildizi yasaldi: $UPLOAD_ROOT"
+fi
+
 # --- 4a) E2E SOZLAMASI — RELIZDAN OLDIN TEKSHIRILADI ------------------------
 # O'LCHANGAN NUQSON (2026-09-09). Bu tekshiruv ilgari E2E qadamining
 # O'ZIDA, `: "${E2E_URL:?...}"` shaklida edi. `set -u` bilan bu

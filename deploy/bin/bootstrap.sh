@@ -49,6 +49,7 @@ install -d -o tenderai -g tenderai -m 0755 \
     "/opt/tenderai/${MUHIT}/var" \
     "/opt/tenderai/${MUHIT}/var/hf" \
     "/opt/tenderai/${MUHIT}/var/cache" \
+    "/opt/tenderai/${MUHIT}/var/uploads" \
     /var/backups/tenderai \
     "/var/backups/tenderai/${MUHIT}" \
     /var/log/caddy
