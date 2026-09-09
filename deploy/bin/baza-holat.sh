@@ -90,12 +90,27 @@ if [ "$(q "SELECT count(*) FROM information_schema.schemata WHERE schema_name='e
     echo "  erp sxemasi yo'q — tekshirilmadi"
 else
     RUXSAT="'v_tai_actor','v_tender_status','v_stock','v_stock_balance','v_client_document'"
-    echo "  --- tai_app ga erp da berilgan HAMMA huquq ---"
-    q "SELECT '    ' || c.relkind::text || ' erp.' || c.relname || ' -> ' || a.privilege_type
+    # GRANTEE `PUBLIC` HAM KO'RSATILADI.
+    #
+    # O'LCHANGAN KAMCHILIK (2026-09-09, birinchi production yurishi):
+    # ro'yxat FAQAT `tai_app` ga berilgan grantlarni chiqarardi va
+    # BO'SH bo'lib qoldi -- holbuki `has_table_privilege` 36 ta
+    # obyekt uchun `true` qaytardi. Ya'ni huquq BOSHQA yo'ldan
+    # kelyapti va asbob "36 ta" degan RAQAM berib, SABABINI
+    # yashirardi. Raqam bilan hech narsa qilib bo'lmaydi.
+    #
+    # `aclexplode` da grantee=0 -- bu `PUBLIC`, ya'ni klasterdagi
+    # HAR QANDAY rol. Uni `tai_app` filtri bilan qidirish uni
+    # ko'rinmas qilardi.
+    echo "  --- erp obyektlariga berilgan huquqlar (tai_app va PUBLIC) ---"
+    q "SELECT '    ' || c.relkind::text || ' erp.' || c.relname || ' -> '
+              || CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+              || ' ' || a.privilege_type
          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
               aclexplode(c.relacl) a
-        WHERE n.nspname='erp' AND a.grantee::regrole::text='tai_app'
-        ORDER BY c.relname, a.privilege_type" || true
+        WHERE n.nspname='erp'
+          AND (a.grantee = 0 OR a.grantee::regrole::text = 'tai_app')
+        ORDER BY c.relname, 1" || true
     N_RUXSAT="$(q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                     WHERE n.nspname='erp' AND c.relkind IN ('r','v','m','p','f')
                       AND has_table_privilege('tai_app', c.oid, 'SELECT')
@@ -108,11 +123,29 @@ else
     if [ "$N_ORTIQ" = "0" ]; then ok "ortiqcha SELECT obyekt: 0"
     else
         belgi "ORTIQCHA SELECT obyekt: ${N_ORTIQ} ta"
-        q "SELECT '    ortiqcha: erp.' || c.relname
+        # NOMMA-NOM va SABABI BILAN. "36 ta" degan raqam bilan
+        # hech narsa qilib bo'lmaydi: qaysi jadval va QAYSI YO'L
+        # bilan ochilgani kerak.
+        q "SELECT '    ortiqcha: erp.' || c.relname || '  [' ||
+                  CASE
+                    WHEN pg_get_userbyid(c.relowner) = 'tai_app' THEN 'EGALIK'
+                    WHEN EXISTS (SELECT 1 FROM aclexplode(c.relacl) a
+                                  WHERE a.grantee = 0) THEN 'PUBLIC'
+                    WHEN EXISTS (SELECT 1 FROM aclexplode(c.relacl) a
+                                  WHERE a.grantee::regrole::text = 'tai_app')
+                      THEN 'to''g''ridan huquq'
+                    ELSE 'rol a''zoligi yoki boshqa yo''l'
+                  END || ']'
              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname='erp' AND c.relkind IN ('r','v','m','p','f')
               AND has_table_privilege('tai_app', c.oid, 'SELECT')
               AND c.relname NOT IN (${RUXSAT}) ORDER BY 1" || true
+        echo "  --- tai_app qaysi rollarga A'ZO ---"
+        q "SELECT '    -> ' || r.rolname
+             FROM pg_auth_members m
+             JOIN pg_roles r ON r.oid = m.roleid
+             JOIN pg_roles g ON g.oid = m.member
+            WHERE g.rolname = 'tai_app' ORDER BY 1" || true
     fi
     # SUKUT HUQUQ — O'ZINI QAYTA TIKLAYDIGAN SILJISH.
     # Bir martalik REVOKE yetarli emas: sukut huquq qolsa keyingi
