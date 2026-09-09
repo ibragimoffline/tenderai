@@ -69,12 +69,14 @@ hisob_sozla() {
     if tender-kompaniya "$MUHIT" --list 2>/dev/null | grep -qE "^[[:space:]]*${login}[[:space:]]"; then
         chiq="$(printf '%s\n' "$parol" \
                 | tender-kompaniya "$MUHIT" "$login" --password --parol-stdin 2>&1)" \
-            || { echo "$chiq" | grep -vi parol >&2; xato "$login: parol yangilanmadi"; }
+            || { printf '%s\n' "$chiq" | grep -vF "$parol" >&2 || true
+               xato "$login: parol yangilanmadi"; }
         echo "  $login — parol yangilandi"
     else
         chiq="$(printf '%s\n' "$parol" \
                 | tender-kompaniya "$MUHIT" "$login" "$kompaniya" --parol-stdin 2>&1)" \
-            || { echo "$chiq" | grep -vi parol >&2; xato "$login: yaratilmadi"; }
+            || { printf '%s\n' "$chiq" | grep -vF "$parol" >&2 || true
+               xato "$login: yaratilmadi"; }
         echo "  $login — yaratildi ($kompaniya)"
     fi
 }
@@ -89,7 +91,7 @@ env_yoz() {
     chown --reference="$ENVFILE" "$vaqt"
     chmod --reference="$ENVFILE" "$vaqt"
     grep -vE '^(E2E_URL|E2E_LOGIN|E2E_PAROL|E2E_BEGONA_LOGIN|E2E_BEGONA_PAROL)=' \
-        "$ENVFILE" > "$vaqt"
+        "$ENVFILE" > "$vaqt" || true
     {
         echo ""
         echo "# --- STAGING E2E (e2e-hisob-sozla.sh yozgan) ---"
