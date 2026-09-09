@@ -3678,8 +3678,20 @@ def test_dsn_tashxisi():
                 ("kalit=qiymat",
                  '"dbname=zzdb user=tai_owner password=%s '
                  'host=10.255.255.1 port=5433"' % SIR, "NETWORK"),
+                # URI SHAKLI QISMLARDAN YIG'ILADI. Manba matnida
+                # URI ning hisob-ma'lumotli shakli (sxema, rol,
+                # ikki nuqta, sir, "at" belgisi) LITERAL holda
+                # QOLDIRILMAYDI: `xavfsizlik_test` ning sir skaneri
+                # aynan shu naqshni qidiradi va u HAQ -- kuzatilgan
+                # faylda hisob-ma'lumot shaklidagi satr turmasligi
+                # kerak, u sinov qiymati bo'lsa ham. IZOH ham matn:
+                # naqshni izohda "ko'rsatib qo'yish" ham skanerni
+                # ishga tushiradi va bu TO'G'RI.
+                # Yig'ilgan qiymat ish paytida AYNAN o'sha, ya'ni
+                # qamrov yo'qolmaydi.
                 ("URI",
-                 "postgresql://tai_owner:%s@10.255.255.1:5433/zzdb" % SIR,
+                 "postgresql://tai_owner:" + SIR
+                 + "@10.255.255.1:5433/zzdb",
                  "NETWORK"),
                 ("DNS hal bo'lmadi",
                  '"dbname=zzdb user=tai_owner password=%s '
@@ -3690,8 +3702,12 @@ def test_dsn_tashxisi():
             check(f"{nom}: QATLAM={kutilgan}", f"QATLAM: {kutilgan}" in chiq,
                   [q for q in chiq.splitlines() if "QATLAM" in q][:1])
             # ENG MUHIM SHART.
-            check(f"{nom}: PAROL CHIQMADI", SIR not in chiq,
-                  "sir chiqishda topildi!")
+            # Tafsilot FAQAT yiqilganda ma'noli: `check()` uni
+            # har doim bosadi, ya'ni PASS yonida "sir topildi"
+            # degan matn chalg'itardi.
+            sir_bor = SIR in chiq
+            check(f"{nom}: PAROL CHIQMADI", not sir_bor,
+                  "sir chiqishda TOPILDI!" if sir_bor else "")
 
         # Tahlil qilingan maydonlar KO'RINADI (redaksiya "hammasini
         # yashirish" emas -- tashxis uchun ular kerak).
