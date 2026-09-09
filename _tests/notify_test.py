@@ -1268,7 +1268,121 @@ def teardown():
           f"(qoldiq: {qoldi}), sozlamalar tiklandi.")
 
 
+# ---------------------------------------------------------------------------
+# BAZASIZ: `notify_new.py` HAR IJARACHI uchun yuradimi
+# ---------------------------------------------------------------------------
+def test_notify_new_har_ijarachi() -> None:
+    """O'LCHANGAN NUQSON (2026-09-09, staging ETL).
+
+    `notify_new.py` kompaniyani UMUMAN so'ramasdi va `notify.run()`
+    ichida `auth.sole_company_id()` ga tushardi — u esa AYNAN BITTA
+    faol kompaniya bo'lishini talab qiladi:
+
+        AuthError: Bir nechta faol kompaniya: 1(...), 8(...), ...
+
+    Ko'p-ijarachili tizimda bu yagona-ijarachi taxmini. Production da
+    u FAQAT SHU KUNGACHA ishlaydi: ikkinchi kompaniya qo'shilgan
+    kunda soatlik ETL ning bildirishnoma qadami yiqiladi va HECH KIM
+    xabar olmaydi.
+
+    Bazasiz: `notify.run` va `auth.active_companies` o'rniga
+    qo'g'irchoq qo'yiladi va skript NIMA CHAQIRGANI o'lchanadi.
+    """
+    import importlib.util as _iu
+    _sp = _iu.spec_from_file_location(
+        "zz_notify_new", os.path.join(ROOT, "notify_new.py"))
+    nn = _iu.module_from_spec(_sp)
+    _sp.loader.exec_module(nn)
+
+    FAOL = [{"id": 1, "username": "alfa"},
+            {"id": 8, "username": "beta"},
+            {"id": 9, "username": "gamma"}]
+    chaqirilgan = []
+
+    def soxta_run(**kw):
+        cid = kw.get("company_id")
+        chaqirilgan.append(cid)
+        if cid == 8:                      # o'rtadagi ijarachi buzuq
+            raise nn.notify.NotifyError("sun'iy nosozlik")
+        return {"min_score": 50, "since": "x", "found": 0,
+                "telegram": {"found": 0}, "message": "ok"}
+
+    asl = (nn.auth.active_companies, nn.notify.run, nn.db.init_pool,
+           nn.db.close_pool, nn.ommaviy_url.ishga_tushishda_tekshir,
+           sys.argv, os.environ.get("XT_DB_DSN"))
+    try:
+        nn.auth.active_companies = lambda: list(FAOL)
+        nn.notify.run = soxta_run
+        nn.db.init_pool = lambda *a, **k: None
+        nn.db.close_pool = lambda *a, **k: None
+        nn.ommaviy_url.ishga_tushishda_tekshir = lambda *a, **k: None
+        os.environ["XT_DB_DSN"] = "dbname=zz"
+
+        # --- 1) STANDART: HAR faol kompaniya ---
+        chaqirilgan.clear()
+        sys.argv = ["notify_new.py"]
+        kod = 0
+        try:
+            nn.main()
+        except SystemExit as e:
+            kod = e.code
+        eq(chaqirilgan, [1, 8, 9], "har faol kompaniya uchun yuriladi")
+        # BITTA IJARACHINING NOSOZLIGI QOLGANLARINI TO'XTATMASIN:
+        # 8 yiqildi, lekin 9 baribir chaqirilgan.
+        ok(9 in chaqirilgan, "buzuq ijarachidan KEYINGISI ham yuradi")
+        # JIM O'TMASIN: chiqish kodi nolga teng bo'lmasin.
+        ok(kod not in (0, None), f"nosozlik bo'lsa chiqish kodi != 0 ({kod!r})")
+        ok("beta" in str(kod), f"xatoda ijarachi NOMI ko'rinadi: {kod!r}")
+
+        # --- 2) `--company` faqat bittasini yurgizadi ---
+        chaqirilgan.clear()
+        sys.argv = ["notify_new.py", "--company", "9"]
+        try:
+            nn.main()
+        except SystemExit:
+            pass
+        eq(chaqirilgan, [9], "`--company` faqat bittasini yurgizadi")
+
+        # --- 3) FAOL KOMPANIYA YO'Q -> XATO ---
+        chaqirilgan.clear()
+        nn.auth.active_companies = lambda: []
+        sys.argv = ["notify_new.py"]
+        kod = 0
+        try:
+            nn.main()
+        except SystemExit as e:
+            kod = e.code
+        eq(chaqirilgan, [], "kompaniya yo'q bo'lsa hech nima chaqirilmaydi")
+        ok(kod not in (0, None), "kompaniya yo'q bo'lsa XATO")
+
+        # --- 4) HAMMASI SOG'LOM -> chiqish kodi 0 ---
+        chaqirilgan.clear()
+        nn.auth.active_companies = lambda: [{"id": 5, "username": "yagona"}]
+        sys.argv = ["notify_new.py"]
+        kod = 0
+        try:
+            nn.main()
+        except SystemExit as e:
+            kod = e.code
+        eq(chaqirilgan, [5], "yagona kompaniya ham yuriladi")
+        ok(kod in (0, None), f"sog'lom yurishda kod 0 ({kod!r})")
+    finally:
+        (nn.auth.active_companies, nn.notify.run, nn.db.init_pool,
+         nn.db.close_pool, nn.ommaviy_url.ishga_tushishda_tekshir,
+         sys.argv, _dsn) = asl
+        if _dsn is None:
+            os.environ.pop("XT_DB_DSN", None)
+        else:
+            os.environ["XT_DB_DSN"] = _dsn
+
+
 def main() -> None:
+    # BAZASIZ BO'LIM AVVAL. DSN yo'q muhitda ham bu qism yurishi
+    # kerak: u ijarachilar bo'yicha sikl SHARTNOMASINI o'lchaydi va
+    # unga baza kerak emas.
+    print("--- bazasiz: notify_new ijarachilar sikli ---")
+    test_notify_new_har_ijarachi()
+    print("  OK   notify_new HAR faol ijarachi uchun yuradi")
     if not os.environ.get("XT_DB_DSN"):
         sys.exit("XATO: XT_DB_DSN o'rnatilmagan (.env).")
 

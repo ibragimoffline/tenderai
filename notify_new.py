@@ -43,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 load_dotenv()  # api.db DSN'ni ko'rishi uchun importdan OLDIN
 
-from api import db, notify, ommaviy_url  # noqa: E402
+from api import auth, db, notify, ommaviy_url  # noqa: E402
 
 # Windows konsoli standart kodlashда (cp1251/cp866) tender nomlaridagi kirill
 # va o'zbekcha belgilarni chiqara olmaydi -> UnicodeEncodeError. Chop etish
@@ -69,6 +69,8 @@ def main() -> None:
                     help="Allaqachon xabar ketganlarni ham qayta yuboradi")
     ap.add_argument("--since-hours", type=float, default=None,
                     help="Oxirgi ETL tsikli o'rniga: oxirgi N soat")
+    ap.add_argument("--company", type=int, default=None,
+                    help="Faqat shu kompaniya (standart: HAR faol kompaniya)")
     args = ap.parse_args()
 
     if not os.environ.get("XT_DB_DSN"):
@@ -86,28 +88,65 @@ def main() -> None:
         sys.exit(f"XATO: {e}")
 
     db.init_pool()
+    xatolar: list = []
     try:
-        res = notify.run(min_score=args.min_score, limit=args.limit,
-                         dry_run=args.dry_run, force=args.force,
-                         since_hours=args.since_hours)
-    except notify.NotifyError as e:
-        # Sozlama/SMTP xatosi — ANIQ matn, exit 2 (cron logда ko'rinadi)
-        sys.exit(f"XATO: {e}")
+        # HAR IJARACHI UCHUN ALOHIDA.
+        #
+        # O'LCHANGAN NUQSON (2026-09-09, staging ETL). Skript
+        # kompaniyani UMUMAN so'ramasdi va `notify.run()` ichida
+        # `auth.sole_company_id()` ga tushardi — u esa AYNAN BITTA
+        # faol kompaniya bo'lishini talab qiladi:
+        #
+        #     AuthError: Bir nechta faol kompaniya: 1(...), 8(...), ...
+        #
+        # Bu ko'p-ijarachili tizimda yagona-ijarachi taxmini edi.
+        # Production da u faqat SHU KUNGACHA ishlaydi: ikkinchi
+        # kompaniya qo'shilgan kunda soatlik ETL ning bildirishnoma
+        # qadami yiqila boshlaydi va HECH KIM xabar olmaydi.
+        # Nosozlik esa bitta jurnal satri bo'lib qolardi.
+        if args.company is not None:
+            kompaniyalar = [{"id": args.company, "username": f"id={args.company}"}]
+        else:
+            kompaniyalar = auth.active_companies()
+            if not kompaniyalar:
+                sys.exit("XATO: faol kompaniya hisobi yo'q.")
+
+        for k in kompaniyalar:
+            cid, nom = int(k["id"]), k.get("username") or f"id={k['id']}"
+            # BITTA IJARACHINING NOSOZLIGI QOLGANLARINI TO'XTATMASIN.
+            # Aks holda ro'yxatdagi birinchi buzuq sozlama butun
+            # tsiklni o'ldirardi va undan keyingilar xabar olmasdi.
+            try:
+                res = notify.run(min_score=args.min_score, limit=args.limit,
+                                 dry_run=args.dry_run, force=args.force,
+                                 since_hours=args.since_hours,
+                                 company_id=cid)
+            except notify.NotifyError as e:
+                xatolar.append(f"{nom}: {e}")
+                print(f"[XATO] {nom}: {e}")
+                continue
+
+            tg = res.get("telegram") or {}
+            print(f"--- {nom} (id={cid}) ---")
+            print(f"Chegara: {res['min_score']} ball | oyna: {res['since']} dan beri")
+            print(f"Topildi: email uchun {res['found']} ta, "
+                  f"Telegram uchun {tg.get('found', 0)} ta")
+            if args.dry_run and res.get("text"):
+                print("\n--- YUBORILADIGAN XABAR (dry-run) ---")
+                print(res["subject"])
+                print(res["text"])
+                print("--- xabar tugadi ---\n")
+            print(res["message"])
     except db.DBUnavailable as e:
         sys.exit(f"XATO: baza mavjud emas: {e}")
     finally:
         db.close_pool()
 
-    tg = res.get("telegram") or {}
-    print(f"Chegara: {res['min_score']} ball | oyna: {res['since']} dan beri")
-    print(f"Topildi: email uchun {res['found']} ta, "
-          f"Telegram uchun {tg.get('found', 0)} ta")
-    if args.dry_run and res.get("text"):
-        print("\n--- YUBORILADIGAN XABAR (dry-run) ---")
-        print(res["subject"])
-        print(res["text"])
-        print("--- xabar tugadi ---\n")
-    print(res["message"])
+    # JIM O'TMAYDI. Yiqilgan ijarachi bo'lsa chiqish kodi 1 --
+    # timer "muvaffaqiyatli" deb yozmasin.
+    if xatolar:
+        sys.exit("XATO: %d ta kompaniyada nosozlik:\n  %s"
+                 % (len(xatolar), "\n  ".join(xatolar)))
 
     # KANAL XATOSI JIMGINA O'TMAYDI. run() xatoni tashlamaydi (bir kanal
     # yiqilsa ikkinchisi yuborilishi kerak), shuning uchun chiqish kodini

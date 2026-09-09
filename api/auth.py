@@ -644,9 +644,21 @@ ACTIVE_COMPANIES_SQL = ("SELECT id, username FROM company_account "
                         "WHERE active ORDER BY id")
 
 
+def active_companies() -> List[Dict[str, Any]]:
+    """Faol kompaniya hisoblari (`id`, `username`), id bo'yicha tartibda.
+
+    NEGA ALOHIDA. Rejalashtirilgan ishlar (bildirishnoma tsikli) HAR
+    ijarachi uchun yurishi kerak. `sole_company_id()` esa aynan
+    BITTASINI talab qiladi va ikkinchi kompaniya qo'shilgan kunda
+    xato beradi. Ikkala ehtiyoj ham haqiqiy, lekin ular BOSHQA
+    savol: "kim?" va "kimlar?".
+    """
+    return db.query(ACTIVE_COMPANIES_SQL)
+
+
 def sole_company_id() -> int:
     """Yagona faol kompaniya id si. Aniqlab bo'lmasa `AuthError`."""
-    rows = db.query(ACTIVE_COMPANIES_SQL)
+    rows = active_companies()
     if len(rows) == 1:
         return int(rows[0]["id"])
     if not rows:
