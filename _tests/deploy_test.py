@@ -3567,6 +3567,34 @@ def test_pgvector_kaskadi():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+# =====================================================================
+# 8o. META SO'ROVI MIGRATSIYA SXEMASI BILAN MOS BO'LSIN
+# =====================================================================
+def test_meta_migratsiya_sorovi():
+    bolim("8o. Zaxira metasi: jadval nomi `migratsiya.py` bilan bir xil")
+    b = oqi("bin", "backup.sh")
+    m = _oqi_ildiz("migratsiya.py")
+
+    # NEGA BU SINOV BOR. Meta so'rovi `|| echo "oxirgi=?"` bilan
+    # o'ralgan -- ya'ni NOTO'G'RI jadval nomi HECH QAYERDA
+    # ko'rinmaydi: skript o'tadi, meta fayli yasaladi, maydon esa
+    # DOIM `?` bo'lib qoladi. O'LCHANGAN: birinchi yozuvda
+    # `migratsiya_jurnal` / `kalit` / `holat='qollandi'` deb
+    # yozilgan edi, haqiqiysi esa `schema_migration` /
+    # `migratsiya_id` / `holat IN ('ok','bootstrap')`.
+    check("`migratsiya.py` jadvali topildi", "schema_migration" in m)
+    check("meta AYNI jadvalni so'raydi", "schema_migration" in b)
+    check("meta `migratsiya_id` ustunini so'raydi", "migratsiya_id" in b)
+    # Holat qiymatlari ham mos bo'lsin.
+    check("meta `ok`/`bootstrap` holatini so'raydi",
+          "'ok','bootstrap'" in b.replace(" ", ""))
+    check("`migratsiya.py` ayni holatlarni ishlatadi",
+          "'ok','bootstrap'" in m.replace(" ", ""))
+    # Eski, YOLG'ON nomlar qaytib kelmasin.
+    for yomon in ("migratsiya_jurnal", "'qollandi'"):
+        check(f"eski nom qaytmadi: {yomon}", yomon not in b)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -3617,6 +3645,7 @@ def main():
     test_tashqi_nusxa_orama_yurgiziladi()
     test_tiklash_metasi()
     test_pgvector_kaskadi()
+    test_meta_migratsiya_sorovi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

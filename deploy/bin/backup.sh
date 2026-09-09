@@ -239,10 +239,15 @@ META="${KATALOG}/tenderai-${MUHIT}-${STAMP}-meta.txt"
     echo "tasdiq_sha=$(cat "${ILDIZ:-/opt/tenderai/$MUHIT}/.verified" 2>/dev/null || echo '?')"
     echo
     echo "## migratsiya holati"
+    # JADVAL NOMI `migratsiya.py` BILAN BIR XIL: `schema_migration`,
+    # holat `ok`/`bootstrap`. Nomni "eslab" yozish jimgina buzilardi:
+    # so'rov yiqilsa `|| echo` uni yutadi va maydon DOIM `?` bo'lib
+    # qolardi -- ya'ni meta fayli "bor", lekin ma'lumot YO'Q.
+    # `_tests/deploy_test.py` §8o ikkalasini SOLISHTIRADI.
     psql "$XT_DB_DSN_OWNER" -tAc \
-        "SELECT 'oxirgi_kalit=' || coalesce(max(kalit)::text,'?') ||
-                '  soni=' || count(*)::text FROM migratsiya_jurnal
-          WHERE holat = 'qollandi'" 2>/dev/null || echo "oxirgi_kalit=?"
+        "SELECT 'oxirgi=' || coalesce(max(migratsiya_id),'?') ||
+                '  soni=' || count(*)::text FROM schema_migration
+          WHERE holat IN ('ok','bootstrap')" 2>/dev/null || echo "oxirgi=?"
     echo
     echo "## kerakli sozlama NOMLARI (qiymat YO'Q)"
     # Faqat `NOM=` shaklidagi qatorlar, `=` dan KEYINGISI TASHLANADI.
