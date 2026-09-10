@@ -57,7 +57,7 @@ Inson tasdig'i aynan shuni ushlaydi.
 import json
 import re
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from api import categories as C
 from api import db, translit, xatolar
@@ -111,6 +111,16 @@ def divisions_for_category(category_code: Optional[str]) -> List[str]:
     return sorted(set(out))
 
 
+#: So'z ajratgich — harf/raqamdan boshqa hamma narsa chegara.
+_SOZ_AJRAT = re.compile(r"[^0-9A-Za-z\u0400-\u04FF]+")
+#: Undan qisqa so'z hamma narsaga mos keladi ("для", "тип").
+_MIN_SOZ = 5
+#: Nechta MANBA atamasi butunligicha naqsh bo'ladi.
+_BUTUN_ATAMA_CHEK = 6
+#: Jami naqsh chegarasi — so'rov arzon qolsin.
+_NAQSH_CHEK = 40
+
+
 def _query_text(product: Dict[str, Any]) -> str:
     """Mahsulotdan qidiruv matni.
 
@@ -123,24 +133,73 @@ def _query_text(product: Dict[str, Any]) -> str:
     return ", ".join(q for q in qismlar if q)
 
 
-def _lexical_patterns(product: Dict[str, Any]) -> List[str]:
-    """Leksik qidiruv naqshlari — HAR IKKI alifboda.
+def _lexical_patterns(product: Dict[str, Any]) -> List[Tuple[str, int]]:
+    """Leksik qidiruv naqshlari — HAR IKKI alifboda, IKKI DARAJADA.
 
-    `translit.variants()` lotin<->kirill o'qishlarini beradi. Bu lug'at
-    nomlari kirillda bo'lgani uchun zarur, LEKIN yetarli emas: o'lchandi,
-    "дори" ham noto'g'ri kod topadi. Shuning uchun leksik — uch signaldan
-    faqat BITTASI.
+    Qaytadi: `[(naqsh, guruh)]`. `guruh` — naqsh qaysi MANBA
+    atamasidan kelgani. U dalil sanashda kerak: bitta so'zning lotin
+    va kirill o'qishi IKKI dalil bo'lib sanalmasligi shart.
+
+    IKKI DARAJA — BUTUN ATAMA VA SO'Z (2026-09-10 da o'lchandi).
+
+    Ilgari faqat BUTUN atama naqsh bo'lardi. Trigram o'xshashligi esa
+    satrlarni butunligicha solishtiradi, ya'ni nomdagi HAR bir ortiqcha
+    belgi maxrajni shishiradi. Model raqamli katalogda bu qoidani
+    butunlay o'chiradi:
+
+        "ds ids-tcm203-a/r/2812(850nm)(b)"  ~  "камера видеонаблюдения"  ~ 0
+        "ds-x30-t1670r360-060p0-q,36v..."   ~  "блок питания"            = 0.204
+
+    Ikkinchi qator MUHIM: javob TO'G'RI topilgan va 0.3 chegarasida
+    tashlab yuborilgan. Ya'ni tartiblash ishlagan, kesish esa
+    ma'lumot shakliga mos kelmagan.
+
+    O'lchov (ishlab chiqarish, 1796 mahsulotli katalog, 60 tasi):
+        butun atama          0/60 nomzod
+        so'z darajasida     18/60 nomzod
+
+    BUTUN ATAMA SAQLANADI. So'zlar unga QO'SHILADI, o'rniga emas:
+    qisqa va toza nomlarda ("Кабель силовой") butun atama aniqroq va
+    uni yo'qotish boshqa ijarachilarda regressiya bo'lardi.
+
+    RAQAMLI SO'Z NAQSH BO'LMAYDI. `tcm203`, `36v1` — model
+    belgilari; ular lug'at nomlarida uchramaydi va faqat o'rin
+    egallaydi.
     """
-    out: List[str] = []
-    for term in [product.get("name")] + list(product.get("keywords") or []):
-        if term and term.strip():
-            out.extend(translit.variants(term))
-    seen, res = set(), []
-    for v in out:
-        if v and v not in seen and len(v) >= 3:
-            seen.add(v)
-            res.append(v)
-    return res[:12]
+    juft: List[Tuple[str, int]] = []
+    korilgan = set()
+    guruh = 0
+
+    def qosh(matn: str) -> None:
+        nonlocal guruh
+        yangi = [v for v in translit.variants(matn)
+                 if v and len(v) >= 3 and v not in korilgan]
+        if not yangi:
+            return
+        for v in yangi:
+            korilgan.add(v)
+            juft.append((v, guruh))
+        guruh += 1
+
+    atamalar = [product.get("name")] + list(product.get("keywords") or [])
+    atamalar = [t.strip() for t in atamalar if t and t.strip()]
+
+    # 1-daraja: BUTUN atama (eski xulq, o'zgarmaydi).
+    for term in atamalar[:_BUTUN_ATAMA_CHEK]:
+        qosh(term)
+
+    # 2-daraja: SO'ZLAR. Nom so'zlari BIRINCHI — kalit so'zlar
+    # ko'pincha datasheet parchalari ("3d dnr", "vca functions") va
+    # ular tovar toifasini bildirmaydi.
+    for term in atamalar:
+        for soz in _SOZ_AJRAT.split(term.lower()):
+            if len(soz) < _MIN_SOZ or any(ch.isdigit() for ch in soz):
+                continue
+            qosh(soz)
+            if len(juft) >= _NAQSH_CHEK:
+                return juft[:_NAQSH_CHEK]
+
+    return juft[:_NAQSH_CHEK]
 
 
 # ---------------------------------------------------------------------------
@@ -180,16 +239,51 @@ LIMIT %(cap)s
 #: `names` massivi chastota bo'yicha tartiblangan, shuning uchun
 #: birinchi nomlar guruhning haqiqiy vakili.
 SQL_LEX = """
-SELECT d.code,
-       ROW_NUMBER() OVER (ORDER BY max(similarity(lower(n.nom), p.naqsh)) DESC) AS rnk
-FROM dim_good_code d
-CROSS JOIN LATERAL unnest(d.names) AS n(nom)
-CROSS JOIN unnest(%(naqshlar)s::text[]) AS p(naqsh)
-WHERE d.level = %(level)s
-  AND d.n_tender_open > 0
-  AND lower(n.nom) %% p.naqsh
-GROUP BY d.code
-ORDER BY max(similarity(lower(n.nom), p.naqsh)) DESC
+WITH naqsh AS (
+    SELECT DISTINCT lower(p.naqsh) AS naqsh, p.guruh
+    FROM unnest(%(naqshlar)s::text[], %(guruhlar)s::int[]) AS p(naqsh, guruh)
+),
+nom AS (
+    SELECT d.code, lower(n.nom) AS nom
+    FROM dim_good_code d
+    CROSS JOIN LATERAL unnest(d.names) AS n(nom)
+    WHERE d.level = %(level)s
+      AND d.n_tender_open > 0
+),
+-- Lug'at nomi SO'ZLARGA ham ajratiladi. "камера видеонаблюдения"
+-- ichidagi "камера" naqshi bilan o'xshashlik 1.0, butun satr bilan
+-- esa 0.32 -- ya'ni chegara atrofida tebranadi va model raqamli
+-- nomda butunlay nolga tushadi.
+soz AS (
+    SELECT nom.code, w.soz
+    FROM nom
+    CROSS JOIN LATERAL regexp_split_to_table(nom.nom, '[^[:alnum:]]+') AS w(soz)
+    WHERE length(w.soz) >= 4
+),
+moslik AS (
+    SELECT nom.code, naqsh.guruh, similarity(nom.nom, naqsh.naqsh) AS ball
+    FROM nom JOIN naqsh ON nom.nom %% naqsh.naqsh
+    UNION ALL
+    SELECT soz.code, naqsh.guruh, similarity(soz.soz, naqsh.naqsh) AS ball
+    FROM soz JOIN naqsh ON soz.soz %% naqsh.naqsh
+),
+-- DALIL SONI BIRINCHI, o'xshashlik ikkinchi.
+--
+-- NEGA: "камера" VA "видеонаблюдения" ni topgan kod bitta umumiy
+-- so'zni ("система") mukammal topgan koddan ustun. Faqat
+-- o'xshashlik bo'yicha tartiblansa teskarisi bo'lardi.
+--
+-- `guruh` bo'yicha sanaladi, NAQSH bo'yicha emas: bitta so'zning
+-- lotin va kirill o'qishi ikki dalil bo'lib sanalmasin.
+yigma AS (
+    SELECT code, count(DISTINCT guruh) AS n_dalil, max(ball) AS eng_ball
+    FROM moslik
+    GROUP BY code
+)
+SELECT code,
+       ROW_NUMBER() OVER (ORDER BY n_dalil DESC, eng_ball DESC, code) AS rnk
+FROM yigma
+ORDER BY n_dalil DESC, eng_ball DESC, code
 LIMIT %(cap)s
 """
 
@@ -233,7 +327,7 @@ def takliflar(product: Dict[str, Any],
         return []
 
     divisions = divisions_for_category(product.get("category_code"))
-    naqshlar = _lexical_patterns(product)
+    naqsh_juft = _lexical_patterns(product)
 
     ranklar: Dict[str, Dict[str, int]] = {}
 
@@ -242,9 +336,12 @@ def takliflar(product: Dict[str, Any],
             ranklar.setdefault(r["code"], {})[nom] = int(r["rnk"])
 
     # --- Signal 1: leksik (trigram, ikki alifboda) ---
-    if naqshlar:
+    if naqsh_juft:
         yig("leksik", db.query(SQL_LEX,
-                               {"level": level, "naqshlar": naqshlar, "cap": cap}))
+                               {"level": level,
+                                "naqshlar": [n for n, _g in naqsh_juft],
+                                "guruhlar": [g for _n, g in naqsh_juft],
+                                "cap": cap}))
 
     # --- Signal 2: semantik (markazlangan vektor) ---
     # AI IXTIYORIY: model yo'q bo'lsa yoki lug'at hali vektorlanmagan

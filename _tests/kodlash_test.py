@@ -98,17 +98,110 @@ def test_query_matn():
 
 
 def test_leksik_naqsh():
-    """Leksik naqshlar IKKI alifboda quriladi."""
+    """Leksik naqshlar IKKI alifboda VA IKKI darajada quriladi.
+
+    O'LCHANGAN NUQSON (2026-09-10). Naqsh faqat BUTUN atama edi va
+    model raqamli katalogda bu qoidani butunlay o'chirardi:
+    "DS-X30-T1670R360-060P0-Q,36V1.67A,60W Блок" uchun to'g'ri javob
+    "Блок питания" 0.204 ball oldi va 0.3 chegarasida tashlandi.
+    """
     section("A. Leksik naqshlar")
     from api import kodlash
 
-    n = kodlash._lexical_patterns({"name": "kamera", "keywords": []})
+    juft = kodlash._lexical_patterns({"name": "kamera", "keywords": []})
+    n = [p for p, _g in juft]
     check("naqsh bor", len(n) > 0, str(n))
     check("kirill varianti ham bor",
-          any(any("Ѐ" <= ch <= "ӿ" for ch in v) for v in n), str(n))
+          any(any("\u0400" <= ch <= "\u04ff" for ch in v) for v in n), str(n))
     # 1-2 belgili naqsh hamma narsaga mos keladi — foydasiz.
     check("qisqa naqsh tashlanadi", all(len(v) >= 3 for v in n), str(n))
 
+    # --- BUTUN ATAMA SAQLANADI (regressiya qo'rig'i) ---
+    # So'z darajasi QO'SHIMCHA. Butun atama yo'qolsa qisqa va toza
+    # nomli kataloglar yomonlashardi.
+    butun = kodlash._lexical_patterns(
+        {"name": "Кабель силовой", "keywords": []})
+    # `translit.variants()` normallashtiradi ("кабель" -> "кабел"),
+    # shuning uchun XOM satr qidirilmaydi. Muhimi — KO'P SO'ZLI
+    # naqsh borligi: u aynan butun atama darajasi.
+    check("butun atama naqsh bo'lib qoladi",
+          any(" " in p for p, _g in butun),
+          str([p for p, _g in butun][:6]))
+    check("butun atama BIRINCHI guruhda",
+          all(g == 0 for p, g in butun if " " in p),
+          str([(p, g) for p, g in butun if " " in p]))
+
+    # --- SO'Z NAQSHLARI QO'SHILADI ---
+    sku = kodlash._lexical_patterns({
+        "name": "DS-X30-T1670R360-060P0-Q,36V1.67A,60W Блок питания",
+        "keywords": []})
+    sozlar = {p for p, _g in sku}
+    check("so'z naqshi ham quriladi", "питания" in sozlar,
+          str(sorted(sozlar)[:8]))
+
+    # --- RAQAMLI BO'LAK NAQSH BO'LMAYDI ---
+    # `t1670r360`, `36v1` model belgisi; ular lug'atda uchramaydi va
+    # faqat naqsh byudjetini yeydi.
+    raqamli = [p for p in sozlar if any(ch.isdigit() for ch in p)
+               and " " not in p]
+    check("raqamli SO'Z naqsh bo'lmaydi", not raqamli, str(raqamli[:6]))
+
+    # --- GURUH: BIR SO'Z = BIR DALIL ---
+    # Lotin va kirill o'qishi ikki dalil bo'lib sanalmasligi shart,
+    # aks holda tartiblash bitta so'zni ikki barobar kuchli deb
+    # o'qirdi.
+    bir = kodlash._lexical_patterns({"name": "kamera", "keywords": []})
+    check("bir atamaning variantlari BIR guruhda",
+          len({g for _p, g in bir}) == 1,
+          str(bir))
+
+    ikki = kodlash._lexical_patterns(
+        {"name": "kamera", "keywords": ["monitor"]})
+    check("ikki atama IKKI guruh beradi (kamida)",
+          len({g for _p, g in ikki}) >= 2,
+          str(sorted({g for _p, g in ikki})))
+
+    # --- QISQA SO'Z TASHLANADI ---
+    qisqa = kodlash._lexical_patterns(
+        {"name": "Тип для сети", "keywords": []})
+    yolgiz = [p for p, _g in qisqa if " " not in p]
+    check("qisqa SO'Z naqsh bo'lmaydi (>=5)",
+          all(len(p) >= 5 for p in yolgiz), str(yolgiz[:8]))
+
+    # --- CHEGARA ---
+    kop = kodlash._lexical_patterns(
+        {"name": " ".join(f"kalitso{i}z" for i in range(40)),
+         "keywords": [f"boshqasoz{i}" for i in range(40)]})
+    check("naqsh soni chegaralangan", len(kop) <= 40, str(len(kop)))
+
+
+def test_leksik_sql_shakli():
+    """`SQL_LEX` dalil SONI bo'yicha tartiblaydi, ballning O'ZI bilan emas.
+
+    NEGA MUHIM: "камера" VA "видеонаблюдения" ni topgan kod bitta
+    umumiy so'zni ("система") mukammal topgan koddan ustun bo'lishi
+    kerak. Faqat `max(similarity)` bo'yicha tartiblansa teskarisi
+    bo'lardi — va aynan shu sinf soxta moslik bergan
+    (`api/main.py` dagi "kategoriya 100 ball" saboqi).
+    """
+    section("A2. Leksik SQL shakli")
+    from api import kodlash
+
+    q = kodlash.SQL_LEX
+    check("lug'at nomi SO'ZLARGA ajratiladi",
+          "regexp_split_to_table" in q)
+    check("butun nom bo'yicha moslik ham qoladi",
+          "nom.nom %% naqsh.naqsh" in q or "nom.nom % naqsh.naqsh" in q)
+    check("dalil soni GURUH bo'yicha sanaladi",
+          "count(DISTINCT guruh)" in q)
+    check("tartib DALIL SONIDAN boshlanadi",
+          "ORDER BY n_dalil DESC, eng_ball DESC" in q)
+    check("ochiq tenderi yo'q kod chiqmaydi", "n_tender_open > 0" in q)
+    check("daraja filtri saqlanadi", "d.level = %(level)s" in q)
+    # Naqsh va guruh massivlari JUFT uzatiladi — biri ikkinchisisiz
+    # kelsa `unnest` jimgina noto'g'ri juftlashtirardi.
+    check("naqsh va guruh birga uzatiladi",
+          "%(naqshlar)s::text[], %(guruhlar)s::int[]" in q)
 
 def test_product_matches():
     """Moslik qoidasi: KOD birlamchi, KATEGORIYA moslik EMAS, so'z chegarasi.
@@ -907,6 +1000,7 @@ def main() -> int:
     test_prior()
     test_query_matn()
     test_leksik_naqsh()
+    test_leksik_sql_shakli()
     test_product_matches()
     test_atribut()
     test_sxema_qulflari()
