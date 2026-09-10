@@ -3970,6 +3970,78 @@ def test_baza_holat():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+# =====================================================================
+# 8s. SOZLAMA TEKSHIRUVI — QIYMAT KO'RSATMASDAN
+# =====================================================================
+def test_sozlama_tekshiruvi():
+    bolim("8s. `--sozlama`: to'liqligini aytadi, qiymatni AYTMAYDI")
+    z = oqi("bin", "zaxira-uzoq-sinov.sh")
+    check("`--sozlama` rejimi bor", "--sozlama" in z)
+    # Chiqishda faqat NOM va ha/yo'q. Qiymat bosiladigan yagona
+    # yo'l `$v` ni echo qilish bo'lardi -- u yo'qligi tekshiriladi.
+    check("qiymat bosilmaydi", 'echo "$v"' not in _izohsiz(z))
+
+    bash = _mashq_bash()
+    if not bash:
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+    baza = tempfile.mkdtemp(prefix="tenderai_sz_")
+    try:
+        N = chr(10)
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        idsh = os.path.join(qutі, "id")
+        io.open(idsh, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N
+            + '[ "$1" = "-u" ] && echo 0 || exec /usr/bin/id "$@"' + N)
+        os.chmod(idsh, 0o755)
+        conf = os.path.join(baza, "brc.conf")
+        SIR_ID, SIR_KEY = "ZZSIRKEYID991", "ZZSIRSECRET772"
+
+        def yur(matn):
+            io.open(conf, "w", encoding="utf-8", newline=N).write(matn)
+            e = dict(os.environ)
+            e["TENDER_BACKUP_REMOTE_CONF"] = _posix_yol(bash, conf)
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 _posix_yol(bash, qutі),
+                 "deploy/bin/zaxira-uzoq-sinov.sh", "production", "--sozlama"],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=60)
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+        toliq = N.join([
+            "USUL=s3",
+            "S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com",
+            "S3_REGION=eu-central-003", "S3_BUCKET=zzb",
+            "S3_PREFIX=tenderai",
+            "S3_ACCESS_KEY_ID=" + SIR_ID,
+            "S3_SECRET_ACCESS_KEY=" + SIR_KEY, ""])
+        kod, chiq = yur(toliq)
+        check("to'liq sozlama -> kod 0", kod == 0, f"kod={kod}")
+        for m in ("endpoint_present=ha", "region_present=ha",
+                  "bucket_present=ha", "prefix_present=ha",
+                  "access_key_present=ha", "secret_key_present=ha"):
+            check(f"ko'rsatiladi: {m}", m in chiq)
+        # ENG MUHIM SHART.
+        sir_bor = SIR_ID in chiq or SIR_KEY in chiq
+        check("SIR CHIQMADI", not sir_bor,
+              "sir chiqishda TOPILDI!" if sir_bor else "")
+
+        # Yetishmovchilik SANALADI va HTTPS emasligi ushlanadi.
+        kod, chiq = yur(N.join([
+            "USUL=s3", "S3_ENDPOINT=http://s3.example.com",
+            "S3_BUCKET=zzb", "S3_ACCESS_KEY_ID=" + SIR_ID, ""]))
+        check("yetishmovchilikda kod != 0", kod != 0, f"kod={kod}")
+        check("secret_key yo'qligi ko'rinadi", "secret_key_present=yo'q" in chiq)
+        # HTTPS BO'LMAGAN endpoint zonddan OLDIN ushlansin: uni
+        # keyin bilish shifrlanmagan kanalga urinishdan keyin
+        # bo'lardi.
+        check("HTTPS emasligi ushlanadi", "endpoint_https=YO'Q" in chiq)
+        check("bu holatda ham sir chiqmadi", SIR_ID not in chiq)
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -4024,6 +4096,7 @@ def main():
     test_dsn_tashxisi()
     test_zaxira_yangiligi_va_isbot()
     test_baza_holat()
+    test_sozlama_tekshiruvi()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

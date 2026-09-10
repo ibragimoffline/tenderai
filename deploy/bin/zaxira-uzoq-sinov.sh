@@ -29,9 +29,66 @@
 # =============================================================================
 set -euo pipefail
 
-MUHIT="${1:?foydalanish: zaxira-uzoq-sinov.sh <staging|production>}"
+MUHIT="${1:?foydalanish: zaxira-uzoq-sinov.sh <staging|production> [--sozlama]}"
 case "$MUHIT" in staging|production) ;; *) echo "Noma'lum muhit: $MUHIT" >&2; exit 2 ;; esac
 [ "$(id -u)" = "0" ] || { echo "root kerak" >&2; exit 1; }
+
+# --- `--sozlama`: FAQAT TO'LDIRILGANLIGINI aytadi ----------------------------
+# NEGA ALOHIDA REJIM. Sozlama fayli `0600 root:root` va uni
+# ko'rish uchun root bo'lish kerak. Lekin "to'ldirilganmi?" degan
+# savolga javob berish uchun QIYMATLARNI ko'rish SHART EMAS --
+# faqat bo'sh yoki bo'sh emasligi.
+#
+# Bu farq muhim: sozlashda yordam berayotgan odam (yoki asbob)
+# qiymatlarni KO'RMASLIGI kerak. Chiqishda maydon NOMI va
+# `ha`/`yo'q` dan boshqa hech narsa yo'q.
+if [ "${2:-}" = "--sozlama" ]; then
+    SZ="${TENDER_BACKUP_REMOTE_CONF:-/etc/tenderai/backup-remote.conf}"
+    if [ ! -f "$SZ" ]; then
+        echo "sozlama_fayli=YO'Q ($SZ)"
+        exit 1
+    fi
+    echo "sozlama_fayli   : $SZ"
+    echo "egasi/rejim     : $(stat -c '%U:%G %a' "$SZ")"
+    set -a
+    # shellcheck disable=SC1090
+    . "$SZ"
+    set +a
+    YETISHMAYDI=0
+    bor() {
+        eval "v=\${${1}:-}"
+        if [ -n "$v" ]; then echo "${2}=ha"
+        else echo "${2}=yo'q"; YETISHMAYDI=$((YETISHMAYDI+1)); fi
+    }
+    echo "usul            : ${USUL:-(berilmagan -> ssh)}"
+    if [ "${USUL:-ssh}" = "s3" ]; then
+        bor S3_ENDPOINT          endpoint_present
+        bor S3_REGION            region_present
+        bor S3_BUCKET            bucket_present
+        bor S3_PREFIX            prefix_present
+        bor S3_ACCESS_KEY_ID     access_key_present
+        bor S3_SECRET_ACCESS_KEY secret_key_present
+        # ENDPOINT SHAKLI — QIYMATSIZ. HTTPS emasligi sozlash
+        # xatosi va uni zonddan OLDIN bilish arzonroq.
+        case "${S3_ENDPOINT:-}" in
+            https://*) echo "endpoint_https=ha" ;;
+            "")        echo "endpoint_https=(berilmagan)" ;;
+            *)         echo "endpoint_https=YO'Q"; YETISHMAYDI=$((YETISHMAYDI+1)) ;;
+        esac
+    else
+        bor UZOQ_HOST  host_present
+        bor UZOQ_USER  user_present
+        bor UZOQ_YOL   yol_present
+        bor SSH_KALIT  kalit_present
+    fi
+    echo
+    if [ "$YETISHMAYDI" -eq 0 ]; then
+        echo "NATIJA: sozlama TO'LIQ"
+        exit 0
+    fi
+    echo "NATIJA: ${YETISHMAYDI} ta maydon yetishmaydi"
+    exit 1
+fi
 
 ENVFILE="${TENDERAI_ENVFILE:-/etc/tenderai/${MUHIT}.env}"
 ORAMA="${TENDER_BACKUP_ORAMA:-/usr/local/sbin/tender-backup-remote}"
