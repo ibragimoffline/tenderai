@@ -4063,6 +4063,86 @@ def test_sozlama_tekshiruvi():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+# =====================================================================
+# 8t. ZAXIRA O'RAMASI — YOPIQ AMALLAR RO'YXATI
+# =====================================================================
+def test_zaxira_oramasi():
+    bolim("8t. `tender-zaxira`: yopiq amallar, umumiy o'tkazgich yo'q")
+    w = oqi("bin", "tender-zaxira.namuna")
+    kod = _izohsiz(w)
+    check("o'rama mavjud", bool(w))
+    # UMUMIY O'TKAZGICH BO'LMASIN: o'rama root nomidan yuradi.
+    check("`\"$@\"` uzatilmaydi", '"$@"' not in kod)
+    check("ixtiyoriy skript nomi qabul qilinmaydi",
+          '$B/$' not in kod and 'exec "$1"' not in kod)
+    check("aynan IKKI argument", '[ "$#" -eq 2 ]' in kod)
+    check("root talab qilinadi", 'id -u' in kod)
+    for a in ("sozlama", "zond", "zaxira", "tiklash-uzoq", "holat"):
+        check(f"amal e'lon qilingan: {a}", a in kod)
+    check("muhit ikkitadan biri", 'staging|production' in kod)
+    # KOD KO'ZGUDAN: yurgizilgan kod qaysi kommit ekani aniq bo'lsin.
+    check("kod bare repodan olinadi",
+          "git --git-dir" in kod and "archive" in kod)
+    check("joylashtirmaydi", "deploy.sh" not in kod)
+    check("migratsiya qo'llamaydi", "migratsiya.py" not in kod)
+
+    bash = _mashq_bash()
+    if not bash:
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+    def yur(*argv):
+        r = subprocess.run([bash, os.path.join(D, "bin", "tender-zaxira.namuna"),
+                            *argv], capture_output=True, text=True, timeout=60)
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+    # HAR QO'RIQCHI ALOHIDA yurgiziladi: bittasi ishlab qolgani
+    # ishlamasa ham "o'rama tekshiradi" degan xulosa chiqardi.
+    for nom, argv, belgi in (
+            ("uchta argument", ("zond", "production", "zz"), "IKKITA argument"),
+            ("noma'lum amal", ("zzyoq", "production"), "Noma'lum amal"),
+            ("noma'lum muhit", ("zond", "zzmuhit"), "Noma'lum muhit"),
+            ("amal o'rniga yo'l", ("../bin/sh", "production"), "Noma'lum amal"),
+    ):
+        k, chiq = yur(*argv)
+        check(f"RAD ETADI: {nom}", k != 0 and belgi in chiq, chiq.strip()[-70:])
+
+
+# =====================================================================
+# 8u. UZOQDAN TIKLASH — MAHALLIY NUSXA ISHLATILMAYDI
+# =====================================================================
+def test_uzoqdan_tiklash():
+    bolim("8u. `uzoqdan-tiklash.sh`: artefakt UZOQDAN olinadi")
+    u = oqi("bin", "uzoqdan-tiklash.sh")
+    kod = _izohsiz(u)
+    check("skript mavjud", bool(u))
+    # KALITLAR BITTA JOYDA: `rclone` bu yerda chaqirilmaydi.
+    check("`rclone` to'g'ridan chaqirilmaydi", "rclone" not in kod)
+    check("o'rama orqali ro'yxat olinadi", "--royxat" in kod)
+    check("o'rama orqali olib kelinadi", "--olib-kel" in kod)
+    # CHECKSUM HAM UZOQDAN: mahalliy checksumga solishtirish
+    # "mahalliy fayl mahalliy checksumga mos" degan ma'nosiz
+    # xulosa bo'lardi.
+    check("checksum fayli ham UZOQDAN olinadi",
+          'olib checksums' in kod)
+    check("checksum SOLISHTIRILADI", 'kutilgan" = "$hozirgi' in kod)
+    check("mos kelmasa TO'XTAYDI", "CHECKSUM MOS EMAS" in u)
+    # PROVENANS: dalil tekshirib bo'ladigan bo'lsin.
+    for m in ('TIKLASH_MANBA="uzoq"', 'TIKLASH_BACKEND="s3"',
+              'TIKLASH_PROVAYDER="backblaze-b2"', "TIKLASH_OBYEKTLAR="):
+        check(f"provenans yoziladi: {m.split('=')[0]}", m in kod)
+    # AJRATILGAN JOY: yuklab olingan fayl zaxira katalogiga ham,
+    # reliz daraxtiga ham tushmasin.
+    check("ajratilgan tiklash ildizi", "tenderai-tiklash" in kod)
+    check("berilgan zaxira bilan tiklanadi", "TIKLASH_ZAXIRA=" in kod)
+    # DUMP MAJBURIY, arxiv ixtiyoriy (hali fayl yuklanmagan bo'lishi
+    # mumkin) -- lekin arxiv BORDA uning checksumi MAJBURIY.
+    check("dump majburiy", 'olib db        "$DB_NOM"                  ha' in kod
+          or 'olib db' in kod and ' ha' in kod)
+    r = oqi("bin", "restore-test.sh")
+    check("restore-test berilgan zaxirani qabul qiladi",
+          "TIKLASH_ZAXIRA" in r)
+    check("dalilga manba yoziladi", 'echo "manba=' in r)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -4118,6 +4198,8 @@ def main():
     test_zaxira_yangiligi_va_isbot()
     test_baza_holat()
     test_sozlama_tekshiruvi()
+    test_zaxira_oramasi()
+    test_uzoqdan_tiklash()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)
