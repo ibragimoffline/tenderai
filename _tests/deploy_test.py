@@ -3843,6 +3843,22 @@ def test_zaxira_yangiligi_va_isbot():
         chiq = yurgiz("production", e5, c5, b5)
         check("E: 9 kunlik isbot TO'SADI", "tiklash isboti ESKI" in chiq)
 
+        # --- H) ISBOT O'QILMASA -> "MAHALLIY" DEB SANALMASIN ---
+        # O'LCHANGAN NUQSON (2026-09-10): fayl `root:root` edi,
+        # tekshiruv `tenderai` nomidan yurdi va O'QIY OLMADI.
+        # Xulosa "mashq MAHALLIY nusxadan olingan" bo'ldi -- ya'ni
+        # asbob O'LCHAMAGAN narsa haqida DA'VO qildi.
+        b8, e8, c8 = holat("h")
+        isbot8 = os.path.join(zx_yolі(b8, "production"), ".tiklash-isboti")
+        os.chmod(isbot8, 0o000)
+        chiq = yurgiz("production", e8, c8, b8)
+        os.chmod(isbot8, 0o640)
+        check("H: o'qilmagan isbot 'MAHALLIY' deb sanalmaydi",
+              "MAHALLIY nusxadan olingan" not in chiq,
+              [q for q in chiq.splitlines() if "MAHALLIY" in q][:1])
+        check("H: huquq muammosi ANIQ aytiladi",
+              "O'QILMADI (huquq)" in chiq)
+
         # --- G) CHECKSUM TASDIG'I YO'Q -> TO'SIQ ---
         # "Nusxa ko'chdi" degan xulosa "nusxa BUTUN" degani emas.
         # Checksum tasdig'isiz isbot nimaning tiklanganini aytmaydi.
@@ -4264,6 +4280,11 @@ def test_uzoqdan_tiklash():
     check("restore-test berilgan zaxirani qabul qiladi",
           "TIKLASH_ZAXIRA" in r)
     check("dalilga manba yoziladi", 'echo "manba=' in r)
+    # ISBOT FAYLI ZAXIRA KATALOGI BILAN BIR XIL EGALIKDA.
+    # Root nomidan yurgizilganda `root:root` bo'lib qolardi va
+    # `tenderai` nomidan yuradigan joylashtirish uni o'qiy olmasdi.
+    check("isbot egaligi katalogdan nusxalanadi",
+          'chown --reference="$KATALOG" "$ISBOT"' in r)
 
 
 def main():

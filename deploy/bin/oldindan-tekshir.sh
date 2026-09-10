@@ -592,6 +592,18 @@ if [ -d "$ZAXIRA_YOL" ]; then
             ogoh "tiklash isboti yo'q ($ISBOT_FAYL)"
         fi
     else
+        # O'QIB BO'LMAGANI "MAHALLIY" DEGANI EMAS.
+        #
+        # O'LCHANGAN NUQSON (2026-09-10): fayl `root:root` edi,
+        # tekshiruv esa `tenderai` nomidan yurdi. `sed` hech nima
+        # qaytarmadi va xulosa "mashq MAHALLIY nusxadan olingan"
+        # bo'ldi -- ya'ni asbob O'LCHAMAGAN narsa haqida DA'VO
+        # qildi va operatorni noto'g'ri joyga yubordi.
+        if [ ! -r "$ISBOT_FAYL" ]; then
+            tosiq "tiklash isboti O'QILMADI (huquq): $ISBOT_FAYL
+   Tekshiruv $(id -un) nomidan yuradi. Fayl egaligi zaxira
+   katalogi bilan bir xil bo'lishi kerak."
+        else
         I_YOSH_KUN=$(( ( $(date +%s) - $(stat -c %Y "$ISBOT_FAYL") ) / 86400 ))
         I_UZOQ="$(sed -n 's/^uzoq=//p' "$ISBOT_FAYL" | head -1)"
         I_RTO="$(sed -n 's/^rto_s=//p' "$ISBOT_FAYL" | head -1)"
@@ -618,6 +630,7 @@ if [ -d "$ZAXIRA_YOL" ]; then
         else
             ok "tiklash isboti: ${I_YOSH_KUN} kun oldin, RTO=${I_RTO:-?}s,
              uzoq=${I_UZOQ:-?}, backend=${I_BACKEND:--}, checksum=${I_CHK:-?}"
+        fi
         fi
     fi
 fi

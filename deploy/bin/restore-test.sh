@@ -236,6 +236,17 @@ ISBOT="${KATALOG:-$(dirname "$ZAXIRA")}/.tiklash-isboti"
         "$(readlink -f "${ILDIZ:-/opt/tenderai/$MUHIT}/current" 2>/dev/null)/.kuzatilgan-manifest" \
         2>/dev/null || echo '-')"
 } > "$ISBOT"
+# EGALIK ZAXIRA KATALOGI BILAN BIR XIL.
+#
+# O'LCHANGAN NUQSON (2026-09-10). Mashq root nomidan yurganda
+# isbot fayli `root:root` bo'lib qolardi. Joylashtirish esa
+# `tenderai` nomidan yuradi va faylni O'QIY OLMASDI -- natijada
+# preflight uni "mahalliy mashq" deb sanab, relizni TO'SARDI.
+#
+# Root sifatida qo'lda yurgizilganda tekshiruv o'tardi, haqiqiy
+# joylashtiruvda esa yiqilardi -- ya'ni nuqson faqat HAQIQIY
+# yo'lda ko'rinardi.
+chown --reference="$KATALOG" "$ISBOT" 2>/dev/null || true
 chmod 640 "$ISBOT" 2>/dev/null || true
 # JURNAL FAYL BILAN BIR XIL AYTSIN. Ilgari bu yerda XOM
 # `TIKLASH_MANBA` bosilardi va jurnalda `uzoq=uzoq` chiqib,
