@@ -635,6 +635,47 @@ if [ -d "$ZAXIRA_YOL" ]; then
     fi
 fi
 
+# --- O'RNATILGAN O'RAMALAR ESKIRMASIN --------------------------------------
+# NEGA. `/usr/local/sbin/tender-*` o'ramalari ko'zgudan AVTOMATIK
+# yangilanmaydi -- ular alohida nusxa. Ya'ni repozitoriyda tuzatilgan
+# nuqson serverda TURAVERADI va buni faqat sha256 ni qo'lda
+# solishtirib bilamiz.
+#
+# O'LCHANGAN (2026-09-10): bitta kunda UCH marta shu sabab bilan
+# to'xtadik -- o'rama eski bo'lgani uchun tuzatish ta'sir qilmadi,
+# va har safar sabab boshqa joyda qidirildi.
+#
+# ISHLAB CHIQARISHDA TO'SIQ, staging da ogohlantirish: staging --
+# aynan o'ramalar tahrirlanadigan joy, u yerda har farq to'sib
+# tursa ish to'xtardi.
+#
+# FAQAT O'RNATILGANLARI solishtiriladi: o'rnatilmagan o'rama
+# "siljish" emas -- u ataylab yo'q bo'lishi mumkin.
+bolim "7. O'RNATILGAN O'RAMALAR"
+SBIN="${TENDERAI_SBIN:-/usr/local/sbin}"
+BU_KATALOG="$(cd "$(dirname "$0")" && pwd)"
+ORAMA_TOPILDI=0
+for _n in "$BU_KATALOG"/*.namuna; do
+    [ -e "$_n" ] || continue
+    _nom="$(basename "$_n" .namuna)"
+    _o="${SBIN}/${_nom}"
+    [ -f "$_o" ] || continue
+    ORAMA_TOPILDI=$((ORAMA_TOPILDI+1))
+    _a="$(sha256sum "$_n" | cut -d' ' -f1)"
+    _b="$(sha256sum "$_o" | cut -d' ' -f1)"
+    if [ "$_a" = "$_b" ]; then
+        ok "${_nom}: nomzod bilan mos"
+    elif [ "$MUHIT" = "production" ]; then
+        tosiq "${_nom} ESKIRGAN: o'rnatilgan nusxa nomzoddan farq qiladi
+   o'rnatilgan: ${_b:0:16}…
+   nomzod     : ${_a:0:16}…
+   Yangilang:  install -o root -g root -m 0755 <nomzod>/${_nom}.namuna ${_o}"
+    else
+        ogoh "${_nom} eskirgan (o'rnatilgan ${_b:0:16}… != nomzod ${_a:0:16}…)"
+    fi
+done
+[ "$ORAMA_TOPILDI" -gt 0 ] || yoq "o'rnatilgan o'rama topilmadi ($SBIN)"
+
 # Nosozlik xabari hech kimga bormasa, `systemd` xizmatni qayta
 # ko'taradi va buni HECH KIM BILMAYDI (docs/deploy.md §12c).
 if ! bor ALERT_TELEGRAM_CHAT && ! bor ALERT_EMAIL; then

@@ -1212,6 +1212,8 @@ def test_mashq():
 
         pmuhit = {"TENDERAI_USER": _joriy_user(),
                   "TENDERAI_ROOT": _joriy_user(),
+                  "TENDERAI_SBIN": _posix_yol(
+                      bash, os.path.join(baza, "sbin-yoq")),
                   "TENDERAI_ILDIZ": _posix_yol(bash, pildiz),
                   "TENDERAI_STAGING_ILDIZ": _posix_yol(bash, ildiz),
                   "TENDERAI_ENVFILE": _posix_yol(bash, penv),
@@ -1541,6 +1543,12 @@ def test_oldindan_tekshiruv():
             # muhitdan olinadi va standart qiymati o'zgarmaydi.
             e["TENDERAI_USER"] = _joriy_user()
             e["TENDERAI_ROOT"] = _joriy_user()
+            # O'RNATILGAN O'RAMALAR MASHQDA TEKSHIRILMASIN.
+            # Haqiqiy `/usr/local/sbin` mezbonning holati -- u
+            # repozitoriy bilan farq qilishi MUMKIN va bu sinov
+            # emas, MEZBON masalasi. Ajratilgan bo'sh katalog.
+            e["TENDERAI_SBIN"] = _posix_yol(
+                bash, os.path.join(os.path.dirname(envfile), "sbin"))
             yol = shim_p
             r = subprocess.run(
                 [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
@@ -4296,6 +4304,83 @@ def test_uzoqdan_tiklash():
           'chown --reference="$KATALOG" "$ISBOT"' in r)
 
 
+# =====================================================================
+# 8v. O'RNATILGAN O'RAMALAR ESKIRMASIN
+# =====================================================================
+def test_orama_siljishi():
+    bolim("8v. `/usr/local/sbin/tender-*` nomzod bilan mos bo'lsin")
+    o = oqi("bin", "oldindan-tekshir.sh")
+    check("tekshiruv bor", "O'RNATILGAN O'RAMALAR" in o)
+    check("faqat O'RNATILGANLARI solishtiriladi", '[ -f "$_o" ] || continue' in o)
+
+    bash = _mashq_bash()
+    if not bash:
+        check("mashq muhiti bor", False, "YURGIZILMADI")
+        return
+
+    baza = tempfile.mkdtemp(prefix="tenderai_orama_")
+    try:
+        N = chr(10)
+        qutі = os.path.join(baza, "shim")
+        os.makedirs(qutі, exist_ok=True)
+        psql = os.path.join(qutі, "psql")
+        io.open(psql, "w", encoding="utf-8", newline=N).write(
+            "#!/bin/sh" + N + "echo 1" + N + "exit 0" + N)
+        os.chmod(psql, 0o755)
+
+        def yur(muhit, sbin, b):
+            ey, cy = _oldindan_qur(
+                b, lambda x: _posix_yol(bash, x),
+                lambda t: t.replace("APP_ENV=production", f"APP_ENV={muhit}"))
+            e = dict(os.environ)
+            e["TENDERAI_ENVFILE"] = _posix_yol(bash, ey)
+            e["TENDERAI_CADDYFILE"] = _posix_yol(bash, cy)
+            e["TENDERAI_ILDIZ"] = _posix_yol(bash, os.path.join(b, "ildiz"))
+            e["TENDERAI_USER"] = _joriy_user()
+            e["TENDERAI_ROOT"] = _joriy_user()
+            e["TENDERAI_SBIN"] = _posix_yol(bash, sbin)
+            r = subprocess.run(
+                [bash, "-c", 'PATH="$1:$PATH"; shift; exec "$@"', "_",
+                 _posix_yol(bash, qutі),
+                 "deploy/bin/oldindan-tekshir.sh", muhit],
+                cwd=ROOT, env=e, capture_output=True, text=True, timeout=180)
+            return (r.stdout or "") + (r.stderr or "")
+
+        # Repozitoriydagi HAQIQIY `.namuna` dan nusxa -> MOS holat.
+        namunalar = [f for f in os.listdir(os.path.join(D, "bin"))
+                     if f.endswith(".namuna")]
+        check("repozitoriyda `.namuna` bor", bool(namunalar), str(namunalar[:2]))
+        if not namunalar:
+            return
+        nom = namunalar[0]
+        sbin_ok = os.path.join(baza, "sbin-ok")
+        os.makedirs(sbin_ok, exist_ok=True)
+        shutil.copy(os.path.join(D, "bin", nom),
+                    os.path.join(sbin_ok, nom[:-len(".namuna")]))
+        chiq = yur("production", sbin_ok, os.path.join(baza, "a"))
+        check("MOS o'rama to'smaydi",
+              "nomzod bilan mos" in chiq and "ESKIRGAN" not in chiq,
+              [q for q in chiq.splitlines() if "orama" in q.lower()][:1])
+
+        # ESKIRGAN nusxa -> production da TO'SIQ.
+        sbin_esk = os.path.join(baza, "sbin-eski")
+        os.makedirs(sbin_esk, exist_ok=True)
+        io.open(os.path.join(sbin_esk, nom[:-len(".namuna")]), "w",
+                encoding="utf-8").write("#!/bin/sh\n# eskirgan nusxa\n")
+        chiq = yur("production", sbin_esk, os.path.join(baza, "b"))
+        check("ESKIRGAN o'rama production da TO'SADI", "ESKIRGAN" in chiq,
+              [q for q in chiq.splitlines() if "ESKIRGAN" in q][:1])
+        check("yangilash buyrug'i ko'rsatiladi", "install -o root" in chiq)
+
+        # Staging da faqat OGOHLANTIRISH: o'ramalar aynan o'sha
+        # yerda tahrirlanadi, har farq to'sib tursa ish to'xtardi.
+        chiq = yur("staging", sbin_esk, os.path.join(baza, "c"))
+        check("staging da faqat OGOHLANTIRISH",
+              "eskirgan (o'rnatilgan" in chiq and "ESKIRGAN:" not in chiq)
+    finally:
+        shutil.rmtree(baza, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -4350,6 +4435,7 @@ def main():
     test_dsn_tashxisi()
     test_zaxira_yangiligi_va_isbot()
     test_baza_holat()
+    test_orama_siljishi()
     test_sozlama_tekshiruvi()
     test_zaxira_oramasi()
     test_uzoqdan_tiklash()
