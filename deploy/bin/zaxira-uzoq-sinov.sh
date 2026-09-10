@@ -117,6 +117,27 @@ if [ "${2:-}" = "--sozlama" ]; then
         bor UZOQ_USER  user_present
         bor UZOQ_YOL   yol_present
         bor_fayl SSH_KALIT kalit_present
+        # BOSHQA SHOXNING QIYMATLARI JIM QOLMASIN.
+        #
+        # O'LCHANGAN CHALG'ITISH (2026-09-10). Operator S3
+        # qiymatlarini kiritdi, lekin `USUL=` ni `ssh` da
+        # qoldirdi. Asbob faqat SSH shoxini tekshirdi va "namuna
+        # qiymatlari" dedi -- ya'ni BAJARILGAN ishni ko'rsatmadi
+        # va sabab noto'g'ri joyda qidirildi.
+        #
+        # Endi ikkinchi shox to'ldirilgan bo'lsa AYTILADI: xato
+        # sozlamada emas, TANLOVDA.
+        S3_BOR=0
+        for k in S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY; do
+            eval "v=\${${k}:-}"
+            [ -n "$v" ] && ! namuna_mi "$v" && S3_BOR=$((S3_BOR+1))
+        done
+        if [ "$S3_BOR" -gt 0 ]; then
+            echo
+            echo "DIQQAT: S3 maydonlaridan ${S3_BOR} tasi TO'LDIRILGAN,"
+            echo "        lekin USUL=ssh — o'rama SSH yo'lidan ketadi."
+            echo "        Tuzatish:  sed -i 's/^USUL=.*/USUL=s3/' $SZ"
+        fi
     fi
     echo
     if [ "$YETISHMAYDI" -eq 0 ]; then

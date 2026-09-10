@@ -4059,6 +4059,26 @@ def test_sozlama_tekshiruvi():
         # Mavjud bo'lmagan kalit fayli ham ushlanadi: yo'l
         # yozilgani fayl BORLIGINI anglatmaydi.
         check("yo'q kalit fayli ushlanadi", "FAYL_YO'Q" in chiq)
+
+        # --- BOSHQA SHOX TO'LDIRILGAN BO'LSA AYTILSIN ---
+        # O'LCHANGAN CHALG'ITISH: S3 qiymatlari kiritilgan, lekin
+        # `USUL=ssh` qolgan. Asbob faqat SSH shoxini tekshirib
+        # "namuna qiymatlari" dedi -- BAJARILGAN ishni ko'rsatmadi
+        # va sabab noto'g'ri joyda qidirildi.
+        kod, chiq = yur(N.join([
+            "USUL=ssh", "UZOQ_HOST=zaxira.example.uz",
+            "UZOQ_USER=zz", "UZOQ_YOL=/srv/zz",
+            "SSH_KALIT=/zz/yoq-kalit",
+            "S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com",
+            "S3_BUCKET=zzb",
+            "S3_ACCESS_KEY_ID=" + SIR_ID,
+            "S3_SECRET_ACCESS_KEY=" + SIR_KEY, ""]))
+        check("USUL=ssh bo'lsa-yu S3 to'ldirilgan bo'lsa AYTILADI",
+              "USUL=ssh — o'rama SSH yo'lidan ketadi" in chiq,
+              [q for q in chiq.splitlines() if "DIQQAT" in q][:1])
+        check("tuzatish buyrug'i ko'rsatiladi", "USUL=s3" in chiq)
+        check("bu holatda ham SIR CHIQMADI",
+              SIR_ID not in chiq and SIR_KEY not in chiq)
     finally:
         shutil.rmtree(baza, ignore_errors=True)
 
