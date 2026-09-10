@@ -11,7 +11,24 @@ OnFailure=tenderai-ogohlantirish@%i:%n.service
 
 [Service]
 Type=oneshot
-User=tenderai
+# ZAXIRA `root` NOMIDAN YURADI -- BU ATAYLAB.
+#
+# O'LCHANGAN NUQSON (2026-09-10). Ilgari `User=tenderai` edi va
+# `backup.sh` `pg_dump` uchun `sudo -u postgres` chaqirardi. Qo'lda
+# yurgizilganda ishlardi, TAYMER orqali esa YIQILARDI:
+#
+#     sudo: The "no new privileges" flag is set, which prevents sudo
+#           from running as root.
+#
+# Sabab quyidagi `NoNewPrivileges=true` -- u SUID ni YADRO
+# darajasida to'sadi. Ya'ni ikki sozlama bir-biriga zid edi va
+# buni faqat taymer yo'lida ko'rish mumkin.
+#
+# Tanlov: `NoNewPrivileges` ni olib tashlash EMAS (u qumdonning
+# asosi), balki `sudo` ni butunlay yo'q qilish. Zaxira `root`
+# nomidan yuradi va `backup.sh` chiqish fayllarini katalog egasiga
+# o'tkazadi (`chown --reference`).
+User=root
 Group=tenderai
 WorkingDirectory=/opt/tenderai/%i/current
 EnvironmentFile=/etc/tenderai/%i.env

@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender-AI + Tender ERP — 11-QADAM: nginx
+# =============================================================================
+#     sudo /home/ibragimoff/src/_server/bin/11-nginx.sh
+#
+# QAYTA YURGIZSA BO'LADI. Sertifikat OLINMAYDI — buni 12-certbot.sh
+# qiladi, DNS shu serverga kelgandan keyin.
+#
+# --- NEGA NGINX, loyihadagi Caddy EMAS ---------------------------------------
+# `tenderai/deploy/caddy/Caddyfile` bor va u yaxshi yozilgan. Lekin bu
+# serverda 80/443 portlarini nginx allaqachon egallagan: bu mashinada
+# BOSHQA loyiha ham turadi va uning bloklari certbot tomonidan
+# tahrirlangan. Ikkinchi jarayon o'sha portlarni OLOLMAYDI.
+#
+# Begona loyihaning domenlari bu yerda ATAYLAB yozilmagan --
+# repozitoriya ochiq va ular boshqa egasining infratuzilmasi.
+#
+# Caddy ni ko'tarish uchun nginx ni olib tashlash kerak bo'lardi —
+# ya'ni BOSHQA, ishlab turgan loyihaga tegish. Bu tender ishining
+# doirasidan tashqarida.
+#
+# --- IKKI ILOVA, IKKI XIL SHAKL ----------------------------------------------
+# TENDER-AI: statikani NGINX uzatadi, `/api/*` esa uvicorn ga ketadi.
+#   Ilova faqat API — u `frontend/dist` ni bilmaydi.
+#
+# TENDER ERP: HAMMASI uvicorn ga ketadi.
+#   `api/main.py` `frontend/dist` ni O'ZI uzatadi va `/api` prefiksini
+#   o'zi kesadi (`strip_api_prefix`). Bu loyihaning ongli qarori;
+#   nginx bu yerda faqat TLS tugatgichi va teskari proksi.
+#
+# --- STAGING TASHQARIGA CHIQMAYDI --------------------------------------------
+# Unga domen ajratilmagan. Blok `127.0.0.1` da tinglaydi — ya'ni unga
+# faqat SSH tunnel orqali kiriladi:
+#
+#     ssh -L 8091:127.0.0.1:8091 -L 8101:127.0.0.1:8101 <server>
+# =============================================================================
+set -euo pipefail
+
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0"; exit 1; }
+
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+
+# --- ACME uchun umumiy webroot ------------------------------------------------
+# Certbot `--webroot` bilan ishlaydi va bu 80-portdagi bloklarni
+# certbot O'ZI tahrirlashidan ko'ra bashorat qilinadigan.
+install -d -o root -g root -m 0755 /var/www/certbot
+
+# --- TENDER-AI (production) — zynq.uz ----------------------------------------
+cat > /etc/nginx/sites-available/tenderai <<'NGINX'
+# Tender-AI — production. Manba: _server/bin/11-nginx.sh
+#
+# Statikani NGINX uzatadi, API uvicorn da (127.0.0.1:8010).
+server {
+    listen 80;
+    listen [::]:80;
+    server_name zynq.uz www.zynq.uz;
+
+    # ACME — sertifikat yangilanishi HTTPS ga o'tgandan keyin ham shu
+    # yerdan o'tadi, shuning uchun blok DOIMIY.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://zynq.uz$request_uri;
+    }
+}
+
+server {
+    # Sertifikat olingunga qadar bu blok YO'Q. `12-certbot.sh` uni
+    # `--nginx` bilan qo'shadi va shu faylni tahrirlaydi.
+    listen 8090;
+    server_name zynq.uz www.zynq.uz;
+
+    # --- API ---------------------------------------------------------------
+    # `proxy_pass` OXIRIDA SLESH BOR va bu MUHIM: u `/api/` prefiksini
+    # KESADI. Ilova marshrutlari `/tenders`, `/health` ko'rinishida —
+    # prefiks kesilmasa hammasi 404 bo'lardi.
+    location /api/ {
+        proxy_pass http://127.0.0.1:8010/;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    # --- Statik qurilma ----------------------------------------------------
+    # `current` — RELIZGA simvolik havola. nginx uni HAR SO'ROVDA
+    # yechadi, ya'ni joylashtirishdan keyin qayta yuklash SHART EMAS.
+    root /opt/tenderai/production/current/frontend/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # --- KESH: `expires`, `add_header` EMAS -----------------------------------
+    # `add_header` ICHKI blokda MEROSXO'R SARLAVHALARNI BEKOR QILADI —
+    # nginx ularni qo'shmaydi, ALMASHTIRADI. O'lchandi (2026-09-04):
+    # server darajasidagi HSTS javobda umuman yo'q edi, chunki har
+    # so'rov `try_files` orqali `location = /index.html` ga tushadi va
+    # o'sha blokdagi `add_header Cache-Control` butun to'plamni
+    # o'chirardi. ERP da esa HSTS bor edi — u yerda ichki `add_header`
+    # yo'q. Ya'ni xatoni faqat yonma-yon qo'yganda ko'rish mumkin.
+    #
+    # `expires` bu tuzoqqa tushmaydi: u alohida mexanizm va merosga
+    # tegmaydi. Yo'qotgan yagona narsa — `immutable` bayrog'i; uning
+    # o'rniga xesh nomli fayllar uchun bir yillik `max-age` qoladi.
+    location /assets/ {
+        expires 1y;
+    }
+    # `-1` -> `Cache-Control: no-cache` (har safar qayta tekshiriladi).
+    # SPA uchun aynan shu kerak: aks holda brauzer eski qurilmaga
+    # ishora qiluvchi `index.html` ni ushlab qolardi.
+    location = /index.html {
+        expires -1;
+    }
+
+    client_max_body_size 32m;
+}
+NGINX
+
+# --- TENDER-AI (staging) — faqat mahalliy -------------------------------------
+cat > /etc/nginx/sites-available/tenderai-staging <<'NGINX'
+# Tender-AI — staging. FAQAT MAHALLIY (SSH tunnel).
+server {
+    listen 127.0.0.1:8091;
+    server_name _;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8011/;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    root /opt/tenderai/staging/current/frontend/dist;
+    index index.html;
+    location / { try_files $uri $uri/ /index.html; }
+    # `add_header` EMAS — yuqoridagi izohga qarang (meros bekor qilinadi).
+    location = /index.html { expires -1; }
+
+    client_max_body_size 32m;
+}
+NGINX
+
+# --- TENDER ERP (production) — erp.zynq.uz ------------------------------------
+cat > /etc/nginx/sites-available/tendererp <<'NGINX'
+# Tender ERP — production. Manba: _server/bin/11-nginx.sh
+#
+# HAMMASI uvicorn ga ketadi: ilova statikani ham, `/api` prefiksini
+# ham O'ZI boshqaradi (`api/main.py`: strip_api_prefix).
+server {
+    listen 80;
+    listen [::]:80;
+    server_name erp.zynq.uz;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://erp.zynq.uz$request_uri;
+    }
+}
+
+server {
+    listen 8190;
+    server_name erp.zynq.uz;
+
+    location / {
+        proxy_pass http://127.0.0.1:8100;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    client_max_body_size 32m;
+}
+NGINX
+
+for S in tenderai tenderai-staging tendererp; do
+    ln -sfn "/etc/nginx/sites-available/${S}" "/etc/nginx/sites-enabled/${S}"
+    log "yoqildi: ${S}"
+done
+
+nginx -t
+systemctl reload nginx
+log "nginx qayta yuklandi"
+
+echo
+log "11-QADAM TUGADI."
+log "DIQQAT: 8090/8190 portlari VAQTINCHA — sertifikat olingach"
+log "12-certbot.sh ularni 443 ga ko'chiradi."
+log "Hozircha mahalliy tekshiruv:"
+echo "  curl -s -H 'Host: zynq.uz'     http://127.0.0.1:8090/ | head -5"
+echo "  curl -s -H 'Host: erp.zynq.uz' http://127.0.0.1:8190/ | head -5"

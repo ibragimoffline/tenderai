@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender-AI — KOMPANIYA hisobini yaratish
+# =============================================================================
+#     sudo .../10-kompaniya.sh <staging|production> <login> "<Kompaniya nomi>"
+#     sudo .../10-kompaniya.sh staging --list
+#
+# Parol INTERAKTIV so'raladi (`getpass`): u ekranda ko'rinmaydi va
+# buyruq tarixiga tushmaydi. Shuning uchun bu skriptni ODAM yurgizadi.
+#
+# --- NEGA KERAK --------------------------------------------------------------
+# Migratsiya `0032_multitenant` ATAYLAB to'xtaydi:
+#
+#     Bu patch mavjud ma'lumotni QAYSI kompaniyaga biriktirishni
+#     bilishi kerak va buni FAOL `company_account` dan oladi.
+#     Hozir faol hisob YO'Q.
+#
+# Bu nuqson emas — qo'riqchi. Patch o'z izohida yozgan: eng kichik `id`
+# ni avtomatik tanlash O'CHIRILGAN SINOV hisobiga tushishi va butun
+# kompaniya ma'lumotini noto'g'ri egaga biriktirishi mumkin edi.
+#
+# Hisob yaratilgach `deploy` shu joydan DAVOM ETADI — avvalgi 31
+# migratsiya jurnalda yozilgan va qayta yurmaydi.
+#
+# --- NEGA KO'ZGUDAN, ish nusxasidan emas -------------------------------------
+# `tenderai` — `nologin` xizmat foydalanuvchisi va u `/home/ibragimoff`
+# ni o'qiy olmaydi (0750). Kod `deploy.sh` dagi bilan bir xil manbadan
+# olinadi: bare repozitoriyadan `git archive`. Ya'ni bu yerda yuradigan
+# kod joylashtiriladigan kod bilan AYNI.
+#
+# --- VENV KESHLANADI ---------------------------------------------------------
+# `/opt/tenderai/var/admin-venv` — ma'muriy CLI uchun. Har chaqiruvda
+# qayta qurish ~40 s ketardi va bu skript bir necha marta yuriladi
+# (`--list`, parol almashtirish).
+# =============================================================================
+set -euo pipefail
+
+MUHIT="${1:?foydalanish: 10-kompaniya.sh <staging|production> <login> \"<nom>\"}"
+shift
+case "$MUHIT" in staging|production) ;; *) echo "Noma'lum muhit: $MUHIT"; exit 2 ;; esac
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0 $MUHIT $*"; exit 1; }
+
+REPO=/opt/tenderai/repo.git
+ENVFILE="/etc/tenderai/${MUHIT}.env"
+VENV=/opt/tenderai/var/admin-venv
+REF="${TENDERAI_REF:-main}"
+
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+[ -f "$ENVFILE" ] || { echo "XATO: $ENVFILE yo'q"; exit 1; }
+
+# --- Kodni ko'zgudan olamiz ---------------------------------------------------
+ISH="$(mktemp -d)"
+trap 'rm -rf "$ISH"' EXIT
+sudo -u tenderai git --git-dir="$REPO" fetch --prune --quiet origin
+sudo -u tenderai git --git-dir="$REPO" archive "$REF" | tar -x -C "$ISH"
+chown -R tenderai:tenderai "$ISH"
+log "kod olindi: $REF"
+
+# --- Venv (keshlangan) --------------------------------------------------------
+if [ ! -x "${VENV}/bin/python" ]; then
+    install -d -o tenderai -g tenderai -m 0755 /opt/tenderai/var
+    sudo -u tenderai python3 -m venv "$VENV"
+    sudo -u tenderai "${VENV}/bin/pip" install --quiet --upgrade pip
+    sudo -u tenderai "${VENV}/bin/pip" install --quiet -r "${ISH}/requirements-api.txt"
+    log "admin-venv qurildi: $VENV"
+else
+    log "admin-venv bor: $VENV"
+fi
+
+# --- Muhit: VAQTINCHALIK `.env` -----------------------------------------------
+set -a
+# shellcheck disable=SC1090
+. "$ENVFILE"
+set +a
+
+# `sudo -E` bu tizimda ISHLAMAYDI:
+#
+#     sudo: preserving the entire environment is not supported, '-E' is ignored
+#
+# Ya'ni `XT_DB_DSN` bolaga yetib bormaydi va skript "baza manzili yo'q"
+# deb yiqiladi.
+#
+# `sudo -u tenderai env XT_DB_DSN="..."` HAM TANLANMADI: u holda DSN
+# (parol bilan birga) `ps` chiqishida — ya'ni mashinadagi HAR QANDAY
+# foydalanuvchiga ko'rinadi.
+#
+# `create_company.py` allaqachon `load_dotenv()` chaqiradi, shuning
+# uchun muhit fayli ish katalogiga `.env` bo'lib qo'yiladi: 0600,
+# egasi `tenderai`, va yuqoridagi `trap` uni kod nusxasi bilan birga
+# o'chiradi. Sir jarayonlar ro'yxatiga ham, doimiy faylga ham tushmaydi.
+#
+# --- QAYSI ROL BILAN: EGASI, ILOVA EMAS --------------------------------------
+# `create_company.py` `XT_DB_DSN` ni o'qiydi, ya'ni standart holda ILOVA
+# roli (`tai_service`) bilan ulanadi. Bu yerda u ISHLAMAYDI:
+#
+#     Auth jadvallari yo'q. Avval: ... schema_patch_auth_2.sql
+#
+# Xabar CHALG'ITUVCHI — jadval BOR (`0025_auth_2` qo'llangan). Uni
+# `tai_service` KO'RMAYDI: `auth.schema_ready()` `information_schema.tables`
+# dan qidiradi, u esa faqat joriy rol HUQUQI BOR jadvallarni ko'rsatadi.
+# Huquqlarni `0057_huquq` beradi — u manifestda 570-o'rinda, ya'ni bizni
+# to'xtatgan `0032_multitenant` (320) dan ANCHA KEYIN.
+#
+# Ya'ni bootstrap paytida ilova roli hali "ko'r". Kompaniya hisobini
+# yaratish — MA'MURIY amal, xuddi migratsiya kabi, shuning uchun u
+# EGASI roli bilan yuriladi. Ilova roli bu ishni doimiy ravishda
+# qilmaydi va unga bunday huquq kerak ham emas.
+#
+# Oxirgi qator yutadi: `python-dotenv` faylni ketma-ket o'qiydi va
+# takrorlangan kalitda oxirgi qiymatni oladi.
+install -o tenderai -g tenderai -m 0600 "$ENVFILE" "${ISH}/.env"
+#
+# APOSTROF `${...:?...}` ICHIDA YOZILMAYDI: bash uni qo'shtirnoq
+# ochilishi deb o'qiydi va fayl oxirigacha "yopilmagan qator" bo'lib
+# ketadi. Shuning uchun xabar matnida apostrof yo'q.
+: "${XT_DB_DSN_OWNER:?muhit faylida XT_DB_DSN_OWNER topilmadi}"
+{
+    echo
+    echo "# 10-kompaniya.sh: ma'muriy amal — EGASI roli bilan."
+    echo "XT_DB_DSN=${XT_DB_DSN_OWNER}"
+} >> "${ISH}/.env"
+
+log "--- create_company.py $* ---"
+cd "$ISH"
+
+# `exec` ISHLATILMAYDI: u jarayonni ALMASHTIRADI va yuqoridagi `trap`
+# hech qachon ishlamasdi — vaqtinchalik katalog (kod va `.env` bilan)
+# `/tmp` da qolib ketardi.
+#
+# `|| KOD=$?` — `set -e` bilan majburiy: aks holda skript chiqish
+# kodini o'qishga ULGURMASDAN to'xtardi va `trap` dagi tozalash ham,
+# haqiqiy kodni qaytarish ham bo'lmasdi.
+KOD=0
+sudo -u tenderai "${VENV}/bin/python" create_company.py "$@" || KOD=$?
+
+cd /
+exit "$KOD"

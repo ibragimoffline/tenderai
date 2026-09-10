@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender-AI + Tender ERP — 12-QADAM: HTTPS sertifikati
+# =============================================================================
+#     sudo /home/ibragimoff/src/_server/bin/12-certbot.sh
+#
+# QAYTA YURGIZSA BO'LADI. Sertifikat bor bo'lsa qayta so'ralmaydi.
+#
+# --- OLDIN DNS TEKSHIRILADI, KEYIN SO'RALADI ---------------------------------
+# Let's Encrypt HTTP-01 sinovi domenga O'ZI murojaat qiladi. Domen
+# boshqa manzilga ko'rsatayotgan bo'lsa sinov o'sha yerga boradi va
+# yiqiladi. Muhimi — MUVAFFAQIYATSIZ URINISHLAR SANALADI: bir soatda
+# 5 ta xato bo'lsa Let's Encrypt shu domenni VAQTINCHA to'sib qo'yadi.
+#
+# Shuning uchun skript avval DNS ni o'zi tekshiradi va mos kelmasa
+# CERTBOT NI UMUMAN CHAQIRMAYDI. "Urinib ko'ramiz, nima bo'lardi" —
+# aynan shu yerda qimmatga tushadi.
+#
+# --- NEGA `--webroot`, `--nginx` EMAS ----------------------------------------
+# `--nginx` plagini konfiguratsiya fayllarini O'ZI tahrirlaydi. Bu
+# serverda nginx ni BOSHQA loyiha (mailroom) ham ishlatadi va uning
+# bloklari allaqachon certbot tomonidan tahrirlangan. Ikkinchi
+# avtomatik tahrirlovchi — kutilmagan o'zgarish manbai.
+#
+# `--webroot` esa faqat faylni `/var/www/certbot` ga qo'yadi va
+# konfiguratsiyaga TEGMAYDI. 443-blokni quyida SKRIPTNING O'ZI
+# yozadi — ya'ni natija ko'rinadigan va takrorlanadigan bo'ladi.
+# =============================================================================
+set -euo pipefail
+
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0"; exit 1; }
+
+# ROYXATDAN OTISH MANZILI MUHITDAN OLINADI.
+#
+# Ilgari bu yerda shaxsiy email qattiq yozilgan edi. Repozitoriya
+# OCHIQ, ya'ni u ochiq internetga tushardi. Manzil sir emas, lekin
+# shaxsiy ma'lumot va uning bu yerda turishi uchun sabab yoq:
+# sertifikat oladigan odam uni baribir biladi.
+#
+# APOSTROF `${...:?...}` ICHIDA YOZILMAYDI: bash uni tirnoq
+# ochilishi deb oqiydi va fayl oxirigacha buziladi. Shuning uchun
+# quyidagi xabarda apostrof yoq.
+EMAIL="${CERTBOT_EMAIL:?CERTBOT_EMAIL kerak: sertifikat uchun email manzil}"
+KUTILGAN_IP="${SERVER_IP:-$(curl -s --max-time 10 https://api.ipify.org || true)}"
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+
+[ -n "$KUTILGAN_IP" ] || { echo "XATO: server manzilini aniqlab bo'lmadi"; exit 1; }
+log "server manzili: $KUTILGAN_IP"
+
+# --- 1) DNS ------------------------------------------------------------------
+NOSOZ=0
+for H in zynq.uz www.zynq.uz erp.zynq.uz; do
+    OLINGAN="$(getent ahostsv4 "$H" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+    OLINGAN="${OLINGAN% }"
+    if [ "$OLINGAN" = "$KUTILGAN_IP" ]; then
+        printf '  %-16s %s  OK\n' "$H" "$OLINGAN"
+    else
+        printf '  %-16s %s  MOS EMAS\n' "$H" "${OLINGAN:-yechilmadi}"
+        NOSOZ=1
+    fi
+done
+
+if [ "$NOSOZ" -ne 0 ]; then
+    echo
+    echo "TO'XTATILDI: DNS hali shu serverga ko'rsatmayapti." >&2
+    echo "  Sertifikat so'ralsa sinov boshqa manzilga borardi va YIQILARDI," >&2
+    echo "  muvaffaqiyatsiz urinishlar esa Let's Encrypt da SANALADI." >&2
+    echo "  Yozuvlar tarqalgach shu skriptni qayta yurgizing." >&2
+    exit 2
+fi
+
+# --- 2) Sertifikatlar ---------------------------------------------------------
+olish() {
+    local NOM="$1"; shift
+    if [ -d "/etc/letsencrypt/live/${NOM}" ]; then
+        log "sertifikat bor: ${NOM} — qayta so'ralmadi"
+        return 0
+    fi
+    local D=()
+    for X in "$@"; do D+=(-d "$X"); done
+    certbot certonly --webroot -w /var/www/certbot \
+        --non-interactive --agree-tos --email "$EMAIL" \
+        --cert-name "$NOM" "${D[@]}"
+    log "sertifikat olindi: ${NOM}"
+}
+
+olish zynq.uz     zynq.uz www.zynq.uz
+olish erp.zynq.uz erp.zynq.uz
+
+# --- 3) 443 bloklari ----------------------------------------------------------
+# Vaqtinchalik 8090/8190 portlari O'RNIGA. 80-blok (ACME + yo'naltirish)
+# tegilmaydi — u 11-nginx.sh yozgan holicha qoladi.
+tls_blok() {
+    local FAYL="$1" NOM="$2" ESKI_PORT="$3"
+    # `listen <port>;` -> `listen 443 ssl;` + sertifikat qatorlari
+    python3 - "$FAYL" "$NOM" "$ESKI_PORT" <<'PY'
+import sys, pathlib
+fayl, nom, eski = sys.argv[1], sys.argv[2], sys.argv[3]
+p = pathlib.Path(fayl); s = p.read_text()
+eski_qator = f"    listen {eski};\n"
+yangi = (
+    "    listen 443 ssl;\n"
+    "    listen [::]:443 ssl;\n"
+    "    http2 on;\n"
+    f"    ssl_certificate     /etc/letsencrypt/live/{nom}/fullchain.pem;\n"
+    f"    ssl_certificate_key /etc/letsencrypt/live/{nom}/privkey.pem;\n"
+    "    include /etc/letsencrypt/options-ssl-nginx.conf;\n"
+    "    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;\n"
+    "\n"
+    "    # HSTS — TLS TUGATGICHNING ishi. Ilova uni qo'ymaydi\n"
+    "    # (`HSTS_MAX_AGE=0`): faqat shu yer HTTPS ni haqiqatan\n"
+    "    # tugatadi, ya'ni sarlavha ikki joyda turmaydi.\n"
+    '    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;\n'
+)
+if eski_qator in s:
+    s = s.replace(eski_qator, yangi)
+    p.write_text(s)
+    print(f"  {fayl}: :{eski} -> 443 ssl")
+else:
+    print(f"  {fayl}: `listen {eski};` topilmadi — allaqachon ko'chirilgan?")
+PY
+}
+
+tls_blok /etc/nginx/sites-available/tenderai  zynq.uz     8090
+tls_blok /etc/nginx/sites-available/tendererp erp.zynq.uz 8190
+
+nginx -t
+systemctl reload nginx
+log "nginx qayta yuklandi — 443 yoqildi"
+
+# --- 4) Avtomatik yangilanish -------------------------------------------------
+systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+log "certbot.timer: $(systemctl is-active certbot.timer 2>/dev/null || echo 'yo`q')"
+
+echo
+log "12-QADAM TUGADI. Tekshiring:"
+echo "  https://zynq.uz"
+echo "  https://erp.zynq.uz"

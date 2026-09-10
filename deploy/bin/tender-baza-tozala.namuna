@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender-AI — bazani NOLDAN qurish uchun tozalash
+# =============================================================================
+#     sudo .../15-baza-tozala.sh <staging|production>
+#
+# Bazani tashlaydi va bo'sh holda qaytadan yaratadi (kengaytmalar bilan).
+# Keyin `tender-deploy-ai <muhit> main` migratsiyalarni noldan qo'llaydi.
+#
+# --- QACHON KERAK ------------------------------------------------------------
+# Yarim tiklangan yoki yarim migratsiya qilingan baza. O'LCHANGAN HOLAT
+# (2026-09-05): `pg_restore` yiqilgach staging da `dim_area` yaratilgan,
+# qolgan jadvallar esa yo'q edi va `schema_migration` BO'SH edi. Ya'ni
+# migratsiya "hech narsa qo'llanmagan" deb hisoblab, birinchi
+# patchdayoq to'qnashdi:
+#
+#     ERROR: relation "dim_area" already exists
+#
+# Bunday holatda "yetishmaganini qo'llash" mumkin emas — jurnal
+# bazadagi haqiqatni aks ettirmaydi. Yagona ishonchli yo'l: noldan.
+#
+# --- OGOHLANTIRISH -----------------------------------------------------------
+# BU AMAL MA'LUMOTNI O'CHIRADI. Skript avval zaxira oladi, lekin
+# `production` uchun tasdiq SO'RAYDI.
+# =============================================================================
+set -euo pipefail
+
+MUHIT="${1:?foydalanish: 15-baza-tozala.sh <staging|production>}"
+case "$MUHIT" in staging|production) ;; *) echo "Noma'lum muhit: $MUHIT"; exit 2 ;; esac
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0 $MUHIT"; exit 1; }
+
+BAZA="tenderai_${MUHIT}"
+ZAXIRA="/var/backups/tenderai/${MUHIT}/tozalashdan-oldin-$(date +%Y%m%d-%H%M%S).dump"
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+psql_() { sudo -u postgres psql -v ON_ERROR_STOP=1 -qtA "$@"; }
+
+if [ "$MUHIT" = "production" ]; then
+    # PRODUCTION UCHUN TASDIQ. Bu skript ma'lumotni o'chiradi va
+    # `staging` bilan `production` orasidagi farq bitta so'zda —
+    # tasodifan yozib yuborish juda oson.
+    echo "DIQQAT: '${BAZA}' bazasi TO'LIQ O'CHIRILADI."
+    printf "Davom etish uchun 'production' deb yozing: "
+    read -r TASDIQ
+    [ "$TASDIQ" = "production" ] || { echo "Bekor qilindi."; exit 1; }
+fi
+
+for X in "tenderai-api@${MUHIT}" "tendererp-api@${MUHIT}"; do
+    systemctl stop "$X" 2>/dev/null || true
+done
+systemctl stop "tenderai-etl@${MUHIT}.timer" 2>/dev/null || true
+log "xizmatlar to'xtatildi"
+
+install -d -o postgres -g postgres -m 0700 "$(dirname "$ZAXIRA")"
+if sudo -u postgres pg_dump -Fc -d "$BAZA" -f "$ZAXIRA" 2>/dev/null; then
+    log "zaxira: $ZAXIRA ($(du -h "$ZAXIRA" | cut -f1))"
+else
+    log "zaxira olinmadi (baza bo'sh yoki yo'q) — davom etamiz"
+fi
+
+psql_ -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+          WHERE datname = '${BAZA}' AND pid <> pg_backend_pid()" >/dev/null || true
+psql_ -c "DROP DATABASE IF EXISTS ${BAZA}" >/dev/null
+psql_ -c "CREATE DATABASE ${BAZA} OWNER tai_owner ENCODING 'UTF8'" >/dev/null
+sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$BAZA" <<'SQL'
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS unaccent;
+SQL
+psql_ -c "REVOKE CONNECT ON DATABASE ${BAZA} FROM PUBLIC" >/dev/null
+psql_ -c "GRANT CONNECT ON DATABASE ${BAZA} TO tai_service, erp_service, tai_owner" >/dev/null
+psql_ -d "$BAZA" -c "ALTER SCHEMA public OWNER TO tai_owner" >/dev/null
+log "baza bo'sh holda qaytadan yaratildi: $BAZA"
+
+# `erp` sxemasining standart huquqlari — 07-erp-huquq.sh dagi bilan bir xil.
+sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$BAZA" <<'SQL'
+CREATE SCHEMA IF NOT EXISTS erp AUTHORIZATION tai_owner;
+GRANT USAGE ON SCHEMA erp TO erp_service, tai_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA erp
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO erp_service;
+ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA erp
+    GRANT USAGE, SELECT ON SEQUENCES TO erp_service;
+ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA erp
+    GRANT SELECT ON TABLES TO tai_app;
+GRANT USAGE ON SCHEMA public TO erp_service;
+ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA public
+    GRANT SELECT ON TABLES TO erp_service;
+SQL
+log "huquqlar qo'yildi"
+
+systemctl start "tenderai-etl@${MUHIT}.timer" 2>/dev/null || true
+
+echo
+log "TUGADI. Endi migratsiyalarni noldan qo'llash:"
+echo "  sudo /usr/local/sbin/tender-deploy-ai  ${MUHIT} main"
+echo "  sudo /usr/local/sbin/tender-deploy-erp ${MUHIT} main"
+log "Zaxira: $ZAXIRA"

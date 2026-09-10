@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender ERP — HODIM hisobini yaratish
+# =============================================================================
+#     sudo .../16-erp-hodim.sh <muhit> <login> "<F.I.Sh>" [--role admin]
+#     sudo .../16-erp-hodim.sh production --list
+#
+# Parol INTERAKTIV so'raladi (`getpass`): ekranda ko'rinmaydi va buyruq
+# tarixiga tushmaydi.
+#
+# --- NEGA KERAK --------------------------------------------------------------
+# ERP sog'lom bo'lsa ham (`/health` -> ok), hodim hisobi bo'lmasa HECH
+# KIM KIRA OLMAYDI. Hodimlar ERP niki (`erp.app_user`) — tender-ai
+# dagi KOMPANIYA hisobi bilan aralashtirilmaydi.
+#
+# --- NEGA RELIZNING O'Z VENV I ------------------------------------------------
+# `10-kompaniya.sh` alohida `admin-venv` quradi, chunki u yozilganda
+# reliz hali yo'q edi. Bu yerda reliz BOR va uning venv ida barcha
+# bog'liqliklar turibdi — ya'ni yuradigan kod XIZMAT yurgizadigan kod
+# bilan AYNI. Qo'shimcha muhit qurish ham, ko'zgudan tortish ham
+# (private repo, deploy key kerak bo'lardi) shart emas.
+#
+# --- SIR `ps` GA TUSHMAYDI ---------------------------------------------------
+# Muhit `env VAR=...` bilan berilmaydi — DSN parol bilan jarayonlar
+# ro'yxatida ko'rinardi. Kichik yuklovchi `load_dotenv()` ni muhit
+# faylining O'ZIGA yo'naltiradi.
+# =============================================================================
+set -euo pipefail
+
+MUHIT="${1:?foydalanish: 16-erp-hodim.sh <staging|production> <login> \"<F.I.Sh>\" [--role admin]}"
+shift
+case "$MUHIT" in staging|production) ;; *) echo "Noma'lum muhit: $MUHIT"; exit 2 ;; esac
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0 $MUHIT $*"; exit 1; }
+
+JORIY="/opt/tendererp/${MUHIT}/current"
+ENVFILE="/etc/tendererp/${MUHIT}.env"
+PY="${JORIY}/.venv/bin/python"
+
+[ -x "$PY" ]      || { echo "XATO: $PY yo'q — avval deploy"; exit 1; }
+[ -f "$ENVFILE" ] || { echo "XATO: $ENVFILE yo'q"; exit 1; }
+[ -f "${JORIY}/create_user.py" ] || { echo "XATO: create_user.py yo'q"; exit 1; }
+
+echo "[$(date '+%F %T')] ERP $MUHIT / create_user.py $*"
+cd "$JORIY"
+KOD=0
+sudo -u tendererp "$PY" -c '
+import runpy, sys
+from dotenv import load_dotenv
+load_dotenv(sys.argv[1])
+sys.argv = sys.argv[2:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+' "$ENVFILE" "${JORIY}/create_user.py" "$@" || KOD=$?
+cd /
+exit "$KOD"

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender ERP — GitHub dan joylashtirish
+# =============================================================================
+#     sudo /home/ibragimoff/src/_server/bin/deploy-tendererp.sh <muhit> [ref]
+#
+# `deploy-tenderai.sh` ning aynan nusxasi — izohlar o'sha yerda.
+# Ikki qadam: GitHub dan `fetch`, keyin loyihaning o'z `deploy.sh` i.
+# =============================================================================
+set -euo pipefail
+
+MUHIT="${1:?foydalanish: deploy-tendererp.sh <staging|production> [ref]}"
+REF="${2:-main}"
+
+case "$MUHIT" in staging|production) ;; *) echo "Noma'lum muhit: $MUHIT"; exit 2 ;; esac
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0 $*"; exit 1; }
+
+REPO=/opt/tendererp/repo.git
+# Repozitoriya PRIVATE — deploy key bilan tortiladi. Sabab va tanlov
+# izohi: 05-erp-bootstrap.sh.
+SSH_DIR=/opt/tendererp/.ssh
+GIT_SSH_COMMAND="ssh -i ${SSH_DIR}/id_ed25519 -o UserKnownHostsFile=${SSH_DIR}/known_hosts -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+
+log "GitHub dan tortilmoqda -> $REPO"
+sudo -u tendererp env GIT_SSH_COMMAND="$GIT_SSH_COMMAND" \
+    git --git-dir="$REPO" fetch --prune --tags origin
+KOMMIT="$(sudo -u tendererp git --git-dir="$REPO" rev-parse --short "$REF" 2>/dev/null)" || {
+    echo "XATO: '$REF' ko'zguda topilmadi. Mavjud shoxlar:" >&2
+    sudo -u tendererp git --git-dir="$REPO" for-each-ref --format='  %(refname:short)' refs/heads >&2
+    exit 1
+}
+log "$REF -> $KOMMIT"
+
+VAQT="$(mktemp -d)"
+trap 'rm -rf "$VAQT"' EXIT
+sudo -u tendererp git --git-dir="$REPO" archive "$REF" deploy | tar -x -C "$VAQT"
+chmod +x "$VAQT"/deploy/bin/*.sh
+chown -R tendererp:tendererp "$VAQT"
+
+log "--- deploy.sh $MUHIT $REF ---"
+sudo -u tendererp -H "$VAQT/deploy/bin/deploy.sh" "$MUHIT" "$REF"
+
+echo
+log "TUGADI: tendererp/$MUHIT <- $REF ($KOMMIT)"
+log "Jurnal:  journalctl -u tendererp-api@$MUHIT -n 50 --no-pager"

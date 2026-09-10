@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender-AI + ERP — LOKAL BAZANI SERVERGA TIKLASH
+# =============================================================================
+#     sudo .../14-baza-tikla.sh <staging|production> <dump-fayli>
+#
+#     sudo .../14-baza-tikla.sh staging /home/ibragimoff/xtxarid.dump
+#
+# --- NIMA QILADI -------------------------------------------------------------
+#   1. Xizmatlarni TO'XTATADI (tender-ai + ERP, shu muhit).
+#   2. Bazani ZAXIRAGA oladi (tiklash yiqilsa qaytish uchun).
+#   3. Bazani tashlab, qaytadan yaratadi.
+#   4. Dump ni tiklaydi (`--no-owner`: egalik `tai_owner` ga o'tadi).
+#   5. Kengaytmalarni va HUQUQLARNI qayta qo'yadi.
+#   6. `migratsiya.py --qolla` — lokal sxema orqada bo'lsa quvib yetadi.
+#   7. Xizmatlarni ko'taradi va tayyorlikni tekshiradi.
+#
+# --- NEGA BAZA TASHLANADI, "faqat ma'lumot" EMAS -----------------------------
+# `pg_dump -Fc` ning `--data-only` rejimi FK tartibiga bog'liq va
+# mavjud qatorlar bilan to'qnashadi. Bu yerda serverdagi baza
+# QIYMATLI EMAS: unda faqat migratsiya izlari va bitta sinov hisobi
+# bor, haqiqiy ma'lumot esa DUMP DA. Shuning uchun to'liq almashtirish
+# ham sodda, ham bashorat qilinadigan.
+#
+# --- OGOHLANTIRISH: HISOBLAR HAM ALMASHADI -----------------------------------
+# `company_account` (tender-ai kirishi) va `erp.app_user` (ERP hodimlari)
+# DUMP DAN keladi. Ya'ni serverda yaratilgan hisob YO'QOLADI va kirish
+# LOKAL parollar bilan bo'ladi. Skript oxirida hisob sanog'ini
+# ko'rsatadi — bo'sh bo'lsa yangisini yaratish kerak.
+# =============================================================================
+set -euo pipefail
+
+MUHIT="${1:?foydalanish: 14-baza-tikla.sh <staging|production> <dump-fayli>}"
+DUMP="${2:?dump fayli kerak}"
+case "$MUHIT" in staging|production) ;; *) echo "Noma'lum muhit: $MUHIT"; exit 2 ;; esac
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0 $MUHIT $DUMP"; exit 1; }
+[ -f "$DUMP" ] || { echo "XATO: dump topilmadi: $DUMP"; exit 1; }
+
+BAZA="tenderai_${MUHIT}"
+ZAXIRA="/var/backups/tenderai/${MUHIT}/tiklashdan-oldin-$(date +%Y%m%d-%H%M%S).dump"
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+psql_() { sudo -u postgres psql -v ON_ERROR_STOP=1 -qtA "$@"; }
+
+log "muhit: $MUHIT   baza: $BAZA"
+log "dump:  $DUMP  ($(du -h "$DUMP" | cut -f1))"
+
+# --- 0) Dump ni `postgres` O'QIY OLADIGAN joyga ko'chiramiz --------------------
+# `pg_restore` `postgres` foydalanuvchisi nomidan yuradi, dump esa
+# odatda uy katalogida bo'ladi va u 0750 (`drwxr-x---`) — ya'ni
+# `postgres` u yerga KIRA OLMAYDI. Fayl huquqi 0644 bo'lsa ham
+# ahamiyatsiz: to'siq KATALOGDA.
+#
+# O'LCHANDI (2026-09-05): `sudo -u postgres pg_restore -l
+# /home/ibragimoff/xtxarid.dump` xato berdi, ayni fayl esa
+# `ibragimoff` nomidan bemalol o'qilardi.
+#
+# Uy katalogining huquqini bo'shatish YECHIM EMAS — u yerda `.ssh`
+# ham bor. Nusxa oladigan joy: `/var/tmp` (postgres o'qiydi, tmpfs
+# emas — 27 MB+ fayl RAM ni yemaydi).
+# --- FAYL TO'LIQ KELGANMI ------------------------------------------------
+# `scp` hali ishlayotgan bo'lsa fayl O'SIB turadi. Hajmni ikki marta
+# o'lchaymiz: o'zgargan bo'lsa uzatish tugamagan.
+#
+# O'LCHANGAN NUQSON (2026-09-05): skript uzatish davom etayotgan
+# faylni oldi va bazani tashlab bo'lgach yiqildi:
+#
+#     pg_restore: error: could not find block ID 6995 in archive
+#                 -- possibly corrupt archive
+#
+# Natijada staging bazasi BO'SH qoldi. Tekshiruv bazaga TEGISHDAN
+# OLDIN bo'lishi kerak.
+H1=$(stat -c '%s' "$DUMP")
+sleep 3
+H2=$(stat -c '%s' "$DUMP")
+if [ "$H1" != "$H2" ]; then
+    echo "XATO: fayl hali O'SYAPTI ($H1 -> $H2 bayt) — uzatish tugamagan." >&2
+    echo "      \`scp\` tugashini kuting va qaytadan yurgizing." >&2
+    exit 1
+fi
+
+ISH_DUMP="$DUMP"
+if ! sudo -u postgres test -r "$DUMP"; then
+    ISH_DUMP="/var/tmp/tikla-$$.dump"
+    install -o postgres -g postgres -m 0600 "$DUMP" "$ISH_DUMP"
+    trap 'rm -f "$ISH_DUMP"' EXIT
+    log "dump nusxalandi (postgres o'qishi uchun): $ISH_DUMP"
+fi
+
+# --- ARXIV BUTUNMI -------------------------------------------------------
+# `pg_restore -l` FAQAT faylning boshidagi TOC ni o'qiydi va yarim
+# faylda ham MUVAFFAQIYATLI o'tadi — aynan shu yolg'on ishonch
+# yuqoridagi nuqsonga yo'l ochgan edi.
+#
+# `-f /dev/null` esa BUTUN arxivni o'qib, ochib chiqadi va hech narsa
+# yozmaydi. Kesilgan yoki buzilgan fayl SHU YERDA ushlanadi.
+if ! sudo -u postgres pg_restore -f /dev/null "$ISH_DUMP" >/dev/null 2>&1; then
+    echo "XATO: arxiv butun emas yoki o'qilmadi." >&2
+    echo "      Custom format (pg_dump -Fc) bo'lishi va uzatish TUGAGAN" >&2
+    echo "      bo'lishi kerak. Server: $(psql --version)" >&2
+    exit 1
+fi
+log "arxiv butun — to'liq o'qib chiqildi ($H2 bayt)"
+
+# --- 1) Xizmatlar to'xtatiladi -------------------------------------------------
+for X in "tenderai-api@${MUHIT}" "tendererp-api@${MUHIT}"; do
+    systemctl stop "$X" 2>/dev/null || true
+    log "to'xtatildi: $X"
+done
+# ETL ham yurmasin — tiklash paytida yozishga urinardi.
+systemctl stop "tenderai-etl@${MUHIT}.timer" 2>/dev/null || true
+
+# --- 2) Zaxira -----------------------------------------------------------------
+install -d -o postgres -g postgres -m 0700 "$(dirname "$ZAXIRA")"
+if sudo -u postgres pg_dump -Fc -d "$BAZA" -f "$ZAXIRA" 2>/dev/null; then
+    log "zaxira: $ZAXIRA ($(du -h "$ZAXIRA" | cut -f1))"
+else
+    log "OGOHLANTIRISH: zaxira olinmadi (baza bo'sh yoki yo'q)"
+fi
+
+# --- 3) Baza qaytadan ----------------------------------------------------------
+# Ulanishlar uzilmasa DROP ishlamaydi.
+psql_ -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+          WHERE datname = '${BAZA}' AND pid <> pg_backend_pid()" >/dev/null || true
+psql_ -c "DROP DATABASE IF EXISTS ${BAZA}" >/dev/null
+psql_ -c "CREATE DATABASE ${BAZA} OWNER tai_owner ENCODING 'UTF8'" >/dev/null
+log "baza qaytadan yaratildi: $BAZA"
+
+# Kengaytmalar TIKLASHDAN OLDIN: dump ichida `vector` tipidagi
+# ustunlar bor va tip mavjud bo'lmasa tiklash o'sha joyda yiqiladi.
+sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$BAZA" <<'SQL'
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS unaccent;
+SQL
+log "kengaytmalar qo'yildi"
+
+# --- 4) Tiklash ----------------------------------------------------------------
+# `--no-owner` — lokal `postgres` egaligi bu yerda `tai_owner` ga o'tadi.
+# `--no-privileges` — lokal GRANT lar ko'chirilmaydi; huquqlarni quyida
+# BIZ qo'yamiz (server roli boshqacha).
+# `--if-exists --clean` YO'Q: baza allaqachon bo'm-bo'sh.
+log "tiklanmoqda — bu bir necha daqiqa olishi mumkin"
+KOD=0
+sudo -u postgres pg_restore --no-owner --no-privileges --exit-on-error \
+    -d "$BAZA" -j 2 "$ISH_DUMP" || KOD=$?
+if [ "$KOD" -ne 0 ]; then
+    echo "XATO: tiklash yiqildi (kod $KOD). Zaxira: $ZAXIRA" >&2
+    exit "$KOD"
+fi
+log "tiklandi"
+
+# --- 5) Huquqlar ---------------------------------------------------------------
+# Dump dagi egalik va GRANT lar tashlab yuborilgan, ya'ni ilova
+# rollarida hozir HECH QANDAY huquq yo'q.
+sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$BAZA" <<'SQL'
+ALTER SCHEMA public OWNER TO tai_owner;
+
+GRANT USAGE ON SCHEMA public TO tai_app, erp_service;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO tai_app;
+GRANT USAGE, SELECT                  ON ALL SEQUENCES IN SCHEMA public TO tai_app;
+GRANT EXECUTE                        ON ALL FUNCTIONS IN SCHEMA public TO tai_app;
+GRANT SELECT                         ON ALL TABLES    IN SCHEMA public TO erp_service;
+
+-- ETL kategoriyalash qadami shu jadvalni TRUNCATE qiladi
+-- (schema_patch_huquq_2.sql bilan bir xil sabab).
+GRANT TRUNCATE ON public.tender_category TO tai_app;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO tai_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO tai_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA public
+    GRANT SELECT ON TABLES TO erp_service;
+
+-- Audit jurnali: yozish MUMKIN, o'zgartirish YO'Q
+-- (schema_patch_huquq.sql 3-bo'limi bilan bir xil qoida).
+DO $$
+BEGIN
+    IF to_regclass('public.audit_jurnal') IS NOT NULL THEN
+        REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_jurnal FROM tai_app;
+    END IF;
+END $$;
+
+-- ERP sxemasi (dump da bo'lsa)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'erp') THEN
+        EXECUTE 'GRANT USAGE ON SCHEMA erp TO erp_service, tai_app';
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA erp TO erp_service';
+        EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA erp TO erp_service';
+        EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA erp TO erp_service';
+        EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA erp TO tai_app';
+        EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA erp
+                 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO erp_service';
+        EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE tai_owner IN SCHEMA erp
+                 GRANT SELECT ON TABLES TO tai_app';
+    END IF;
+END $$;
+SQL
+log "huquqlar qo'yildi"
+
+# --- 6) Migratsiya quvib yetadi ------------------------------------------------
+# Lokal sxema serverdagidan orqada bo'lishi mumkin. `migratsiya.py`
+# jurnalga qarab faqat YETISHMAGANINI qo'llaydi.
+JORIY="/opt/tenderai/${MUHIT}/current"
+ENVFILE="/etc/tenderai/${MUHIT}.env"
+set -a; . "$ENVFILE"; set +a
+log "migratsiya holati"
+sudo -u tenderai "${JORIY}/.venv/bin/python" "${JORIY}/migratsiya.py" \
+    --holat --dsn "$XT_DB_DSN_OWNER" | tail -5 || true
+log "migratsiya qo'llanadi"
+sudo -u tenderai "${JORIY}/.venv/bin/python" "${JORIY}/migratsiya.py" \
+    --qolla --dsn "$XT_DB_DSN_OWNER"
+
+# ERP patchlari ham
+ERP_JORIY="/opt/tendererp/${MUHIT}/current"
+if [ -x "${ERP_JORIY}/deploy/bin/migratsiya.sh" ]; then
+    log "ERP migratsiyasi"
+    sudo -u tendererp "${ERP_JORIY}/deploy/bin/migratsiya.sh" \
+        --qolla --dsn "$XT_DB_DSN_OWNER" || log "OGOHLANTIRISH: ERP migratsiyasi yiqildi"
+fi
+
+# --- 7) Xizmatlar ---------------------------------------------------------------
+for X in "tenderai-api@${MUHIT}" "tendererp-api@${MUHIT}"; do
+    systemctl start "$X"
+    log "ko'tarildi: $X"
+done
+systemctl start "tenderai-etl@${MUHIT}.timer" 2>/dev/null || true
+
+# --- 8) Natija -----------------------------------------------------------------
+echo
+log "--- MA'LUMOT ---"
+sudo -u postgres psql -d "$BAZA" -c "
+SELECT 'tender' AS jadval, count(*) FROM tender
+UNION ALL SELECT 'dim_area', count(*) FROM dim_area
+UNION ALL SELECT 'company_account', count(*) FROM company_account
+UNION ALL SELECT 'erp.app_user',
+       (SELECT count(*) FROM erp.app_user
+        WHERE to_regclass('erp.app_user') IS NOT NULL)
+" 2>/dev/null || sudo -u postgres psql -d "$BAZA" -c \
+    "SELECT 'tender' AS jadval, count(*) FROM tender
+     UNION ALL SELECT 'dim_area', count(*) FROM dim_area"
+
+echo
+log "TUGADI. Zaxira (kerak bo'lsa qaytish uchun): $ZAXIRA"
+log "DIQQAT: kirish endi LOKAL parollar bilan — hisoblar dump dan keldi."

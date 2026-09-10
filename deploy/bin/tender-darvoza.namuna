@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE="/etc/tenderai/staging.env"
+REPO="/opt/tenderai/repo.git"
+
+case "${1:-}" in
+  tekshir|yarat|sinov|tozala)
+    AMAL="$1"
+    shift
+    ;;
+  *)
+    echo "Ruxsat etilgan amallar: tekshir | yarat | sinov | tozala" >&2
+    exit 2
+    ;;
+esac
+
+set -a
+source "$ENV_FILE"
+set +a
+
+for v in XT_DB_DSN_TEST_ADMIN XT_DB_DSN_OWNER XT_DB_DSN; do
+  if [[ -z "${!v:-}" ]]; then
+    echo "$v sozlanmagan" >&2
+    exit 1
+  fi
+done
+
+SHA="$(
+  sudo -u tenderai git --git-dir="$REPO" rev-parse 'main^{commit}'
+)"
+
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "main SHA aniqlanmadi" >&2
+  exit 1
+}
+
+VAQT="$(mktemp -d /tmp/tender-darvoza.XXXXXX)"
+trap 'rm -rf "$VAQT"' EXIT
+
+chown tenderai:tenderai "$VAQT"
+
+sudo -u tenderai \
+  git --git-dir="$REPO" archive "$SHA" deploy |
+sudo -u tenderai tar -x -C "$VAQT"
+
+chmod +x "$VAQT"/deploy/bin/*.sh
+
+echo "darvoza SHA: $SHA" >&2
+
+exec sudo -u tenderai env \
+  APP_ENV=staging \
+  RELEASE_SHA="$SHA" \
+  APP_PUBLIC_URL="$APP_PUBLIC_URL" \
+  AUTH_COOKIE_SECURE="$AUTH_COOKIE_SECURE" \
+  XT_DB_DSN_TEST_ADMIN="$XT_DB_DSN_TEST_ADMIN" \
+  XT_DB_DSN_OWNER="$XT_DB_DSN_OWNER" \
+  XT_DB_DSN="$XT_DB_DSN" \
+  "$VAQT/deploy/bin/darvoza-baza.sh" "$AMAL" "$@"

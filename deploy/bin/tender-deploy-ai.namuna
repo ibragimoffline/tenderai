@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender-AI — GitHub dan joylashtirish
+# =============================================================================
+#     sudo /home/ibragimoff/src/_server/bin/deploy-tenderai.sh <muhit> [ref]
+#
+#     sudo .../deploy-tenderai.sh staging            # main ning uchi
+#     sudo .../deploy-tenderai.sh staging v1.2.3     # teg
+#     sudo .../deploy-tenderai.sh production v1.2.3  # staging dan o'tgan bo'lsa
+#
+# NIMA QILADI — IKKI QADAM, IKKALASI HAM YUPQA:
+#   1. `/opt/tenderai/repo.git` ni GitHub dan YANGILAYDI (`fetch --prune`).
+#   2. Loyihaning O'Z `deploy/bin/deploy.sh` ini chaqiradi.
+#
+# NEGA O'RAMA, `deploy.sh` ning O'ZI EMAS: `deploy.sh` bare repo dan
+# `git archive` qiladi va tarmoqqa UMUMAN chiqmaydi — u kodni qayerdan
+# olishni bilmaydi, faqat "shu yerda turibdi" deb hisoblaydi. Manbani
+# GitHub qilish uchun oldiga bitta `fetch` kerak, xolos. `deploy.sh` ga
+# TEGILMAYDI: uning ichida staging darvozasi, sog'liq tekshiruvi va
+# avtomatik orqaga qaytish bor va ular sinovdan o'tgan.
+#
+# JOYLASHTIRISH RELIZDAN yuriladi, ish nusxasidan emas: `deploy.sh`
+# `${JORIY}/deploy/bin/health-check.sh` ni chaqiradi, ya'ni skriptning
+# o'zi ham reliz bilan birga keladi va versiyalanadi.
+# =============================================================================
+set -euo pipefail
+
+MUHIT="${1:?foydalanish: deploy-tenderai.sh <staging|production> [ref]}"
+REF="${2:-main}"
+
+case "$MUHIT" in staging|production) ;; *) echo "Noma'lum muhit: $MUHIT"; exit 2 ;; esac
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0 $*"; exit 1; }
+
+REPO=/opt/tenderai/repo.git
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+
+# --- 1) GitHub dan yangilash --------------------------------------------------
+log "GitHub dan tortilmoqda -> $REPO"
+sudo -u tenderai git --git-dir="$REPO" fetch --prune --tags origin
+KOMMIT="$(sudo -u tenderai git --git-dir="$REPO" rev-parse --short "$REF" 2>/dev/null)" || {
+    echo "XATO: '$REF' ko'zguda topilmadi. Mavjud shoxlar:" >&2
+    sudo -u tenderai git --git-dir="$REPO" for-each-ref --format='  %(refname:short)' refs/heads >&2
+    exit 1
+}
+log "$REF -> $KOMMIT"
+
+# --- 2) Loyihaning o'z joylashtirish skripti ---------------------------------
+# Reliz ichidagi nusxa hali yo'q (birinchi joylashtirish), shuning uchun
+# skript KO'ZGUDAN olinadi — aynan joylashtirilayotgan `$REF` dan.
+VAQT="$(mktemp -d)"
+trap 'rm -rf "$VAQT"' EXIT
+sudo -u tenderai git --git-dir="$REPO" archive "$REF" deploy | tar -x -C "$VAQT"
+chmod +x "$VAQT"/deploy/bin/*.sh
+chown -R tenderai:tenderai "$VAQT"
+
+log "--- deploy.sh $MUHIT $REF ---"
+sudo -u tenderai -H "$VAQT/deploy/bin/deploy.sh" "$MUHIT" "$REF"
+
+echo
+log "TUGADI: tenderai/$MUHIT <- $REF ($KOMMIT)"
+log "Jurnal:  journalctl -u tenderai-api@$MUHIT -n 50 --no-pager"

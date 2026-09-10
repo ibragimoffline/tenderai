@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tender-AI — ETL skriptini QO'LDA yurgizish (chiqishi to'liq ko'rinadi)
+# =============================================================================
+#     sudo .../13-etl-qol.sh <muhit> <skript> [argumentlar...]
+#
+#     sudo .../13-etl-qol.sh production etl_uzex.py --type-id 2 --max-seconds 120
+#     sudo .../13-etl-qol.sh production etl_categorize.py
+#
+# --- NEGA KERAK --------------------------------------------------------------
+# `run_etl.py` orkestratori bola jarayonning stdout idan FAQAT OXIRGI 4
+# QATORINI uzatadi (496-qator), `stderr` ni esa umuman chop etmaydi —
+# u faqat chiqish kodi xato bo'lganda `_fail_reason` orqali ishlatiladi.
+#
+# `etl_uzex.py` esa yozuv darajasidagi sabablarni AYNAN stderr ga
+# yozadi ("DB xato", "BUZUQ YOZUV"). Uzex `QISMAN` kodi bilan tugaydi,
+# u "xato emas" deb sanaladi — natijada 655 ta yiqilgan yozuvning
+# sababi jurnalga UMUMAN tushmadi.
+#
+# Bu skript o'sha oynani ochadi: bola to'g'ridan-to'g'ri terminalga
+# yozadi.
+#
+# --- SIR `ps` GA TUSHMAYDI ---------------------------------------------------
+# Muhit `env VAR=...` bilan berilmaydi — u holda DSN (parol bilan)
+# jarayonlar ro'yxatida ko'rinardi. O'rniga kichik yuklovchi
+# `load_dotenv()` ni MUHIT FAYLINING O'ZIGA yo'naltiradi va skriptni
+# `runpy` bilan chaqiradi. Vaqtinchalik `.env` ham yaratilmaydi.
+#
+# Reliz ichidagi venv ishlatiladi — ya'ni yuradigan kod TIMER
+# yurgizadigan kod bilan AYNI.
+# =============================================================================
+set -euo pipefail
+
+MUHIT="${1:?foydalanish: 13-etl-qol.sh <staging|production> <skript> [args...]}"
+SKRIPT="${2:?skript nomi kerak, masalan etl_uzex.py}"
+shift 2
+case "$MUHIT" in staging|production) ;; *) echo "Noma'lum muhit: $MUHIT"; exit 2 ;; esac
+[ "$(id -u)" = "0" ] || { echo "root kerak: sudo $0 $MUHIT $SKRIPT $*"; exit 1; }
+
+JORIY="/opt/tenderai/${MUHIT}/current"
+ENVFILE="/etc/tenderai/${MUHIT}.env"
+PY="${JORIY}/.venv/bin/python"
+
+[ -x "$PY" ]      || { echo "XATO: $PY yo'q"; exit 1; }
+[ -f "$ENVFILE" ] || { echo "XATO: $ENVFILE yo'q"; exit 1; }
+[ -f "${JORIY}/${SKRIPT}" ] || { echo "XATO: ${JORIY}/${SKRIPT} yo'q"; exit 1; }
+
+# --- CHIQISH FAYLGA HAM YOZILADI ---------------------------------------------
+# Terminaldagi matn faqat operatorda qoladi. Nosozlikni birga
+# ko'rayotganda uni qayta-qayta nusxalash kerak bo'lardi, uzun chiqish
+# esa nusxalashda qirqilardi. Fayl `ibragimoff` egaligida — ya'ni
+# root'siz o'qiladi.
+JURNAL_DIR=/home/ibragimoff/src/_server/log
+install -d -o ibragimoff -g ibragimoff -m 0755 "$JURNAL_DIR"
+JURNAL="${JURNAL_DIR}/$(date +%Y%m%d-%H%M%S)-${MUHIT}-${SKRIPT%.py}.log"
+
+{
+echo "[$(date '+%F %T')] $MUHIT / $SKRIPT $*"
+echo "[$(date '+%F %T')] reliz: $(readlink -f "$JORIY")"
+echo "----------------------------------------------------------------------"
+} | tee "$JURNAL"
+
+cd "$JORIY"
+KOD=0
+# `2>&1` — stderr HAM yozilsin. `run_etl.py` aynan uni tashlab
+# yuboradi va shu sababdan yozuv xatolari ko'rinmay qolgan edi.
+sudo -u tenderai "$PY" -c '
+import runpy, sys
+from dotenv import load_dotenv
+load_dotenv(sys.argv[1])          # muhit fayli TO`G`RIDAN-TO`G`RI
+sys.argv = sys.argv[2:]           # bola o`z argumentlarini ko`rsin
+runpy.run_path(sys.argv[0], run_name="__main__")
+' "$ENVFILE" "${JORIY}/${SKRIPT}" "$@" 2>&1 | tee -a "$JURNAL" || KOD=${PIPESTATUS[0]}
+
+{
+echo "----------------------------------------------------------------------"
+echo "[$(date '+%F %T')] chiqish kodi: $KOD"
+} | tee -a "$JURNAL"
+chown ibragimoff:ibragimoff "$JURNAL"
+echo "Jurnal: $JURNAL"
+cd /
+exit "$KOD"
