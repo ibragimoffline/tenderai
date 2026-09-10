@@ -4217,8 +4217,17 @@ def test_zaxira_oramasi():
     # Zaxira mantiqi ko'zgudagi skriptda.
     z = oqi("bin", "zaxira-ol.sh")
     check("zaxira ko'zgudagi backup.sh bilan", '${HERE}/backup.sh' in z)
-    check("foydalanuvchi O'ZGARMAYDI (tenderai)",
-          'sudo -u "$XIZMAT_USER"' in z and 'TENDERAI_USER:-tenderai' in z)
+    # `sudo` ISHLATILMAYDI. Systemd birligi `NoNewPrivileges=yes`
+    # bilan yuradi va bu bayroq SUID ko'tarilishini YADRO
+    # darajasida bloklaydi -- ya'ni qo'lda yo'l ishlab, TAYMER
+    # yo'li yiqilardi. Ikkala yo'l ham root bo'lsin.
+    check("`sudo` orqali ko'tarilmaydi",
+          "sudo " not in _izohsiz(z))
+    b = oqi("bin", "backup.sh")
+    # EGALIK KATALOGDAN NUSXALANADI: kim yurgizganidan qat'i
+    # nazar fayllar bir xil egalikda bo'lsin.
+    check("chiqish fayllari egaligi katalogdan",
+          'chown --reference="$KATALOG"' in b)
     # `mktemp -d` root uchun 0700 yasaydi va `sudo -u tenderai`
     # unga KIRA OLMAYDI -- xato esa "command not found" bo'lib
     # ko'rinadi, ya'ni sabab yo'l huquqi ekani bilinmaydi.

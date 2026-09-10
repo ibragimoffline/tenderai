@@ -15,23 +15,32 @@
 # =============================================================================
 
 # ============================================================================
-# CHAQIRUV SHARTNOMASI — `sudo` ORQALI
+# CHAQIRUV SHARTNOMASI — ROOT, `sudo` SIZ
 # ============================================================================
-# Zaxira xizmati (`tenderai-backup@.service`) `tenderai`
-# foydalanuvchisi nomidan yuradi, bu fayl esa `0600 root:root` --
-# ATAYLAB: ilova roli zaxira omborining kalitini o'qimasligi kerak.
+# `production.env` da:
 #
-# Shuning uchun o'rama `sudo` orqali chaqiriladi. `production.env`:
+#   BACKUP_REMOTE_CMD='/usr/local/sbin/tender-backup-remote {fayl}'
 #
-#   BACKUP_REMOTE_CMD='/usr/bin/sudo -n /usr/local/sbin/tender-backup-remote {fayl}'
+# O'rama root talab qiladi, chunki bu fayl `0600 root:root` --
+# ATAYLAB: ilova roli (`tenderai`) zaxira omborining kalitini
+# o'qimasligi kerak.
 #
-# va `/etc/sudoers.d/tenderai-backup`:
+# ZAXIRA XIZMATI HAM ROOT SIFATIDA YURISHI KERAK:
 #
-#   tenderai ALL=(root) NOPASSWD: /usr/local/sbin/tender-backup-remote
+#   /etc/systemd/system/tenderai-backup@.service   ->  User=root
 #
-# Bu sudo huquqi TOR: bitta dastur, va o'ramaning o'zi argumentni
-# qat'iy tekshiradi (mutlaq yo'l, `..` yo'q, zaxira katalogi
-# ichida, tor alifbo, e'lon qilingan turlar).
+# NEGA `sudo` EMAS. Birlik `NoNewPrivileges=yes` bilan yuradi va
+# bu bayroq SUID ko'tarilishini YADRO darajasida bloklaydi --
+# `sudo` u yerda ISHLAMAYDI. O'lchandi (2026-09-10): qo'lda
+# yurgizilganda o'tardi, taymerdan esa yiqilardi.
+#
+# QUMDON SAQLANADI. `ProtectSystem=strict` va
+# `ReadWritePaths=/var/backups/tenderai` o'z kuchida: root ham
+# faqat zaxira katalogiga yoza oladi. `NoNewPrivileges` ham
+# qoladi -- endi unga ehtiyoj ham yo'q.
+#
+# Fayl egaligi `backup.sh` da katalogdan nusxalanadi, ya'ni kim
+# yurgizganidan qat'i nazar bir xil bo'ladi.
 #
 # ============================================================================
 # USUL — ikkitasidan biri. Ikkalasi ham AYNI shartnomani bajaradi:

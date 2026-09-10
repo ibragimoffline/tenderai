@@ -259,6 +259,21 @@ META="${KATALOG}/tenderai-${MUHIT}-${STAMP}-meta.txt"
         | awk '{print $1}' || true
 } > "$META"
 sha256sum "$META" > "${META}.sha256"
+
+# --- EGALIK KATALOG BILAN BIR XIL -------------------------------------------
+# NEGA. Zaxira ikki yo'ldan yuriladi: systemd birligi va qo'lda
+# (`tender-zaxira zaxira`). Ular BOSHQA foydalanuvchi ostida
+# yurganda fayllar aralash egalikda qolardi va keyingi yurish
+# o'zidan oldingi fayllarga tega olmasligi mumkin edi.
+#
+# Katalogning o'zi yagona manba: undan nusxalanadi.
+for _f in "$FAYL" "${FAYL}.sha256" "$META" "${META}.sha256" \
+          ${FAYL_ARXIV:+"$FAYL_ARXIV" "${FAYL_ARXIV}.sha256"}; do
+    [ -f "$_f" ] || continue
+    chown --reference="$KATALOG" "$_f" 2>/dev/null || true
+    chmod 640 "$_f" 2>/dev/null || true
+done
+
 log "tiklash metama'lumoti: $(basename "$META") ($(wc -l < "$META") qator, sirsiz)"
 
 # --- TASHQI NUSXA -----------------------------------------------------------

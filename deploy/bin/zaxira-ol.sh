@@ -33,7 +33,21 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 BACKUP="${HERE}/backup.sh"
 [ -x "$BACKUP" ] || { echo "backup.sh yo'q: $BACKUP" >&2; exit 1; }
 
-XIZMAT_USER="${TENDERAI_USER:-tenderai}"
+# ROOT SIFATIDA YURADI -- `sudo` ISHLATILMAYDI.
+#
+# O'LCHANGAN NUQSON (2026-09-10). Avval bu skript `sudo -u tenderai`
+# bilan yurgizardi va o'rama `sudo` orqali root ga ko'tarilardi.
+# Systemd birligi esa `NoNewPrivileges=yes` bilan yuradi -- bu
+# bayroq SUID ko'tarilishini YADRO darajasida bloklaydi. Ya'ni
+# qo'lda yo'l ishlardi, TAYMER yo'li esa yiqilardi.
+#
+# Endi ikkala yo'l ham root: kalitlar to'g'ridan o'qiladi, SUID
+# yo'li umuman yo'q. Qumdon SAQLANADI (`ProtectSystem=strict`,
+# `ReadWritePaths`, `NoNewPrivileges`) -- root ham faqat zaxira
+# katalogiga yoza oladi.
+#
+# Fayl egaligi `backup.sh` da katalogdan nusxalanadi, ya'ni kim
+# yurgizganidan qat'i nazar bir xil bo'ladi.
 
 # KATALOG XIZMAT ROLI UCHUN OCHILADI.
 #
@@ -46,5 +60,5 @@ ILDIZ="$(cd "${HERE}/../.." && pwd)"
 chmod a+rX "$ILDIZ" "${ILDIZ}/deploy" "$HERE" 2>/dev/null || true
 find "$HERE" -maxdepth 1 -type f -name '*.sh' -exec chmod a+rx {} + 2>/dev/null || true
 
-echo "zaxira: ${MUHIT} (kod: ${HERE})  foydalanuvchi: ${XIZMAT_USER}"
-exec sudo -u "$XIZMAT_USER" -H "$BACKUP" "$MUHIT"
+echo "zaxira: ${MUHIT} (kod: ${HERE})  foydalanuvchi: root"
+exec "$BACKUP" "$MUHIT"
