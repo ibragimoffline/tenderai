@@ -63,10 +63,24 @@ log "asosiy baza: $ASOSIY_BAZA   sinov bazasi: $SINOV_BAZA"
 # Admin DSN — `postgres` bazasiga ulanib CREATE/DROP qilish uchun.
 ADMIN_DSN="$(printf '%s' "$XT_DB_DSN_OWNER" | sed "s/dbname=${ASOSIY_BAZA}/dbname=postgres/")"
 
-# --- 1) Eng oxirgi zaxira ----------------------------------------------------
-ZAXIRA="$(find "$KATALOG" -maxdepth 1 -name '*.dump' -printf '%T@ %p\n' 2>/dev/null \
-          | sort -rn | head -1 | cut -d' ' -f2- || true)"
-[ -n "$ZAXIRA" ] || xato "zaxira topilmadi: $KATALOG"
+# --- 1) Zaxira: MAHALLIY eng oxirgisi yoki BERILGAN yo'l ---------------------
+# `TIKLASH_ZAXIRA` berilsa AYNAN o'sha fayl tiklanadi. Bu uzoqdan
+# olib kelingan nusxani tiklash uchun: mahalliy artefaktni qayta
+# ishlatish "uzoqdan tiklandi" degan da'voni ISBOTLAMASDI --
+# u faqat mahalliy diskni sinardi.
+#
+# `TIKLASH_MANBA` esa DALILGA yoziladi va uni skript O'ZI
+# TAXMIN QILMAYDI: qiymatni faqat uzoqdan olib keladigan yo'l
+# qo'yadi.
+if [ -n "${TIKLASH_ZAXIRA:-}" ]; then
+    ZAXIRA="$TIKLASH_ZAXIRA"
+    [ -f "$ZAXIRA" ] || xato "berilgan zaxira topilmadi: $ZAXIRA"
+    log "zaxira MANBASI: ${TIKLASH_MANBA:-berilgan} ($ZAXIRA)"
+else
+    ZAXIRA="$(find "$KATALOG" -maxdepth 1 -name '*.dump' -printf '%T@ %p\n' 2>/dev/null \
+              | sort -rn | head -1 | cut -d' ' -f2- || true)"
+    [ -n "$ZAXIRA" ] || xato "zaxira topilmadi: $KATALOG"
+fi
 log "zaxira: $(basename "$ZAXIRA")  ($(du -h "$ZAXIRA" | cut -f1))"
 
 # BO'SH DUMP -- ZAXIRA EMAS.
@@ -207,7 +221,20 @@ ISBOT="${KATALOG:-$(dirname "$ZAXIRA")}/.tiklash-isboti"
     # MANBA: mahalliy nusxami yoki uzoqdan olib kelinganmi.
     # `TIKLASH_MANBA=uzoq` ni faqat uzoq nusxadan tiklaydigan
     # yo'l qo'yadi -- bu skript o'zi TAXMIN QILMAYDI.
-    echo "uzoq=${TIKLASH_MANBA:-mahalliy}"
+    echo "uzoq=$([ "${TIKLASH_MANBA:-mahalliy}" = "uzoq" ] && echo ha || echo mahalliy)"
+    # PROVENANS: qayerdan, qaysi backend, qaysi provayder va
+    # QAYSI obyekt kalitlaridan. "Uzoqdan tiklandi" degan yozuv
+    # tekshirib bo'lmaydigan bo'lsa u dalil emas.
+    echo "manba=${TIKLASH_MANBA:-mahalliy}"
+    echo "backend=${TIKLASH_BACKEND:--}"
+    echo "provayder=${TIKLASH_PROVAYDER:--}"
+    echo "obyekt_kalitlari=${TIKLASH_OBYEKTLAR:--}"
+    # Bu nuqtaga FAQAT sha256 mos kelgan va tiklash o'tgan
+    # holatda yetib kelinadi -- ya'ni `ok` o'lchovga asoslangan.
+    echo "checksum=ok"
+    echo "reliz_sha=$(sed -n '2s/^# sha: *//p' \
+        "$(readlink -f "${ILDIZ:-/opt/tenderai/$MUHIT}/current" 2>/dev/null)/.kuzatilgan-manifest" \
+        2>/dev/null || echo '-')"
 } > "$ISBOT"
 chmod 640 "$ISBOT" 2>/dev/null || true
 log "tiklash isboti yozildi: $ISBOT (uzoq=${TIKLASH_MANBA:-mahalliy})"

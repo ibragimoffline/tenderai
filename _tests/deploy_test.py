@@ -1382,6 +1382,7 @@ def _zaxira_urugi(katalog, uzoq="ha"):
                 "# tenderai tiklash isboti v1",
                 "sana=2026-09-09T00:00:00Z", "zaxira=" + os.path.basename(dump),
                 "rto_s=5", "jadval=59", "migratsiya=87",
+                "checksum=ok", "backend=s3", "provayder=backblaze-b2",
                 "uzoq=" + uzoq, ""]))
 
 
@@ -3820,6 +3821,19 @@ def test_zaxira_yangiligi_va_isbot():
                  (eski9, eski9))
         chiq = yurgiz("production", e5, c5, b5)
         check("E: 9 kunlik isbot TO'SADI", "tiklash isboti ESKI" in chiq)
+
+        # --- G) CHECKSUM TASDIG'I YO'Q -> TO'SIQ ---
+        # "Nusxa ko'chdi" degan xulosa "nusxa BUTUN" degani emas.
+        # Checksum tasdig'isiz isbot nimaning tiklanganini aytmaydi.
+        b7, e7, c7 = holat("g")
+        io.open(os.path.join(zx_yolі(b7, "production"), ".tiklash-isboti"),
+                "w", encoding="utf-8", newline=chr(10)).write(chr(10).join([
+                    "# tenderai tiklash isboti v1", "rto_s=5",
+                    "backend=s3", "uzoq=ha", ""]))
+        chiq = yurgiz("production", e7, c7, b7)
+        check("G: checksum tasdig'isiz isbot TO'SADI",
+              "checksum tasdig'i YO'Q" in chiq,
+              [q for q in chiq.splitlines() if "checksum" in q][:1])
 
         # --- F) STAGING DA BULAR FAQAT OGOHLANTIRISH ---
         # Staging sinov maydoni: ma'lumoti yo'qolsa qayta yasaladi.

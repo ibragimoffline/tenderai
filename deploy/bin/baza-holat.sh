@@ -175,6 +175,74 @@ done
 [ "$(rol tai_app rolcanlogin)"     = "false" ] && ok "tai_app login=false (guruh roli)" \
     || belgi "tai_app LOGIN qila oladi"
 
+# --- 5) 0085 SHARTLARI — FAQAT SANOQ ------------------------------------------
+# NEGA ALOHIDA. `public.app_user` mavjudligi 0085 ni QO'LLASA
+# BO'LADI degani emas. Migratsiya ikki shartdan biri bajarilgandagina
+# tushiradi: jadval BO'SH, yoki har bir eski hisob `erp.app_user` da
+# BOR. Ikkalasi ham bajarilmasa u TO'XTAYDI -- ya'ni joylashtiruv
+# migratsiya qadamida yiqilardi.
+#
+# Buni OLDINDAN bilish kerak: aks holda "zaxira tayyor, chiqamiz"
+# deb boshlab, o'rtada to'xtardik.
+#
+# FAQAT SANOQ. Parol xeshi, token va foydalanuvchi nomi CHIQMAYDI.
+if [ "$(q "SELECT (to_regclass('public.app_user') IS NOT NULL)::text")" = "true" ]; then
+    echo
+    echo "5. 0085 SHARTLARI (faqat sanoq)"
+    N_ESKI="$(q "SELECT count(*) FROM public.app_user")"
+    N_SESS="$(q "SELECT coalesce((SELECT count(*) FROM public.app_session),-1)")"
+    echo "  public.app_user qatorlar    : ${N_ESKI}"
+    echo "  public.app_session qatorlar : $([ "$N_SESS" = "-1" ] && echo '(jadval yo'\''q)' || echo "$N_SESS")"
+
+    if [ "$N_ESKI" = "0" ]; then
+        ok "shart (a) BAJARILDI: eski jadval BO'SH — yo'qotadigan ma'lumot yo'q"
+    elif [ "$(q "SELECT count(*) FROM information_schema.tables
+                  WHERE table_schema='erp' AND table_name='app_user'")" != "1" ]; then
+        belgi "eski jadvalda ${N_ESKI} ta hisob bor, \`erp.app_user\` esa YO'Q
+   — ko'chirish tekshirib bo'lmaydi, 0085 TO'XTAYDI"
+    else
+        N_ERP="$(q "SELECT count(*) FROM erp.app_user")"
+        N_KOCHMAGAN="$(q "SELECT count(*) FROM public.app_user l
+                           WHERE NOT EXISTS (SELECT 1 FROM erp.app_user e
+                                              WHERE lower(e.username) = lower(l.username))")"
+        N_IKKILAN="$(q "SELECT count(*) FROM (
+                          SELECT lower(l.username) FROM public.app_user l
+                            JOIN erp.app_user e ON lower(e.username) = lower(l.username)
+                           GROUP BY 1 HAVING count(*) > 1) t")"
+        echo "  erp.app_user qatorlar       : ${N_ERP}"
+        echo "  ko'chmagan                  : ${N_KOCHMAGAN}"
+        echo "  ikkilangan moslik           : ${N_IKKILAN}"
+        if [ "$N_KOCHMAGAN" = "0" ] && [ "$N_IKKILAN" = "0" ]; then
+            ok "shart (b) BAJARILDI: har bir eski hisob ERP da bor"
+        else
+            belgi "0085 SHARTI BAJARILMAGAN: ko'chmagan=${N_KOCHMAGAN} ikkilangan=${N_IKKILAN}
+   — migratsiya jadvalni QOLDIRADI va joylashtiruv TO'XTAYDI"
+        fi
+    fi
+
+    # KUTILMAGAN BOG'LIQLIK. Migratsiya `CASCADE` ishlatmaydi va
+    # kutilmagan bog'liqlik bo'lsa ataylab to'xtaydi.
+    N_FK="$(q "SELECT count(*) FROM pg_constraint c
+                 JOIN pg_class t ON t.oid = c.confrelid
+                 JOIN pg_class src ON src.oid = c.conrelid
+                 JOIN pg_namespace n ON n.oid = t.relnamespace
+                WHERE c.contype='f' AND n.nspname='public'
+                  AND t.relname='app_user' AND src.relname <> 'app_session'")"
+    N_VIEW="$(q "SELECT count(DISTINCT dep.relname) FROM pg_depend d
+                   JOIN pg_rewrite r ON r.oid = d.objid
+                   JOIN pg_class dep ON dep.oid = r.ev_class
+                   JOIN pg_class src ON src.oid = d.refobjid
+                   JOIN pg_namespace n ON n.oid = src.relnamespace
+                  WHERE n.nspname='public' AND src.relname='app_user'
+                    AND dep.relname NOT IN ('app_user','app_session')")"
+    if [ "$N_FK" = "0" ] && [ "$N_VIEW" = "0" ]; then
+        ok "kutilmagan bog'liqlik yo'q (FK=0, ko'rinish=0)"
+    else
+        belgi "KUTILMAGAN BOG'LIQLIK: FK=${N_FK} ko'rinish=${N_VIEW}
+   — 0085 ataylab to'xtaydi (\`CASCADE\` ishlatilmaydi)"
+    fi
+fi
+
 echo
 echo "=============================================================="
 if [ "$SILJISH" -eq 0 ]; then

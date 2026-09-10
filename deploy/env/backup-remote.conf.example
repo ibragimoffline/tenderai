@@ -27,24 +27,78 @@
 USUL=ssh
 
 # ----------------------------------------------------------------------------
-# USUL=s3 uchun
+# USUL=s3 uchun — Backblaze B2 (S3 ga mos API)
 # ----------------------------------------------------------------------------
-# `rclone.conf` FAQAT root o'qiydigan faylda (0600 root:root) va
-# muhit faylida EMAS: ilova unga tegmaydi.
-#   S3_REMOTE   — `rclone.conf` dagi remote nomi
-#   S3_BUCKET   — chelak nomi (faqat zaxira uchun ajratilgan)
-#   S3_PREFIKS  — obyekt kaliti prefiksi (muhit nomi tavsiya etiladi)
+# NEGA B2: zaxira JORIY SERVERNING nosozlik doirasidan TASHQARIDA
+# bo'lishi kerak. Ikkinchi disk ham, ayni provayderdagi ikkinchi
+# hajm ham buni bermaydi.
 #
-# KALIT TOR HUQUQLI BO'LSIN. Tavsiya: `PutObject` + `ListBucket` +
-# `GetObject`, `DeleteObject` SIZ. Saqlash muddati chelakning
-# lifecycle qoidasi bilan, BOSHQA hisob ostida qo'llanadi -- manba
-# mezbon buzilsa zaxirani o'chira olmasin.
-# TLS majburiy (rclone S3 uchun standart holda HTTPS ishlatadi).
+# KALITLAR SHU FAYLDA. Alohida `rclone.conf` KERAK EMAS: o'rama
+# rclone ni `RCLONE_CONFIG_*` muhit o'zgaruvchilari bilan sozlaydi.
+# Sabab -- ikkinchi sir fayli ikkinchi xatar: uni ham 0600 tutish,
+# zaxiralamaslik va almashtirganda ikki joyni yangilash kerak
+# bo'lardi.
 #
-# S3_REMOTE=zaxira
+# KALIT ARGUMENTGA TUSHMAYDI. `--s3-access-key-id ...` `ps` da
+# serverdagi HAR QANDAY foydalanuvchiga ko'rinardi.
+#
+# S3_ENDPOINT HTTPS bo'lishi SHART — o'rama tekshiradi.
+#
+# ENDPOINT NI B2 PANELIDAN OLING (chelak yaratilgach ko'rinadi):
+#   https://s3.<region>.backblazeb2.com     masalan eu-central-003
+#
+# S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
+# S3_REGION=eu-central-003
+# S3_PROVIDER=Other
 # S3_BUCKET=tenderai-zaxira
-# S3_PREFIKS=production
-# RCLONE_CONF=/etc/tenderai/rclone.conf
+# S3_PREFIX=tenderai
+#
+# --- ILOVA KALITI (application key) -----------------------------------------
+# MASTER KALIT ISHLATILMAYDI. B2 da "Master Application Key" butun
+# hisobni boshqaradi; u buzilsa zaxira ham, boshqa hamma narsa ham
+# ketadi.
+#
+# AYNAN SHU CHELAK uchun alohida ilova kaliti yarating
+# (B2 panelida: App Keys -> Add a New Application Key):
+#
+#   Name of Key      : tenderai-zaxira
+#   Allow access to  : FAQAT `tenderai-zaxira` chelagi
+#   Type of Access   : Read and Write
+#   File name prefix : tenderai/          (prefiks bo'yicha cheklash)
+#
+# `Read and Write` KERAK, `Delete` esa KERAK EMAS: o'rama uzoqda
+# hech narsa o'chirmaydi. O'qish tiklash mashqi uchun shart --
+# uzoqdan qaytarib olmasdan "tiklanadi" deb bo'lmaydi.
+#
+# S3_ACCESS_KEY_ID=<keyID>
+# S3_SECRET_ACCESS_KEY=<applicationKey>
+
+# ----------------------------------------------------------------------------
+# SAQLASH MUDDATI — CHELAK QOIDASI BILAN, SKRIPT BILAN EMAS
+# ----------------------------------------------------------------------------
+# O'rama uzoqda HECH NARSA O'CHIRMAYDI va bu ataylab: manba mezbon
+# buzilganda (shifrlovchi dastur, o'g'irlangan kalit) o'chirish
+# huquqi zaxirani ham yo'q qilardi.
+#
+# Muddat B2 ning O'Z lifecycle qoidasi bilan qo'llanadi. Boshlang'ich
+# siyosat (loyihada qat'iyroq qoida bo'lmasa):
+#
+#   kunlik  : 14 kun
+#   haftalik: 8 hafta
+#   oylik   : 6 oy
+#
+# QOIDANI YOQISHDAN OLDIN uni hujjatlashtiring va TEKSHIRING: noto'g'ri
+# yozilgan lifecycle BUTUN zaxirani jimgina o'chirishi mumkin.
+# Tavsiya: avval `daysFromUploadingToHiding` ni qo'ying va bir necha
+# kun kuzating, `daysFromHidingToDeleting` ni KEYIN yoqing.
+#
+# Obyekt kalitlari tur bo'yicha ajratilgan, ya'ni qoidani turga
+# qarab boshqacha qo'ysa bo'ladi:
+#
+#   tenderai/production/db/YYYY/MM/DD/...
+#   tenderai/production/uploads/YYYY/MM/DD/...
+#   tenderai/production/meta/YYYY/MM/DD/...
+#   tenderai/production/checksums/YYYY/MM/DD/...
 
 # ----------------------------------------------------------------------------
 # USUL=ssh uchun

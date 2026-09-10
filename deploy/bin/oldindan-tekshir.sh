@@ -576,6 +576,8 @@ if [ -d "$ZAXIRA_YOL" ]; then
         I_YOSH_KUN=$(( ( $(date +%s) - $(stat -c %Y "$ISBOT_FAYL") ) / 86400 ))
         I_UZOQ="$(sed -n 's/^uzoq=//p' "$ISBOT_FAYL" | head -1)"
         I_RTO="$(sed -n 's/^rto_s=//p' "$ISBOT_FAYL" | head -1)"
+        I_CHK="$(sed -n 's/^checksum=//p' "$ISBOT_FAYL" | head -1)"
+        I_BACKEND="$(sed -n 's/^backend=//p' "$ISBOT_FAYL" | head -1)"
         if [ "$I_YOSH_KUN" -gt "$ISBOT_MUDDAT_KUN" ]; then
             if [ "$MUHIT" = "production" ]; then
                 tosiq "tiklash isboti ESKI: ${I_YOSH_KUN} kun (chegara ${ISBOT_MUDDAT_KUN}).
@@ -590,8 +592,13 @@ if [ -d "$ZAXIRA_YOL" ]; then
    Bu mexanizmni isbotlaydi, lekin \"disk yo'qolsa tiklanadi\" degan
    da'voni ISBOTLAMAYDI. Ishlab chiqarish uchun mashq UZOQ nusxadan
    olinishi shart."
+        elif [ "$MUHIT" = "production" ] && [ "$I_CHK" != "ok" ]; then
+            # NUSXA KO'CHDI != NUSXA BUTUN. Checksum tasdig'isiz
+            # "tiklandi" degan yozuv nimaning tiklanganini aytmaydi.
+            tosiq "tiklash isbotida checksum tasdig'i YO'Q (checksum=${I_CHK:-?})"
         else
-            ok "tiklash isboti: ${I_YOSH_KUN} kun oldin, RTO=${I_RTO:-?}s, uzoq=${I_UZOQ:-?}"
+            ok "tiklash isboti: ${I_YOSH_KUN} kun oldin, RTO=${I_RTO:-?}s,
+             uzoq=${I_UZOQ:-?}, backend=${I_BACKEND:--}, checksum=${I_CHK:-?}"
         fi
     fi
 fi
