@@ -214,6 +214,24 @@ if "${ARGV[@]}"; then
     exit 0
 fi
 echo
+# YOZISH YIQILDI — O'QISH ISHLAYDIMI?
+#
+# `403` ikki xil sozlama xatosidan kelib chiqadi va ularning
+# tuzatishi BOSHQACHA: kalit faqat o'qishga ruxsat bergan, yoki
+# kalit umuman boshqa chelakka bog'langan. Ro'yxatni so'rab
+# ko'rish ikkisini AJRATADI -- taxmin qilmaymiz.
+ORAMA_YOL="${ARGV[0]}"
+if [ -x "$ORAMA_YOL" ]; then
+    echo "  qo'shimcha tashxis: o'qish huquqi tekshirilmoqda…" >&2
+    if "$ORAMA_YOL" --royxat "$MUHIT" zond >/dev/null 2>&1; then
+        echo "  O'QISH ISHLAYDI, YOZISH yiqildi ->" >&2
+        echo "  kalitda YOZISH huquqi yo'q (B2: 'Read and Write' kerak)." >&2
+    else
+        echo "  O'QISH HAM YIQILDI ->" >&2
+        echo "  kalit boshqa chelakka bog'langan, yoki prefiks cheklovi" >&2
+        echo "  mos kelmayapti, yoki chelak nomi noto'g'ri." >&2
+    fi
+fi
 echo "NATIJA: ZOND YIQILDI — yuqoridagi xabarga qarang." >&2
 echo "  Ishlab chiqarish dumpini YUBORMANG: avval shartnomani tuzating." >&2
 exit 1
