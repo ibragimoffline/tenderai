@@ -4038,6 +4038,27 @@ def test_sozlama_tekshiruvi():
         # bo'lardi.
         check("HTTPS emasligi ushlanadi", "endpoint_https=YO'Q" in chiq)
         check("bu holatda ham sir chiqmadi", SIR_ID not in chiq)
+
+        # --- NAMUNA QIYMATI "TO'LDIRILGAN" DEB SANALMASIN ---
+        # O'LCHANGAN YOLG'ON YASHIL (2026-09-10): sozlama fayli
+        # namunadan nusxa qilib o'rnatilgandi va asbob uni
+        # `sozlama TO'LIQ` dedi. "Bo'sh emas" va "to'ldirilgan" --
+        # ikki xil narsa.
+        #
+        # REPOZITORIYDAGI HAQIQIY NAMUNA bilan sinaladi: u
+        # o'zgarsa ham shart kuchda qoladi.
+        xom = _oqi_ildiz("deploy/env/backup-remote.conf.example")
+        faqat_kod = N.join(q for q in xom.splitlines()
+                           if q.strip() and not q.lstrip().startswith("#"))
+        kod, chiq = yur(faqat_kod + N)
+        check("NAMUNA fayli 'TO'LIQ' deb sanalmaydi",
+              "NATIJA: sozlama TO'LIQ" not in chiq,
+              [q for q in chiq.splitlines() if "NATIJA" in q][:1])
+        check("namuna qiymati NAMUNA deb belgilanadi", "=NAMUNA" in chiq)
+        check("namunada kod != 0", kod != 0, f"kod={kod}")
+        # Mavjud bo'lmagan kalit fayli ham ushlanadi: yo'l
+        # yozilgani fayl BORLIGINI anglatmaydi.
+        check("yo'q kalit fayli ushlanadi", "FAYL_YO'Q" in chiq)
     finally:
         shutil.rmtree(baza, ignore_errors=True)
 

@@ -55,10 +55,47 @@ if [ "${2:-}" = "--sozlama" ]; then
     . "$SZ"
     set +a
     YETISHMAYDI=0
+    # NAMUNA QIYMATI TO'LDIRILGAN EMAS.
+    #
+    # O'LCHANGAN YOLG'ON YASHIL (2026-09-10). Sozlama fayli namunadan
+    # nusxa qilib o'rnatilgan edi va uning ichida `zaxira.example.uz`
+    # kabi o'rin-egalari turardi. Asbob "bo'sh emas" deb sanadi va
+    # `sozlama TO'LIQ` dedi -- ya'ni namunani sozlama deb ko'rsatdi.
+    #
+    # "Bo'sh emas" va "to'ldirilgan" -- ikki xil narsa. Loyihaning
+    # `oldindan-tekshir.sh` i buni allaqachon biladi (`password=REPLACE`,
+    # `example.uz`); shu qoida bu yerga ham keltirildi.
+    namuna_mi() {
+        case "$1" in
+            *example.uz*|*example.com*|*EXAMPLE*) return 0 ;;
+            "<"*">"|*REPLACE*|*"o'rin-egasi"*)     return 0 ;;
+        esac
+        return 1
+    }
     bor() {
         eval "v=\${${1}:-}"
-        if [ -n "$v" ]; then echo "${2}=ha"
-        else echo "${2}=yo'q"; YETISHMAYDI=$((YETISHMAYDI+1)); fi
+        if [ -z "$v" ]; then
+            echo "${2}=yo'q"; YETISHMAYDI=$((YETISHMAYDI+1))
+        elif namuna_mi "$v"; then
+            echo "${2}=NAMUNA"; YETISHMAYDI=$((YETISHMAYDI+1))
+        else
+            echo "${2}=ha"
+        fi
+    }
+    # FAYL YO'LI UCHUN: mavjudligi ham tekshiriladi. Yo'l yozilgani
+    # fayl BORLIGINI anglatmaydi va kalit yo'q bo'lsa zond baribir
+    # yiqilardi -- buni oldinroq bilish arzonroq.
+    bor_fayl() {
+        eval "v=\${${1}:-}"
+        if [ -z "$v" ]; then
+            echo "${2}=yo'q"; YETISHMAYDI=$((YETISHMAYDI+1))
+        elif namuna_mi "$v"; then
+            echo "${2}=NAMUNA"; YETISHMAYDI=$((YETISHMAYDI+1))
+        elif [ ! -f "$v" ]; then
+            echo "${2}=FAYL_YO'Q"; YETISHMAYDI=$((YETISHMAYDI+1))
+        else
+            echo "${2}=ha"
+        fi
     }
     echo "usul            : ${USUL:-(berilmagan -> ssh)}"
     if [ "${USUL:-ssh}" = "s3" ]; then
@@ -79,7 +116,7 @@ if [ "${2:-}" = "--sozlama" ]; then
         bor UZOQ_HOST  host_present
         bor UZOQ_USER  user_present
         bor UZOQ_YOL   yol_present
-        bor SSH_KALIT  kalit_present
+        bor_fayl SSH_KALIT kalit_present
     fi
     echo
     if [ "$YETISHMAYDI" -eq 0 ]; then
