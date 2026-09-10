@@ -4129,19 +4129,20 @@ def test_sozlama_tekshiruvi():
             check(f"nosozlik qatlami e'lon qilingan: {qat}",
                   f'QATLAM="{qat}"' in w)
         check("rclone xatosi O'QILADI", "RC_XATO" in w)
-    # CHEKLANGAN KALIT: rclone chelakni so'ramasin. AYNAN BITTA
-    # chelakka cheklangan B2 kaliti `HeadBucket` ga huquqga ega
-    # emas va TO'G'RI sozlangan kalit bilan ham 403 chiqardi.
-    check("chelak mavjudligi tekshirilmaydi",
-          "NO_CHECK_BUCKET" in w)
-    # ZOND YIQILSA: o'qish/yozish ajratilsin -- ularning tuzatishi
-    # BOSHQACHA va taxmin qilish operatorni noto'g'ri joyga
-    # yuborardi.
-    z = oqi("bin", "zaxira-uzoq-sinov.sh")
-    check("yiqilganda o'qish huquqi ham sinaladi", "--royxat" in z)
-    check("o'qish/yozish farqi aytiladi",
-          "O'QISH ISHLAYDI, YOZISH yiqildi" in z
-          and "O'QISH HAM YIQILDI" in z)
+        # CHEKLANGAN KALIT: rclone chelakni so'ramasin. AYNAN
+        # BITTA chelakka cheklangan B2 kaliti `HeadBucket` ga
+        # huquqga ega emas va TO'G'RI sozlangan kalit bilan ham
+        # 403 chiqardi.
+        check("chelak mavjudligi tekshirilmaydi",
+              "NO_CHECK_BUCKET" in w)
+        # ZOND YIQILSA: o'qish/yozish ajratilsin -- ularning
+        # tuzatishi BOSHQACHA va taxmin qilish operatorni
+        # noto'g'ri joyga yuborardi.
+        z = oqi("bin", "zaxira-uzoq-sinov.sh")
+        check("yiqilganda o'qish huquqi ham sinaladi", "--royxat" in z)
+        check("o'qish/yozish farqi aytiladi",
+              "O'QISH ISHLAYDI, YOZISH yiqildi" in z
+              and "O'QISH HAM YIQILDI" in z)
         check("eski TAXMIN olib tashlandi",
               "kalit, chelak yoki huquq?" not in _izohsiz(w))
     finally:
