@@ -29,6 +29,30 @@ export const en: Dict = {
     '{n} matching tenders are outside the regions set in your profile — '
     + 'they do not reach the broker queue.',
   'match.toProfile': 'Change regions',
+
+  // --- EMPTY "Matches for you": THE REASON ---
+  'match.emptyNoProducts': 'Catalog is empty',
+  'match.emptyNoProductsBody':
+    'Matching runs on the products in your catalog. Add at least one '
+    + 'product first.',
+  'match.emptyUncoded': 'Catalog is not coded yet',
+  'match.emptyUncodedBody':
+    'Matching works on official classifier codes. None of your {n} '
+    + 'products has a code assigned, so the result is empty — filters '
+    + 'have nothing to do with it.',
+  'match.emptyPending': 'Code suggestions await approval',
+  'match.emptyPendingBody':
+    '{n} code suggestions are not approved. An unapproved suggestion '
+    + 'never becomes a match — review them in the catalog.',
+  'match.emptyPartial': 'Code coverage is incomplete',
+  'match.emptyPartialBody':
+    'No open tenders found for the coded products. {n} of {jami} '
+    + 'products still have no code and were not searched at all.',
+  'match.emptyNoMatch': 'No matching open tenders',
+  'match.emptyNoMatchBody':
+    'Your catalog is fully coded. No open tender matching your codes '
+    + 'has been published yet.',
+  'match.toCatalog': 'Go to catalog',
   'app.matchedBy.code': 'Exact product line match: {items}',
   'cat.fNameNote': 'Be specific, for example: “Computer monitor”.',
   'cat.moreOptions': 'Additional details',

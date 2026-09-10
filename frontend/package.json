@@ -8,12 +8,13 @@
     "dev": "vite",
     "build": "tsc -b --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit && npm run test:markdown && npm run test:xato",
+    "typecheck": "tsc -b --noEmit && npm run test:markdown && npm run test:xato && npm run test:katalog",
     "test:markdown": "node --import=./sinov-yuklagich.mjs src/markdown.test.ts",
     "test:colors": "node --import=./sinov-yuklagich.mjs src/colors.test.ts",
     "test:xato": "node --import=./sinov-yuklagich.mjs src/xato.test.ts",
     "test:xulq": "vitest run --config vitest.config.ts",
-    "gate": "npm run typecheck && npm run test:xulq && vite build"
+    "gate": "npm run typecheck && npm run test:xulq && vite build",
+    "test:katalog": "node --import=./sinov-yuklagich.mjs src/katalogBosh.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/ibm-plex-sans": "^5.3.0",

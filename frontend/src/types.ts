@@ -140,9 +140,39 @@ export interface HududXulosa {
   jami: number
 }
 
+/**
+ * KATALOG KODLASH HOLATI — bo'shlikning SABABI.
+ *
+ * `/catalog/match` HAR javobda beradi (`api/kodlash.py:holat()`).
+ * Sonlar interfeysga "moslik yo'q" bilan "katalog kodlanmagan" ni
+ * AJRATISH uchun kerak: bular butunlay boshqa holatlar va keyingi
+ * qadami ham boshqa.
+ */
+export interface KodlashHolat {
+  /** Katalogdagi mahsulotlar soni. */
+  mahsulot: number
+  /** Tasdiqlangan kodi bor mahsulotlar. */
+  kodlangan: number
+  /** Kodi yo'q mahsulotlar (`mahsulot - kodlangan`). */
+  kodsiz: number
+  /** Odam tasdig'ini kutayotgan kod takliflari. */
+  kutayotgan_taklif: number
+  /**
+   * Qamrov foizi. `null` — O'LCHANMAGAN (katalog bo'sh, maxraj yo'q),
+   * NOL EMAS.
+   */
+  qamrov_pct: Nullable<number>
+}
+
 export interface CatalogMatchResponse extends Paged<TenderRow> {
   hudud?: HududXulosa
   atama_kesildi?: number
+  /**
+   * Bo'sh natijaning sababini o'qish uchun. `undefined` — eski
+   * javob; unda hech qanday sabab DA'VO QILINMAYDI
+   * (`katalogBosh.ts`).
+   */
+  holat?: KodlashHolat
 }
 
 export interface AiSummary {

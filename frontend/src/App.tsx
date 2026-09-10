@@ -12,6 +12,7 @@ import TenderTable from './components/TenderTable'
 import Pagination from './components/Pagination'
 import ProfileForm from './components/ProfileForm'
 import CatalogView from './components/CatalogView'
+import { katalogBoshHolat } from '@/katalogBosh'
 import AccountSettings from './components/AccountSettings'
 import CompanyDocuments from './components/CompanyDocuments'
 import Freshness from './components/Freshness'
@@ -43,7 +44,7 @@ const TenderDrawer = lazy(() => import('./components/TenderDrawer'))
 const ChatPanel = lazy(() => import('./components/ChatPanel'))
 import type {
   Category, CompanyProfileData, CatalogMatchInfo, Freshness as FreshnessData,
-  HududXulosa, Product, Region, SavedSearch, Stats, Status, TenderRow,
+  HududXulosa, KodlashHolat, Product, Region, SavedSearch, Stats, Status, TenderRow,
 } from '@/types'
 
 const PAGE_SIZE = 25
@@ -109,6 +110,10 @@ export default function App() {
   // "Sizga mos" natijasidagi hudud xulosasi. `null` — hali
   // o'lchanmagan yoki bu ko'rinish katalog rejimida emas.
   const [hudud, setHudud] = useState<HududXulosa | null>(null)
+  // KATALOG KODLASH HOLATI — bo'sh natijaning SABABI.
+  // `null` — O'LCHANMAGAN (boshqa ko'rinish yoki eski javob), NOL EMAS:
+  // shunda hech qanday sabab da'vo qilinmaydi.
+  const [kodHolat, setKodHolat] = useState<KodlashHolat | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [catalogError, setCatalogError] = useState<string | null>(null)
 
@@ -270,7 +275,7 @@ export default function App() {
       let rows: { items: TenderRow[]; total: number }
       if (view === 'match' && activeSearchId) {
         // Saqlangan qidiruv faol — kalit so'z bo'yicha ballaydi
-        setHudud(null)
+        setHudud(null); setKodHolat(null)
         rows = await api.match({
           profile: profile || { keywords: [], regions: [], currency: null, min_cost: null, max_cost: null },
           status: filters.status, region: filters.region, currency: filters.currency,
@@ -305,9 +310,10 @@ export default function App() {
           })),
         }
         setHudud(r.hudud ?? null)
+        setKodHolat(r.holat ?? null)
         api.catalogSeen().then(() => setCatalogNew((n) => ({ ...n, new: 0 }))).catch(() => {})
       } else {
-        setHudud(null)
+        setHudud(null); setKodHolat(null)
         rows = await api.tenders({
           status: filters.status, region: filters.region,
           currency: filters.currency, q: filters.q, category: filters.category,
@@ -504,6 +510,11 @@ export default function App() {
               items={data.items}
               mode={view}
               loading={loading}
+              /* Bo'sh natijaning sababi. Katalog rejimida EMAS bo'lsa
+                 `kodHolat` `null` va jadval eski umumiy matnni beradi. */
+              bosh={view === 'match' && !activeSearchId
+                ? katalogBoshHolat(kodHolat) : null}
+              onKatalog={() => goto('catalog')}
               /* Status ustuni behuda: filtr bitta statusda bo'lsa har qator bir xil
                  bo'ladi. Faqat "barcha statuslar" tanlanganda ko'rsatamiz. */
               showStatus={!filters.status}

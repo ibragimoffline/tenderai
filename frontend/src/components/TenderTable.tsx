@@ -7,9 +7,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { TenderRow } from '@/types'
+import type { KatalogBosh } from '@/katalogBosh'
 
 // Ball rozetkasi rangi (Sizga mos ko'rinishi uchun).
 // Tailwind sinf nomlarini DINAMIK QURIB bo'lmaydi (JIT ularni topa olmaydi),
@@ -97,10 +99,20 @@ interface TenderTableProps {
   onSort: (col: string) => void
   loading: boolean
   showStatus: boolean
+  /**
+   * Bo'sh natijaning SABABI ("Sizga mos" uchun, `katalogBosh.ts`).
+   *
+   * Berilmasa — eski umumiy matn qoladi. Jadval o'zi sabab
+   * O'YLAB TOPMAYDI: u katalog holatini bilmaydi va bilishi ham
+   * kerak emas.
+   */
+  bosh?: KatalogBosh | null
+  /** "Katalogga o'tish" bosilganda. Berilmasa tugma ko'rinmaydi. */
+  onKatalog?: () => void
 }
 
 export default function TenderTable({
-  items, mode, onSelect, sort, onSort, loading, showStatus,
+  items, mode, onSelect, sort, onSort, loading, showStatus, bosh, onKatalog,
 }: TenderTableProps) {
   const t = useT()
   const f = useFormat()
@@ -125,12 +137,29 @@ export default function TenderTable({
   }
 
   if (!loading && items.length === 0) {
+    // SABAB BO'LSA — O'SHA AYTILADI. Filtr maslahati faqat qamrov
+    // to'liq bo'lganda beriladi: kodlanmagan katalogda u odamni
+    // butunlay boshqa tomonga yuboradi (§`katalogBosh.ts`).
+    const sarlavha = bosh ? bosh.sarlavha : 'common.notFound'
+    const izoh = bosh ? bosh.izoh : 'table.empty'
     return (
-      <Empty className="rounded-xl border border-dashed bg-card">
+      <Empty className="rounded-xl border border-dashed bg-card"
+             data-bosh={bosh?.kalit}>
         <EmptyHeader>
-          <EmptyTitle>{t('common.notFound')}</EmptyTitle>
-          <EmptyDescription>{t('table.empty')}</EmptyDescription>
+          <EmptyTitle>{t(sarlavha)}</EmptyTitle>
+          <EmptyDescription>{t(izoh, bosh?.vars)}</EmptyDescription>
+          {bosh?.filtrMaslahati && bosh.izoh !== 'table.empty' && (
+            <EmptyDescription>{t('table.empty')}</EmptyDescription>
+          )}
         </EmptyHeader>
+        {onKatalog && bosh && bosh.kalit !== 'olchanmadi'
+          && bosh.kalit !== 'moslik_yoq' && (
+          <EmptyContent>
+            <Button variant="outline" size="sm" onClick={onKatalog}>
+              {t('match.toCatalog')}
+            </Button>
+          </EmptyContent>
+        )}
       </Empty>
     )
   }

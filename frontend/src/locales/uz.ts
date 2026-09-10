@@ -33,6 +33,33 @@ export const uz = {
     '{n} ta mos tender profilingizdagi hududdan tashqarida — ular broker '
     + 'navbatiga tushmaydi.',
   'match.toProfile': 'Hududni o‘zgartirish',
+
+  // --- "SIZGA MOS" BO'SH BO'LGANDA: SABABI ---
+  // "Filtrlarni o'zgartirib ko'ring" KODLANMAGAN katalogda YOLG'ON
+  // maslahat edi (`katalogBosh.ts` dagi izohga qarang).
+  'match.emptyNoProducts': 'Katalog bo‘sh',
+  'match.emptyNoProductsBody':
+    'Moslik katalogingizdagi mahsulotlar bo‘yicha topiladi. Avval '
+    + 'kamida bitta mahsulot qo‘shing.',
+  'match.emptyUncoded': 'Katalog hali kodlanmagan',
+  'match.emptyUncodedBody':
+    'Moslik rasmiy tasniflagich kodlari bo‘yicha ishlaydi. {n} ta '
+    + 'mahsulotning birortasiga ham kod biriktirilmagan, shuning uchun '
+    + 'natija bo‘sh — filtrning bunga aloqasi yo‘q.',
+  'match.emptyPending': 'Kod takliflari tasdiq kutmoqda',
+  'match.emptyPendingBody':
+    '{n} ta kod taklifi tasdiqlanmagan. Tasdiqlanmagan taklif moslikka '
+    + 'aylanmaydi — katalogda ularni ko‘rib chiqing.',
+  'match.emptyPartial': 'Kod qamrovi to‘liq emas',
+  'match.emptyPartialBody':
+    'Kodlangan mahsulotlar bo‘yicha ochiq tender topilmadi. {jami} ta '
+    + 'mahsulotdan {n} tasi hali kodlanmagan va ular umuman '
+    + 'qidirilmadi.',
+  'match.emptyNoMatch': 'Mos ochiq tender yo‘q',
+  'match.emptyNoMatchBody':
+    'Katalog to‘liq kodlangan. Hozircha kodlaringizga mos ochiq tender '
+    + 'e’lon qilinmagan.',
+  'match.toCatalog': 'Katalogga o‘tish',
   'app.matchedBy.code': 'Mahsulot lotiga aniq mos: {items}',
   'cat.fNameNote': 'Turini aniq yozing, masalan: “Kompyuter monitori”.',
   'cat.moreOptions': 'Qo‘shimcha ma’lumotlar',
