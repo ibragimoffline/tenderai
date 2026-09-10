@@ -859,6 +859,41 @@ def vectorize_codes(conn, args) -> None:
         cur.execute("SELECT code, content_hash FROM good_code_embedding")
         bor = {r["code"]: r["content_hash"] for r in cur.fetchall()}
 
+    # MARKAZLANMAGAN QATORLARNI QAYTA MARKAZLASH — MODELSIZ.
+    #
+    # O'LCHANGAN NUQSON (ishlab chiqarish, 2026-09-10). Lug'at markaz
+    # YO'Q paytda vektorlangan: `embedding` yozilgan, `embedding_c`
+    # esa NULL qolgan. Skript o'zi to'g'ri ogohlantirdi ("markazdan
+    # keyin qayta yurgizing"), lekin o'sha maslahat ISHLAMAYDI:
+    # qayta yurishda `content_hash` mos keladi va hamma qator
+    # o'tkazib yuboriladi. Natija: 842 koddan 841 tasi markazlanmagan
+    # qoldi va `SQL_SEM` (`embedding_c IS NOT NULL`) ularni KO'RMADI —
+    # semantik taklif signali jimgina o'lik edi.
+    #
+    # AYNI NUQSON MARKAZ HAR QAYTA HISOBLANGANDA TAKRORLANADI.
+    # `recompute_centroid()` FAQAT `tender_embedding` ni yangilaydi;
+    # lug'at vektorlari eski markazga bog'liq bo'lib qoladi va buni
+    # hech narsa ko'rsatmaydi -- sifat sekin-asta yomonlashadi,
+    # xato chiqmaydi.
+    #
+    # MODEL CHAQIRILMAYDI: bu ayirish + normallashtirish, xuddi
+    # `recompute_centroid()` ning o'zidagi kabi.
+    # `--count-only` HECH NARSA YOZMAYDI -- bu uning butun shartnomasi.
+    if markaz is not None and not args.count_only:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE good_code_embedding
+                   SET embedding_c = l2_normalize(embedding - %(mvec)s::vector),
+                       centroid_id = %(mid)s
+                 WHERE embedding IS NOT NULL
+                   AND (embedding_c IS NULL
+                        OR centroid_id IS DISTINCT FROM %(mid)s)""",
+                {"mvec": markaz["vec"], "mid": markaz["id"]})
+            qayta = cur.rowcount
+        conn.commit()
+        if qayta:
+            print(f"  [i] {qayta:,} kod QAYTA MARKAZLANDI (model chaqirilmadi)")
+
     ish = []
     for r in rows:
         matn = kod_matni(r)
