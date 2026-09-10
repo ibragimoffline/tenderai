@@ -4184,11 +4184,29 @@ def test_zaxira_oramasi():
     # eski bo'lsa u ILOVA roli bilan dump olib, tiklash metasini
     # yozmasdi. `backup.sh` xizmatning o'zi emas, TEXNIK XIZMAT
     # asbobi.
-    check("zaxira ko'zgudagi backup.sh bilan", '"$B/backup.sh"' in kod)
-    check("foydalanuvchi O'ZGARMAYDI (tenderai)",
-          "sudo -u tenderai" in kod)
+    # O'RAMA YUPQA BO'LSIN. U ko'zgudan OLINMAYDI -- alohida
+    # nusxa. Har mantiq o'zgarishi uni qayta o'rnatishni talab
+    # qilardi va bu bir necha marta takrorlandi. Shuning uchun
+    # har amal ko'zgudagi skriptga UZATILADI, mantiq o'ramada
+    # QOLMAYDI.
+    for satr in kod.splitlines():
+        if satr.strip().startswith(("sozlama)", "zond)", "holat)",
+                                    "tiklash-uzoq)", "zaxira)")):
+            continue
+    uzat = [q for q in kod.splitlines() if "exec " in q]
+    check("har amal ko'zgudagi skriptga uzatiladi",
+          uzat and all('"$B/' in q for q in uzat), str(uzat[:2]))
     check("systemd orqali RELIZDAGI kod yurgizilmaydi",
           "systemctl start" not in kod)
+    # Zaxira mantiqi ko'zgudagi skriptda.
+    z = oqi("bin", "zaxira-ol.sh")
+    check("zaxira ko'zgudagi backup.sh bilan", '${HERE}/backup.sh' in z)
+    check("foydalanuvchi O'ZGARMAYDI (tenderai)",
+          'sudo -u "$XIZMAT_USER"' in z and 'TENDERAI_USER:-tenderai' in z)
+    # `mktemp -d` root uchun 0700 yasaydi va `sudo -u tenderai`
+    # unga KIRA OLMAYDI -- xato esa "command not found" bo'lib
+    # ko'rinadi, ya'ni sabab yo'l huquqi ekani bilinmaydi.
+    check("katalog xizmat roli uchun ochiladi", "chmod a+rX" in z)
     check("migratsiya qo'llamaydi", "migratsiya.py" not in kod)
 
     bash = _mashq_bash()
