@@ -205,20 +205,35 @@ def expire_stale_tenders(platforms: List[str]) -> int:
         conn.close()
 
 
-def _lugat_va_markaz() -> List[str]:
-    """Tasniflagich lug'atini va embedding markazini qayta hisoblaydi.
+def _lugat_qur() -> List[str]:
+    """Tasniflagich LUG'ATINI qayta quradi. SOF SQL, model chaqirilmaydi.
 
-    SOF SQL — model chaqirilmaydi. Qaytadi: xatolar ro'yxati (bo'sh =
-    muvaffaqiyat).
+    NEGA ALOHIDA VA NEGA STANDART OQIMDA (2026-09-10).
+    Ilgari bu qadam `--with-rag` ichida edi. Bayroq esa "bo'laklash +
+    vektorlar (chat uchun)" degani, ya'ni RAG uchun. Lug'at qurilishi
+    esa RAG ga UMUMAN bog'liq emas: u `tender_good` dan sof SQL bilan
+    yig'iladi va katalog moslashtirishning BIRINCHI halqasi.
 
-    MUVAFFAQIYAT MUSBAT SHARTDAN TEKSHIRILADI: `recompute_centroid()`
-    namuna 50 dan kam bo'lsa NULL qaytaradi va istisno CHIQARMAYDI.
-    Ya'ni "xato bo'lmadi" bu yerda "ish bajarildi" degani EMAS —
-    natijani ALOHIDA o'qiymiz.
+    O'LCHANGAN OQIBAT (ishlab chiqarish, 2026-09-10):
+        catalog_product     1796
+        dim_good_code          0     <- lug'at hech qachon qurilmagan
+        tender_good         2491     <- manba BOR edi
+    Zanjir: lug'at bo'sh -> taklif yasab bo'lmaydi -> `catalog_product_code`
+    ga yozib bo'lmaydi (FK) -> `v_catalog_code_active` bo'sh ->
+    "Sizga mos" HECH QACHON natija bermaydi.
+
+    Ya'ni ixtiyoriy RAG bayrog'i MAJBURIY biznes halqasini bloklab
+    turgan. Endi lug'at standart yurishda quriladi.
+
+    JIMGINA BO'SH QOLMAYDI: qatorlar soni OLDIN va KEYIN o'lchanadi va
+    natija tuzilmali yoziladi. Manba bor-u lug'at bo'sh qolsa — bu
+    XATO, ogohlantirish emas.
     """
     xatolar: List[str] = []
+    oldin = keyin = None
+    holat = "xato"
     try:
-        env_shart("_lugat_va_markaz()")
+        env_shart("_lugat_qur()")
         conn = db()
         try:
             with conn.cursor() as cur:
@@ -234,8 +249,50 @@ def _lugat_va_markaz() -> List[str]:
                 cur.fetchall()
                 cur.execute("SELECT count(*) FROM dim_good_code")
                 keyin = cur.fetchone()[0]
-                emit([f"  [i] lug'at: {oldin} -> {keyin} kod"])
 
+                # MANBA BOR-U NATIJA BO'SH BO'LSA — XATO.
+                # "Xato chiqmadi" bu yerda "ish bajarildi" degani emas:
+                # bo'sh lug'at butun katalog moslashtirishni o'chiradi
+                # va uni HECH NARSA ko'rsatmasdi.
+                cur.execute("SELECT count(*) FROM tender_good "
+                            "WHERE good_code IS NOT NULL")
+                manba = cur.fetchone()[0]
+                holat = "ok" if keyin > 0 else ("manbasiz" if manba == 0 else "bosh")
+                if holat == "bosh":
+                    xatolar.append(
+                        f"lug'at BO'SH qoldi: tender_good da {manba} ta kodli "
+                        f"qator bor, dim_good_code esa 0. Katalog "
+                        f"moslashtirish ISHLAMAYDI.")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:                                   # noqa: BLE001
+        xatolar.append(f"lug'at: {e}")
+
+    # TUZILMALI YOZUV — sirsiz, faqat sanoq.
+    emit([f"  [i] good_code_dict_rows_before={oldin if oldin is not None else '?'} "
+          f"good_code_dict_rows_after={keyin if keyin is not None else '?'} "
+          f"good_code_dict_rebuild_status={holat}"])
+    return xatolar
+
+
+def _markaz_yangila() -> List[str]:
+    """Embedding MARKAZINI qayta hisoblaydi. RAG yo'liga tegishli.
+
+    Lug'atdan AJRATILDI: markaz semantik qidiruvga tegishli va
+    `--with-rag` ostida qolishi to'g'ri. Lug'at esa katalog
+    moslashtirishga tegishli va u har yurishda kerak.
+
+    MUVAFFAQIYAT MUSBAT SHARTDAN TEKSHIRILADI: `recompute_centroid()`
+    namuna 50 dan kam bo'lsa NULL qaytaradi va istisno CHIQARMAYDI.
+    Ya'ni "xato bo'lmadi" bu yerda "ish bajarildi" degani EMAS.
+    """
+    xatolar: List[str] = []
+    try:
+        env_shart("_markaz_yangila()")
+        conn = db()
+        try:
+            with conn.cursor() as cur:
                 cur.execute("SELECT recompute_centroid()")
                 markaz = cur.fetchone()[0]
                 if markaz is None:
@@ -259,7 +316,7 @@ def _lugat_va_markaz() -> List[str]:
         finally:
             conn.close()
     except Exception as e:                                   # noqa: BLE001
-        xatolar.append(f"lug'at/markaz: {e}")
+        xatolar.append(f"markaz: {e}")
     return xatolar
 
 
@@ -1070,30 +1127,44 @@ def main() -> None:
     # Holbuki bu qadam hujjat matniga UMUMAN BOG'LIQ EMAS (tender nomi
     # + pozitsiyalardan quriladi) va 0.5 daqiqa oladi. Eng arzon va
     # eng ta'sirli qadam BIRINCHI turishi kerak.
+    # --- TASNIFLAGICH LUG'ATI — STANDART OQIMDA, BAYROQSIZ ---
+    #
+    # KATALOG MOSLASHTIRISHNING BIRINCHI HALQASI. `dim_good_code`
+    # bo'sh bo'lsa taklif yasab bo'lmaydi, `catalog_product_code` ga
+    # yozib bo'lmaydi (FK) va "Sizga mos" hech qachon natija
+    # bermaydi. Bu qadam SOF SQL — pullik AI ham, vektor ham,
+    # tashqi xizmat ham talab qilmaydi.
+    #
+    # Ilgari u `--with-rag` ichida edi va ishlab chiqarishda
+    # HECH QACHON yurmagan (o'lchandi 2026-09-10: 1796 mahsulot,
+    # 2491 tender kodi, lug'at 0).
+    _lugat_xato = _lugat_qur()
+    if _lugat_xato:
+        post_xatolar.extend(_lugat_xato)
+
     if args.with_rag:
         _ok, _err, _dt, out, _kod = run_script("etl_embed.py", ["--tenders"])
         emit(["\n===== post: tender vektorlari =====", *out])
         if not _ok:
             post_xatolar.append(f"etl_embed --tenders: {_err}")
 
-        # --- TASNIFLAGICH LUG'ATI VA MARKAZ ---
+        # --- MARKAZ ---
         #
-        # NEGA SHU YERDA VA SHU TARTIBDA: ikkalasi ham ESKIRADI va
-        # eskirganini HECH NARSA ko'rsatmaydi — semantik qidiruv
-        # sekin-asta yomonlashadi, xato chiqmaydi. Bu aynan "jimgina
-        # buzilish" sinfi.
+        # NEGA SHU YERDA: markaz ESKIRADI va eskirganini HECH NARSA
+        # ko'rsatmaydi — semantik qidiruv sekin-asta yomonlashadi,
+        # xato chiqmaydi. Bu aynan "jimgina buzilish" sinfi.
+        #
+        # LUG'AT BU YERDAN CHIQARILDI. U RAG ga bog'liq emas va
+        # standart oqimda, yuqorida quriladi (`_lugat_qur`).
         #
         # Tartib majburiy:
-        #   1) lug'at   — yangi tenderlar yangi kod olib keladi
-        #   2) markaz   — korpus o'sgach o'rtacha suriladi
-        #   3) kod vek. — yangi kodlar vektorsiz qolmasin
-        #   4) hublik   — markaz o'zgargach `embedding_c` o'zgaradi,
+        #   1) markaz   — korpus o'sgach o'rtacha suriladi
+        #   2) kod vek. — yangi kodlar vektorsiz qolmasin
+        #   3) hublik   — markaz o'zgargach `embedding_c` o'zgaradi,
         #                 ya'ni hub_bias ham qayta hisoblanishi kerak
-        #
-        # 1, 2 va 4 — SOF SQL, model chaqirilmaydi (soniyalar).
-        _kod_xato = _lugat_va_markaz()
-        if _kod_xato:
-            post_xatolar.extend(_kod_xato)
+        _markaz_xato = _markaz_yangila()
+        if _markaz_xato:
+            post_xatolar.extend(_markaz_xato)
         else:
             _ok, _err, _dt, out, _kod = run_script("etl_embed.py", ["--codes"])
             emit(["\n===== post: tasniflagich vektorlari =====", *out])

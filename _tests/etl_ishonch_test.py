@@ -1241,6 +1241,204 @@ def test_byudjet_taqsimoti() -> None:
 
 
 # =====================================================================
+# ---------------------------------------------------------------------------
+# TASNIFLAGICH LUG'ATI RAG BAYROG'IGA BOG'LIQ BO'LMASIN
+# ---------------------------------------------------------------------------
+def test_lugat_bayroqdan_mustaqil() -> None:
+    """O'LCHANGAN NUQSON (ishlab chiqarish, 2026-09-10).
+
+    `rebuild_good_code_dict()` chaqiruvi `if args.with_rag:` ichida edi.
+    Ishlab chiqarish ETL si esa bu bayroqni BERMAYDI, ya'ni lug'at
+    HECH QACHON qurilmagan:
+
+        catalog_product  1796      dim_good_code  0
+        tender_good      2491      <- manba BOR edi
+
+    Zanjir: lug'at bo'sh -> taklif yasab bo'lmaydi -> `catalog_product_code`
+    ga yozib bo'lmaydi (FK) -> "Sizga mos" hech qachon natija bermaydi.
+    Ixtiyoriy RAG bayrog'i MAJBURIY biznes halqasini bloklab turgan.
+
+    AST BILAN TEKSHIRILADI, matn qidiruvi bilan EMAS: "qaysi `if`
+    ichida" degan savolga grep javob bera olmaydi -- u faqat
+    qatorlar tartibini ko'radi.
+    """
+    import ast as _ast
+    manba = io.open(os.path.join(ROOT, "run_etl.py"), encoding="utf-8").read()
+    daraxt = _ast.parse(manba)
+
+    def _qamrab(nom):
+        """`nom` chaqirig'ini qamrab turgan `if` shartlari matni."""
+        topildi = []
+
+        def yur(tugun, shartlar):
+            for bola in _ast.iter_child_nodes(tugun):
+                yangi = shartlar
+                if isinstance(bola, _ast.If):
+                    yangi = shartlar + [_ast.unparse(bola.test)]
+                    for st in bola.body:
+                        yur(st, yangi)
+                    for st in bola.orelse:
+                        yur(st, shartlar + ["not (%s)" % _ast.unparse(bola.test)])
+                    continue
+                if (isinstance(bola, _ast.Call)
+                        and isinstance(bola.func, _ast.Name)
+                        and bola.func.id == nom):
+                    topildi.append(list(shartlar))
+                yur(bola, yangi)
+
+        yur(daraxt, [])
+        return topildi
+
+    lugat = _qamrab("_lugat_qur")
+    markaz = _qamrab("_markaz_yangila")
+
+    # CASE A / D: bayroqsiz ham lug'at quriladi.
+    check("lug'at chaqirig'i bor", len(lugat) >= 1, str(lugat))
+    rag_ostida = [q for q in lugat if any("with_rag" in c for c in q)]
+    check("CASE A/D: lug'at `--with-rag` ostida EMAS",
+          not rag_ostida, str(rag_ostida))
+
+    # CASE B: bir marta, ikki marta emas.
+    check("CASE B: lug'at AYNAN BIR MARTA chaqiriladi",
+          len(lugat) == 1, f"{len(lugat)} marta")
+
+    # RAG ishi SHARTLI qolsin: markaz `--with-rag` ostida.
+    check("markaz chaqirig'i bor", len(markaz) >= 1, str(markaz))
+    check("markaz `--with-rag` ostida QOLADI",
+          all(any("with_rag" in c for c in q) for q in markaz), str(markaz))
+
+    # LUG'AT PULLIK AI GA BOG'LIQ BO'LMASIN.
+    i = manba.index("def _lugat_qur(")
+    j = manba.index("\ndef ", i + 10)
+    tana = manba[i:j]
+    for yomon in ("anthropic", "ANTHROPIC", "paid_guard", "openai"):
+        check(f"lug'at pullik yo'lga tegmaydi: {yomon}", yomon not in tana)
+    check("lug'at faqat SQL ishlatadi", "rebuild_good_code_dict" in tana)
+
+
+def test_lugat_xatosi_korinadi() -> None:
+    """CASE E: lug'at qurilmasa bu KO'RINADI va yutilmaydi.
+
+    "Xato chiqmadi" bu yerda "ish bajarildi" degani emas: bo'sh lug'at
+    butun katalog moslashtirishni o'chiradi va uni hech narsa
+    ko'rsatmasdi. Shuning uchun `_lugat_qur()` xatolar RO'YXATINI
+    qaytaradi va ETL uni `post_xatolar` ga qo'shadi.
+    """
+    import importlib.util as _iu
+    _sp = _iu.spec_from_file_location(
+        "zz_run_etl", os.path.join(ROOT, "run_etl.py"))
+    m = _iu.module_from_spec(_sp)
+    _sp.loader.exec_module(m)
+
+    asl_db, asl_env, asl_emit = m.db, m.env_shart, m.emit
+    yozilgan = []
+    try:
+        m.env_shart = lambda *a, **k: None
+        m.emit = lambda satrlar: yozilgan.extend(satrlar)
+
+        # --- ulanish yiqiladi ---
+        def portlaydi():
+            raise RuntimeError("sun'iy: baza yo'q")
+        m.db = portlaydi
+        xato = m._lugat_qur()
+        check("CASE E: ulanish yiqilsa XATO qaytadi", bool(xato), str(xato[:1]))
+        check("CASE E: xato matnida sabab bor",
+              any("sun'iy" in x for x in xato), str(xato[:1]))
+        # HOLAT HAR DOIM YOZILADI -- muvaffaqiyatda ham, xatoda ham.
+        check("CASE E: holat satri yoziladi",
+              any("good_code_dict_rebuild_status" in s for s in yozilgan),
+              str(yozilgan[-1:]))
+        check("CASE E: holat `xato`",
+              any("rebuild_status=xato" in s for s in yozilgan),
+              str(yozilgan[-1:]))
+    finally:
+        m.db, m.env_shart, m.emit = asl_db, asl_env, asl_emit
+
+
+def test_lugat_bosh_qolsa_xato() -> None:
+    """Manba BOR-u lug'at BO'SH qolsa — bu XATO, ogohlantirish emas.
+
+    Aynan shu holat ishlab chiqarishda jimgina turgan: `tender_good`
+    da 2491 kodli qator bor edi, lug'at esa 0. Hech narsa xato
+    bermadi va "Sizga mos" shunchaki bo'sh ko'rindi.
+
+    XULQ SINALADI, MATN EMAS. Birinchi yozuvda bu sinov funksiya
+    tanasida "BO'SH qoldi" satrini qidirardi -- va `if` sharti
+    `False` ga o'zgartirilganda ham O'TIB KETDI. Ya'ni u qo'riqchi
+    emas, ko'chirma edi.
+    """
+    import importlib.util as _iu
+    _sp = _iu.spec_from_file_location(
+        "zz_run_etl2", os.path.join(ROOT, "run_etl.py"))
+    m = _iu.module_from_spec(_sp)
+    _sp.loader.exec_module(m)
+
+    class SoxtaCur:
+        """So'rov MATNIGA qarab javob beradigan qo'g'irchoq."""
+
+        def __init__(self, keyingi_soni):
+            self.keyingi = keyingi_soni
+            self.javob = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, params=None):
+            q = " ".join(sql.split())
+            if "to_regclass" in q:
+                self.javob = ("dim_good_code",)
+            elif "count(*) FROM dim_good_code" in q:
+                self.javob = (self.keyingi.pop(0),)
+            elif "rebuild_good_code_dict" in q:
+                self.javob = None
+            elif "FROM tender_good" in q:
+                self.javob = (2491,)
+            else:
+                self.javob = (0,)
+
+        def fetchone(self):
+            return self.javob
+
+        def fetchall(self):
+            return []
+
+    class SoxtaConn:
+        def __init__(self, keyingi):
+            self._k = keyingi
+
+        def cursor(self):
+            return SoxtaCur(self._k)
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    asl_db, asl_env, asl_emit = m.db, m.env_shart, m.emit
+    try:
+        m.env_shart = lambda *a, **k: None
+        m.emit = lambda satrlar: None
+
+        # --- MANBA BOR, LUG'AT BO'SH QOLDI -> XATO ---
+        m.db = lambda: SoxtaConn([0, 0])          # oldin 0, keyin 0
+        xato = m._lugat_qur()
+        check("manba bor-u lug'at bo'sh qolsa XATO", bool(xato), str(xato[:1]))
+        check("xato matni sababni aytadi",
+              any("BO'SH" in x for x in xato), str(xato[:1]))
+
+        # --- LUG'AT TO'LDI -> XATO YO'Q ---
+        # Aks holda yuqoridagi shart "har doim xato" degan ma'nosiz
+        # holatdan ham o'tardi.
+        m.db = lambda: SoxtaConn([0, 812])        # oldin 0, keyin 812
+        xato2 = m._lugat_qur()
+        check("lug'at to'lsa xato YO'Q", not xato2, str(xato2[:1]))
+    finally:
+        m.db, m.env_shart, m.emit = asl_db, asl_env, asl_emit
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="ETL ishonchliligi sinovi")
     rejim.bayroqlar(ap)
@@ -1256,6 +1454,9 @@ def main() -> None:
     test_qayta_urinish_amalda()
     test_buzuq_yozuv_izolyatsiyasi()
     test_idempotentlik_strukturasi()
+    test_lugat_bayroqdan_mustaqil()
+    test_lugat_xatosi_korinadi()
+    test_lugat_bosh_qolsa_xato()
     test_http_audit()
     test_toxtatgich()
     test_inkremental()
