@@ -188,10 +188,23 @@ def _lexical_patterns(product: Dict[str, Any]) -> List[Tuple[str, int]]:
     for term in atamalar[:_BUTUN_ATAMA_CHEK]:
         qosh(term)
 
-    # 2-daraja: SO'ZLAR. Nom so'zlari BIRINCHI — kalit so'zlar
-    # ko'pincha datasheet parchalari ("3d dnr", "vca functions") va
-    # ular tovar toifasini bildirmaydi.
-    for term in atamalar:
+    # 2-daraja: SO'ZLAR — FAQAT NOMDAN, kalit so'zlardan EMAS.
+    #
+    # O'LCHANGAN ZARAR (2026-09-10, ishlab chiqarish). Kalit so'zlar
+    # bu katalogda datasheet bandlari: "human detection", "3d dnr",
+    # "vca functions", "blc". Ular so'zlarga ajratilganda `human`
+    # naqsh bo'ladi va lug'atdagi lotincha `human` ga tushadi —
+    # 15 ta o'lchangan moslikdan 14 tasi AYNAN SHU edi.
+    #
+    # Bu ESKI xulqdan YOMONROQ bo'lardi: ilgari kalit so'z butun
+    # satr sifatida naqsh bo'lgani uchun hech qachon mos kelmasdi,
+    # ya'ni zararsiz edi. So'zga ajratish uni ZARARLI qiladi —
+    # tasdiqlash ekrani NOTO'G'RI kod taklif qilardi.
+    #
+    # NOM — sotuvchi qo'lda yozgan atama. KALIT SO'ZLAR — ommaviy
+    # import qilingan texnik matn. Ikkalasiga bir xil ishonch
+    # bo'lmaydi. Kalit so'zlar 1-darajada (butun atama) qoladi.
+    for term in atamalar[:1]:
         for soz in _SOZ_AJRAT.split(term.lower()):
             if len(soz) < _MIN_SOZ or any(ch.isdigit() for ch in soz):
                 continue

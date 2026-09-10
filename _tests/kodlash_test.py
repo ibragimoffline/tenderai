@@ -146,6 +146,20 @@ def test_leksik_naqsh():
                and " " not in p]
     check("raqamli SO'Z naqsh bo'lmaydi", not raqamli, str(raqamli[:6]))
 
+    # --- KALIT SO'Z SO'ZLARGA AJRATILMAYDI ---
+    # O'LCHANGAN ZARAR: "human detection" -> `human` naqshi lug'atdagi
+    # lotincha `human` ga tushadi. Ishlab chiqarishda 15 moslikdan
+    # 14 tasi shu edi. Kalit so'zlar ommaviy import qilingan
+    # datasheet matni; nom esa sotuvchi yozgan atama.
+    kal = kodlash._lexical_patterns(
+        {"name": "DS-7104HGHI-M1", "keywords": ["human detection", "3d dnr"]})
+    yolgiz_k = {p for p, _g in kal if " " not in p}
+    check("kalit so'z SO'ZGA ajratilmaydi", "human" not in yolgiz_k,
+          str(sorted(yolgiz_k)[:8]))
+    check("kalit so'z BUTUN atama sifatida qoladi",
+          any(p.startswith("human") and " " in p for p, _g in kal),
+          str([p for p, _g in kal]))
+
     # --- GURUH: BIR SO'Z = BIR DALIL ---
     # Lotin va kirill o'qishi ikki dalil bo'lib sanalmasligi shart,
     # aks holda tartiblash bitta so'zni ikki barobar kuchli deb
