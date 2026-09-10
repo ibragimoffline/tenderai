@@ -3349,8 +3349,20 @@ def test_tashqi_nusxa_orama():
     check("StrictHostKeyChecking=yes", "StrictHostKeyChecking=yes" in w)
     check("known_hosts MAJBURIY", "known_hosts YO'Q yoki bo'sh" in w)
     # YOZISH-UCHUN-ONLY: manba mezbon buzilsa zaxira o'chmasin.
-    check("uzoqda hech narsa O'CHIRMAYDI",
-          " rm " not in _izohsiz(w) and "--delete" not in _izohsiz(w))
+    # UZOQDA HECH NARSA O'CHIRILMAYDI.
+    #
+    # Shart UZOQ obyektlarga tegishli. Ilgari bu yerda ` rm `
+    # qidirilardi va u MAHALLIY vaqtinchalik faylni o'chirishni
+    # ham ushlab, to'g'ri kodni qizartirdi. Endi aynan uzoqdagi
+    # o'chirish yo'llari tekshiriladi: rclone ning o'chiruvchi
+    # buyruqlari va `ssh` orqali masofadan `rm`.
+    kod_satr = _izohsiz(w).splitlines()
+    ochir = [q for q in kod_satr
+             if re.search(r"\b(delete|deletefile|purge|rmdirs?)\b", q)]
+    check("rclone o'chiruvchi buyruqlari YO'Q", not ochir, str(ochir[:1]))
+    uzoq_rm = [q for q in kod_satr if "ssh " in q and " rm " in q]
+    check("ssh orqali masofadan `rm` YO'Q", not uzoq_rm, str(uzoq_rm[:1]))
+    check("`--delete` bayrog'i yo'q", "--delete" not in _izohsiz(w))
     # BUTUNLIK UZOQDA: "nusxa ko'chdi" != "nusxa BUTUN".
     check("uzoqdagi checksum O'QILADI", "UZOQ_SHA=" in w)
     check("checksum SOLISHTIRILADI", 'UZOQ_SHA" = "$MAHALLIY_SHA' in w)
@@ -4079,6 +4091,46 @@ def test_sozlama_tekshiruvi():
         check("tuzatish buyrug'i ko'rsatiladi", "USUL=s3" in chiq)
         check("bu holatda ham SIR CHIQMADI",
               SIR_ID not in chiq and SIR_KEY not in chiq)
+
+        # --- BOSH HARFLI O'RIN-EGASI ---
+        # O'LCHANGAN (2026-09-10): sozlamaga `REGION`, `CHELAK`,
+        # `KEYID`, `APPKEY` yozilib qoldi va asbob "TO'LIQ" dedi.
+        # Nuqson bir bosqich KECHROQ, tarmoqqa chiqqandan keyin
+        # (DNS da) ko'rindi. Haqiqiy qiymatlar bunday emas: S3
+        # chelak nomlari kichik harfli bo'lishi SHART.
+        kod, chiq = yur(N.join([
+            "USUL=s3", "S3_ENDPOINT=https://s3.REGION.backblazeb2.com",
+            "S3_REGION=REGION", "S3_BUCKET=CHELAK", "S3_PREFIX=tenderai",
+            "S3_ACCESS_KEY_ID=KEYID", "S3_SECRET_ACCESS_KEY=APPKEY", ""]))
+        check("BOSH HARFLI o'rin-egasi ushlanadi",
+              "NATIJA: sozlama TO'LIQ" not in chiq and "=NAMUNA" in chiq,
+              [q for q in chiq.splitlines() if "NATIJA" in q][:1])
+        check("manzil ichidagi bosh harfli bo'lak ham",
+              "endpoint_present=NAMUNA" in chiq)
+        # HAQIQIY KO'RINISHDAGI qiymatlar RAD ETILMASIN -- aks
+        # holda qo'riqcha ishlatib bo'lmas edi.
+        kod, chiq = yur(N.join([
+            "USUL=s3",
+            "S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com",
+            "S3_REGION=eu-central-003", "S3_BUCKET=tenderai-zaxira",
+            "S3_PREFIX=tenderai",
+            "S3_ACCESS_KEY_ID=005a1b2c3d4e5f60000000001",
+            "S3_SECRET_ACCESS_KEY=K005zZaBcDeFgHiJkLmNoPqRsTuVwXy", ""]))
+        check("haqiqiy ko'rinishdagi qiymatlar O'TADI",
+              kod == 0 and "NATIJA: sozlama TO'LIQ" in chiq,
+              [q for q in chiq.splitlines() if "NAMUNA" in q][:2])
+
+        # NOSOZLIK QATLAMGA AJRATILSIN: "kalit, chelak yoki
+        # huquq?" degan TAXMIN o'lchangan holatda (DNS) noto'g'ri
+        # edi va operatorni kalitni qidirishga yuborardi.
+        w = oqi("bin", "tender-backup-remote.namuna")
+        for qat in ("DNS", "TLS", "AUTH", "BUCKET", "PERMISSION",
+                    "NETWORK"):
+            check(f"nosozlik qatlami e'lon qilingan: {qat}",
+                  f'QATLAM="{qat}"' in w)
+        check("rclone xatosi O'QILADI", "RC_XATO" in w)
+        check("eski TAXMIN olib tashlandi",
+              "kalit, chelak yoki huquq?" not in _izohsiz(w))
     finally:
         shutil.rmtree(baza, ignore_errors=True)
 

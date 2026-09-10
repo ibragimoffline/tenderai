@@ -290,8 +290,32 @@ else
     MANZIL="${R}:${OBYEKT}"
     log "manzil: s3 ${S3_ENDPOINT} -> ${OBYEKT}"
     RC=("$RCLONE" --retries 3 --low-level-retries 5)
-    "${RC[@]}" copyto -- "$HAQIQIY" "$MANZIL" >/dev/null \
-        || xato "nusxa ko'chmadi (kalit, chelak yoki huquq?)"
+    # NOSOZLIK QATLAMGA AJRATILADI.
+    #
+    # Ilgari xabar "(kalit, chelak yoki huquq?)" edi -- ya'ni
+    # TAXMIN. O'lchangan holatda esa sabab DNS edi va bu ro'yxatda
+    # umuman yo'q edi: operator kalitni qidirib vaqt yo'qotardi.
+    # `rclone` ning o'z xatosi sababni aytadi, uni o'qish kerak.
+    RC_XATO="$(mktemp)"
+    if ! "${RC[@]}" copyto -- "$HAQIQIY" "$MANZIL" >/dev/null 2>"$RC_XATO"; then
+        SABAB="$(tr -d '\r' < "$RC_XATO" | grep -viE '^[0-9/: ]*(ERROR|NOTICE)' \
+                 | grep -v '^$' | head -2)"
+        [ -n "$SABAB" ] || SABAB="$(head -2 "$RC_XATO")"
+        QATLAM="OTHER"
+        case "$SABAB" in
+            *"no such host"*|*"lookup "*|*"DNS"*)          QATLAM="DNS" ;;
+            *x509*|*certificate*|*"tls:"*|*TLS*)           QATLAM="TLS" ;;
+            *InvalidAccessKeyId*|*SignatureDoesNotMatch*|*"401 "*|*Unauthorized*)
+                                                          QATLAM="AUTH" ;;
+            *NoSuchBucket*|*"bucket"*"not"*"exist"*)       QATLAM="BUCKET" ;;
+            *AccessDenied*|*"403 "*|*"not authorized"*)    QATLAM="PERMISSION" ;;
+            *"connection refused"*|*timeout*|*"i/o timeout"*) QATLAM="NETWORK" ;;
+        esac
+        rm -f "$RC_XATO"
+        xato "nusxa ko'chmadi — QATLAM: ${QATLAM}
+   ${SABAB}"
+    fi
+    rm -f "$RC_XATO"
 
     # BUTUNLIK: obyekt QAYTA O'QILADI va hash MAHALLIY hisoblanadi.
     #

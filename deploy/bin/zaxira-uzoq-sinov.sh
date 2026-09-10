@@ -70,6 +70,26 @@ if [ "${2:-}" = "--sozlama" ]; then
             *example.uz*|*example.com*|*EXAMPLE*) return 0 ;;
             "<"*">"|*REPLACE*|*"o'rin-egasi"*)     return 0 ;;
         esac
+        # BUTUNLAY BOSH HARFLI QIYMAT — O'RIN-EGASI.
+        #
+        # O'LCHANGAN (2026-09-10): sozlamaga `REGION`, `CHELAK`,
+        # `KEYID`, `APPKEY` yozilib qoldi va asbob "TO'LIQ" dedi.
+        # Zond esa DNS da yiqildi -- ya'ni nuqson bir bosqich
+        # KECHROQ, tarmoqqa chiqqandan keyin ko'rindi.
+        #
+        # Haqiqiy qiymatlar bunday ko'rinmaydi: S3 chelak nomlari
+        # kichik harfli bo'lishi SHART, B2 regionlari
+        # `eu-central-003` shaklida, kalitlar esa aralash.
+        # Shuning uchun "faqat BOSH harf va pastki chiziq" ishonchli
+        # o'rin-egasi belgisi.
+        case "$1" in
+            *[!A-Z_]*) ;;
+            *) return 0 ;;
+        esac
+        # Manzil ichidagi bosh harfli bo'lak ham (`s3.REGION.…`).
+        case "$1" in
+            *://*[A-Z][A-Z]*) return 0 ;;
+        esac
         return 1
     }
     bor() {
