@@ -90,6 +90,33 @@ def _tanani_yur(node):
         yield from _tanani_yur(child)
 
 
+def _ichki_fn(node):
+    """Shu qamrovdagi BEVOSITA ichki funksiyalar — BIR QAVAT pastda.
+
+    NEGA `ast.walk` EMAS (o'lchangan yolg'on ogohlantirish, 2026-09-10).
+    `ast.walk` funksiya chegarasida TO'XTAMAYDI: u ikki qavat pastdagi
+    funksiyani ham qaytaradi. Natijada `f -> g -> h` zanjirida `h`
+    IKKI MARTA tekshirilardi — bir marta to'g'ri (`g` qamrovi bilan),
+    bir marta esa BOBO qamrovi bilan, ya'ni `g` ning parametrlari va
+    lokal nomlarisiz. Ular "ANIQLANMAGAN" bo'lib chiqardi.
+
+    HAQIQATDA YUZ BERDI: `etl_ishonch_test.py` dagi
+    `test -> _qamrab(nom) -> yur()` uchun `nom` va `topildi` yolg'on
+    aybdor bo'ldi va RELIZNI TO'XTATDI. Kod esa to'g'ri edi.
+
+    Yolg'on ogohlantirish tekshiruvchini o'ldiradi: bir-ikki marta
+    "bu shunchaki tekshiruvchi adashyapti" deyilgach, u boshqa
+    o'qilmaydi.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, _FN):
+            yield child                      # PASTGA TUSHMAYMIZ: uning
+            continue                          # ichkarisi O'Z qamrovi
+        if isinstance(child, (ast.Lambda, ast.ClassDef)):
+            continue
+        yield from _ichki_fn(child)
+
+
 def _stores(fn):
     """Shu funksiyada tayinlanadigan nomlar -> eng erta qator."""
     out = {}
@@ -176,12 +203,10 @@ def tekshir(yol):
                 nuqsonlar.append((fn.name, n.lineno, nom,
                                   f"ANIQLANISHDAN OLDIN (tayinlash {min(stores[nom])})"))
 
-        for child in ast.walk(fn):
-            if child is fn:
-                continue
-            if isinstance(child, _FN):
-                # Ichki funksiya TASHQI qamrovni ko'radi.
-                yur(child, korinadi)
+        # Ichki funksiya TASHQI qamrovni ko'radi -- lekin FAQAT
+        # BEVOSITA tashqi qamrovni (`_ichki_fn` dagi izohga qarang).
+        for child in _ichki_fn(fn):
+            yur(child, korinadi)
 
     for node in tree.body:
         if isinstance(node, _FN):
@@ -237,6 +262,25 @@ def siklda_yigish(items):
     return jami
 
 
+def uch_qavat(dastlabki):
+    # UCH QAVAT: tashqi -> o'rta -> ichki. IKKI qavat yetarli emas
+    # edi -- nuqson faqat NEVARA qavatda ko'rinadi.
+    def orta(kalit):
+        topildi = []
+
+        def ichki(tugun):
+            # `kalit` va `topildi` -- `orta` ga tegishli, ya'ni
+            # `uch_qavat` qamrovida YO'Q. `ast.walk` bilan rekursiya
+            # qilinganda `ichki` BOBO qamrovi bilan ham tekshirilardi
+            # va bu ikki nom yolg'ondan "ANIQLANMAGAN" bo'lib
+            # chiqardi. HAQIQATDA RELIZNI TO'XTATDI (2026-09-10).
+            if tugun == kalit:
+                topildi.append(tugun)
+            return topildi
+        return ichki(kalit)
+    return orta(dastlabki)
+
+
 def try_except_ichida(p):
     try:
         v = os.path.join(p)
@@ -275,6 +319,12 @@ def test_tekshiruvchi():
     # QAMROV ZANJIRI eng muhimi: ichki funksiya tashqi nomni ko'radi.
     check("qonuniy naqshlarda TOPILMA YO'Q (yopilma, sikl, try)",
           not soxta, str(soxta))
+    # UCH QAVAT alohida da'vo qilinadi: umumiy "topilma yo'q"
+    # tekshiruvi kelajakda boshqa sababdan yiqilsa, aynan SHU
+    # regressiya sababini aytadigan qator qolsin.
+    uch = [n for _f, _l, n, _t in soxta if n in ("kalit", "topildi")]
+    check("IKKI QAVAT tashqaridagi nom `ANIQLANMAGAN` deb sanalmaydi",
+          not uch, str(uch))
 
 
 def test_kod_bazasi():
