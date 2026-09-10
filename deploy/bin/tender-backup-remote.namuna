@@ -317,10 +317,16 @@ else
         case "$SABAB" in
             *"no such host"*|*"lookup "*|*"DNS"*)          QATLAM="DNS" ;;
             *x509*|*certificate*|*"tls:"*|*TLS*)           QATLAM="TLS" ;;
-            *InvalidAccessKeyId*|*SignatureDoesNotMatch*|*"401 "*|*Unauthorized*)
+            *InvalidAccessKeyId*|*SignatureDoesNotMatch*|*Unauthorized*)
                                                           QATLAM="AUTH" ;;
+            *"status code: 401"*)                         QATLAM="AUTH" ;;
             *NoSuchBucket*|*"bucket"*"not"*"exist"*)       QATLAM="BUCKET" ;;
-            *AccessDenied*|*"403 "*|*"not authorized"*)    QATLAM="PERMISSION" ;;
+            # `403` dan KEYIN vergul keladi ("status code: 403,"),
+            # bo'sh joy EMAS. Bir marta `OTHER` deb belgilanib,
+            # sababni yashirdi -- naqsh AYNAN xabar shakliga
+            # moslandi.
+            *AccessDenied*|*Forbidden*|*"not authorized"*) QATLAM="PERMISSION" ;;
+            *"status code: 403"*)                         QATLAM="PERMISSION" ;;
             *"connection refused"*|*timeout*|*"i/o timeout"*) QATLAM="NETWORK" ;;
         esac
         rm -f "$RC_XATO"
