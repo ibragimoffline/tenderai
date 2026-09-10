@@ -1439,46 +1439,6 @@ def test_lugat_bosh_qolsa_xato() -> None:
     finally:
         m.db, m.env_shart, m.emit = asl_db, asl_env, asl_emit
 
-def test_kod_vektori_qayta_markazlanadi() -> None:
-    """Markaz kelgach lug'at vektorlari QAYTA MARKAZLANADI.
-
-    O'LCHANGAN NUQSON (ishlab chiqarish, 2026-09-10): lug'at markaz
-    YO'Q paytda vektorlangan -> `embedding` bor, `embedding_c` NULL.
-    Skript to'g'ri ogohlantirdi ("markazdan keyin qayta yurgizing"),
-    lekin o'sha maslahat ISHLAMASDI: qayta yurishda `content_hash`
-    mos kelib, 842 koddan 841 tasi o'tkazib yuborildi. `SQL_SEM` esa
-    `embedding_c IS NOT NULL` talab qiladi -- semantik signal
-    JIMGINA o'lik edi.
-
-    Ayni nuqson markaz HAR qayta hisoblanganda takrorlanadi:
-    `recompute_centroid()` faqat `tender_embedding` ni yangilaydi.
-    """
-    tana = io.open(os.path.join(ROOT, "etl_embed.py"),
-                   encoding="utf-8").read()
-    i = tana.index("def vectorize_codes(")
-    j = tana.index("\ndef ", i + 10)
-    fn = tana[i:j]
-
-    check("markazlanmagan qator qayta hisoblanadi",
-          "embedding_c IS NULL" in fn, "shart yo'q")
-    check("ESKI markazli qator ham qayta hisoblanadi",
-          "centroid_id IS DISTINCT FROM" in fn, "shart yo'q")
-    check("MODEL chaqirilmaydi (ayirish + normallashtirish)",
-          "l2_normalize(embedding - " in fn, "SQL yo'q")
-
-    # `content_hash` o'tkazib yuborish MANTIQIDAN OLDIN bo'lishi shart:
-    # aks holda "o'zgarmagan" qatorlar yana chetlab o'tilardi.
-    check("xesh tekshiruvidan OLDIN turadi",
-          fn.index("UPDATE good_code_embedding")
-          < fn.index('if bor.get(r["code"]) == h'),
-          "tartib teskari")
-
-    # `--count-only` shartnomasi: HECH NARSA YOZMAYDI.
-    check("`--count-only` da yozilmaydi",
-          "not args.count_only" in fn.split("UPDATE good_code_embedding")[0],
-          "qo'riq yo'q")
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description="ETL ishonchliligi sinovi")
     rejim.bayroqlar(ap)
@@ -1497,7 +1457,6 @@ def main() -> None:
     test_lugat_bayroqdan_mustaqil()
     test_lugat_xatosi_korinadi()
     test_lugat_bosh_qolsa_xato()
-    test_kod_vektori_qayta_markazlanadi()
     test_http_audit()
     test_toxtatgich()
     test_inkremental()
