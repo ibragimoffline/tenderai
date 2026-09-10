@@ -237,6 +237,9 @@ ISBOT="${KATALOG:-$(dirname "$ZAXIRA")}/.tiklash-isboti"
         2>/dev/null || echo '-')"
 } > "$ISBOT"
 chmod 640 "$ISBOT" 2>/dev/null || true
-log "tiklash isboti yozildi: $ISBOT (uzoq=${TIKLASH_MANBA:-mahalliy})"
+# JURNAL FAYL BILAN BIR XIL AYTSIN. Ilgari bu yerda XOM
+# `TIKLASH_MANBA` bosilardi va jurnalda `uzoq=uzoq` chiqib,
+# faylda esa `uzoq=ha` turardi -- ikki xil so'z, bitta narsa.
+log "tiklash isboti yozildi: $ISBOT (manba=${TIKLASH_MANBA:-mahalliy}, uzoq=$([ "${TIKLASH_MANBA:-mahalliy}" = "uzoq" ] && echo ha || echo mahalliy))"
 
 log "TIKLASH MASHQI OTDI. RTO=${DAVOM}s, zaxira=$(basename "$ZAXIRA")"
