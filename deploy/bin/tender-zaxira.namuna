@@ -66,12 +66,23 @@ zond)         exec "$B/zaxira-uzoq-sinov.sh" "$MUHIT" ;;
 holat)        exec "$B/baza-holat.sh" "$MUHIT" ;;
 tiklash-uzoq) exec "$B/uzoqdan-tiklash.sh" "$MUHIT" ;;
 zaxira)
-    # ZAXIRA XIZMAT NOMIDAN. `backup.sh` `tenderai` foydalanuvchisi
-    # sifatida yuriydi (systemd birligi ham shunday), ya'ni fayl
-    # egaligi va huquqlari TIMER bilan bir xil chiqadi. Root
-    # nomidan yurgizsak, keyingi timer o'z fayllariga tega
+    # ZAXIRA XIZMAT NOMIDAN, LEKIN KO'ZGUDAGI KOD BILAN.
+    #
+    # `systemctl start tenderai-backup@...` RELIZDAGI `backup.sh`
+    # ni yurgizadi. Production relizi eski bo'lsa (hozir 5-sentabr)
+    # u ILOVA roli bilan dump oladi va tiklash metasini umuman
+    # yozmaydi -- ya'ni zaxira olinardi, lekin u kutilgan zaxira
+    # BO'LMASDI.
+    #
+    # `backup.sh` -- xizmatning O'ZI emas, TEXNIK XIZMAT asbobi.
+    # Uni ko'zgudan yurgizish relizni o'zgartirmaydi va
+    # joylashtiruv HISOBLANMAYDI.
+    #
+    # FOYDALANUVCHI O'ZGARMAYDI: `tenderai` nomidan yuriladi --
+    # aynan timer kabi. Root nomidan yurgizsak fayl egaligi
+    # boshqacha chiqib, keyingi timer o'z fayllariga tega
     # olmasligi mumkin edi.
-    log "zaxira olinmoqda (xizmat nomidan) — uzoqqa yuborish ham shu yerda"
-    exec systemctl start --wait "tenderai-backup@${MUHIT}.service"
+    log "zaxira olinmoqda (ko'zgudagi kod, xizmat nomidan)"
+    exec sudo -u tenderai -H "$B/backup.sh" "$MUHIT"
     ;;
 esac

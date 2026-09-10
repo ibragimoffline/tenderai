@@ -3332,6 +3332,15 @@ def test_tashqi_nusxa_orama():
           "MUTLAQ yo'l emas" in o)
     check("dastur BAJARILADIGAN bo'lsin", '[ ! -x "$BRC_BIN" ]' in o)
     check("dastur egasi root bo'lsin", 'B_EGA" = "$ROOT_USER' in o)
+    # `sudo` ORQALI CHAQIRISH KUTILGAN HOLAT: zaxira xizmati
+    # `tenderai` nomidan yuradi, o'rama esa root talab qiladi
+    # (sozlama `0600 root:root`). Bunda tekshiriladigan dastur
+    # `sudo` EMAS, undan keyingi mutlaq yo'l -- aks holda biz
+    # `sudo` ning egaligini o'lchab, o'ramaniki haqida hech narsa
+    # bilmasdik.
+    check("`sudo` shakli tanib olinadi", "*/sudo)" in o)
+    check("tekshiriladigan dastur sudo dan KEYINGISI",
+          'BRC_BIN="$_s"' in o)
     check("dastur hamma uchun yozilmasin", "HAMMA uchun yoziladi" in o)
 
     # O'RAMANING O'ZI.
@@ -4170,6 +4179,16 @@ def test_zaxira_oramasi():
     check("kod bare repodan olinadi",
           "git --git-dir" in kod and "archive" in kod)
     check("joylashtirmaydi", "deploy.sh" not in kod)
+    # ZAXIRA KO'ZGUDAGI KOD BILAN OLINADI. `systemctl start`
+    # RELIZDAGI `backup.sh` ni yurgizardi -- production relizi
+    # eski bo'lsa u ILOVA roli bilan dump olib, tiklash metasini
+    # yozmasdi. `backup.sh` xizmatning o'zi emas, TEXNIK XIZMAT
+    # asbobi.
+    check("zaxira ko'zgudagi backup.sh bilan", '"$B/backup.sh"' in kod)
+    check("foydalanuvchi O'ZGARMAYDI (tenderai)",
+          "sudo -u tenderai" in kod)
+    check("systemd orqali RELIZDAGI kod yurgizilmaydi",
+          "systemctl start" not in kod)
     check("migratsiya qo'llamaydi", "migratsiya.py" not in kod)
 
     bash = _mashq_bash()

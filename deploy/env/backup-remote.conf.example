@@ -15,6 +15,25 @@
 # =============================================================================
 
 # ============================================================================
+# CHAQIRUV SHARTNOMASI — `sudo` ORQALI
+# ============================================================================
+# Zaxira xizmati (`tenderai-backup@.service`) `tenderai`
+# foydalanuvchisi nomidan yuradi, bu fayl esa `0600 root:root` --
+# ATAYLAB: ilova roli zaxira omborining kalitini o'qimasligi kerak.
+#
+# Shuning uchun o'rama `sudo` orqali chaqiriladi. `production.env`:
+#
+#   BACKUP_REMOTE_CMD='/usr/bin/sudo -n /usr/local/sbin/tender-backup-remote {fayl}'
+#
+# va `/etc/sudoers.d/tenderai-backup`:
+#
+#   tenderai ALL=(root) NOPASSWD: /usr/local/sbin/tender-backup-remote
+#
+# Bu sudo huquqi TOR: bitta dastur, va o'ramaning o'zi argumentni
+# qat'iy tekshiradi (mutlaq yo'l, `..` yo'q, zaxira katalogi
+# ichida, tor alifbo, e'lon qilingan turlar).
+#
+# ============================================================================
 # USUL — ikkitasidan biri. Ikkalasi ham AYNI shartnomani bajaradi:
 # bitta argument, qat'iy validatsiya, uzoqda checksum tekshiruvi.
 #

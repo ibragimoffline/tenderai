@@ -480,7 +480,26 @@ else
            BRC_OK=0 ;;
     esac
     # BIRINCHI SO'Z — BAJARILADIGAN FAYL, qobiq satri emas.
+    #
+    # `sudo` ORQALI CHAQIRISH KUTILGAN HOLAT. Zaxira xizmati
+    # `tenderai` nomidan yuradi, o'rama esa root talab qiladi
+    # (sozlama `0600 root:root` -- ilova roli zaxira kalitini
+    # o'qimasligi kerak). Shuning uchun shartnoma:
+    #     BACKUP_REMOTE_CMD='/usr/bin/sudo -n /usr/local/sbin/... {fayl}'
+    # Bunday holda TEKSHIRILADIGAN dastur `sudo` emas, undan
+    # KEYINGI mutlaq yo'l -- aks holda biz `sudo` ning egaligini
+    # o'lchab, o'ramaniki haqida hech narsa bilmasdik.
     BRC_BIN="${BRC%% *}"
+    case "$BRC_BIN" in
+        */sudo)
+            for _s in $BRC; do
+                case "$_s" in
+                    */sudo|-*) continue ;;
+                    /*) BRC_BIN="$_s"; break ;;
+                    *) break ;;
+                esac
+            done ;;
+    esac
     if [ "$BRC_OK" = "1" ]; then
         case "$BRC_BIN" in
             /*) ;;
