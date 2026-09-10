@@ -337,6 +337,71 @@ def test_moslik_sql_faol_korinishdan():
     check("company_id bo'yicha filtrlaydi", "company_id = %(company_id)s" in sql)
 
 
+def test_match_javobi_holat_beradi():
+    """`/catalog/match` HAR javobda `holat` qaytaradi.
+
+    NEGA SHART. Interfeys bo'sh natijaning SABABINI aynan shundan
+    o'qiydi (`frontend/src/katalogBosh.ts`). Kalit bir shoxda
+    tushib qolsa, hech narsa yiqilmaydi: frontend `undefined`
+    ni "o'lchanmadi" deb qabul qiladi va ESKI YOLG'ON MASLAHAT
+    qaytadi -- "Filtrlarni o'zgartirib ko'ring", holbuki katalog
+    kodlanmagan. Aynan shu nuqson 2026-09-10 da o'lchangan.
+
+    Ya'ni bu jimgina orqaga qaytish. Uni faqat SHAKL sinovi
+    ushlaydi.
+    """
+    section("B. `/catalog/match` javob shakli")
+    import ast as _ast
+    import io as _io
+
+    manba = _io.open(os.path.join(ROOT, "api", "main.py"),
+                     encoding="utf-8").read()
+    fn = None
+    for tugun in _ast.walk(_ast.parse(manba)):
+        if isinstance(tugun, _ast.FunctionDef) and tugun.name == "catalog_match":
+            fn = tugun
+            break
+    check("`catalog_match()` topildi", fn is not None)
+    if fn is None:
+        return
+
+    # FAQAT SHU funksiyaning O'ZINIKI: ichki yordamchilar bo'lsa
+    # ularning `return` i boshqa shartnoma.
+    ichki = {id(n) for f in _ast.walk(fn)
+             if isinstance(f, _ast.FunctionDef) and f is not fn
+             for n in _ast.walk(f)}
+    qaytish = [n for n in _ast.walk(fn)
+               if isinstance(n, _ast.Return) and id(n) not in ichki
+               and isinstance(n.value, _ast.Dict)]
+    check("lug'at qaytaruvchi shox BOR", len(qaytish) >= 3,
+          f"{len(qaytish)} ta")
+
+    holatsiz = []
+    for n in qaytish:
+        kalitlar = {k.value for k in n.value.keys
+                    if isinstance(k, _ast.Constant)}
+        if "holat" not in kalitlar:
+            holatsiz.append(n.lineno)
+    check("HAR javobda `holat` bor", not holatsiz,
+          f"holatsiz qatorlar: {holatsiz}")
+
+    # Shakl bir xil bo'lsin: interfeys `items`/`total` ni ham
+    # har javobda kutadi.
+    for kerak in ("items", "total", "hudud"):
+        yoq = [n.lineno for n in qaytish
+               if kerak not in {k.value for k in n.value.keys
+                                if isinstance(k, _ast.Constant)}]
+        check(f"HAR javobda `{kerak}` bor", not yoq, str(yoq))
+
+    # `holat` MANBAI bitta bo'lsin -- ikki joyda ikki xil hisob
+    # bo'lsa interfeys qaysi biriga ishonishini bilmaydi.
+    tana = _ast.get_source_segment(manba, fn) or ""
+    check("`holat` yagona manbadan (`kodlash.holat`)",
+          tana.count('"holat"') == tana.count("kodlash.holat("),
+          f'"holat" {tana.count(chr(34) + "holat" + chr(34))} marta, '
+          f"kodlash.holat( {tana.count('kodlash.holat(')} marta")
+
+
 def test_semantik_hublik():
     """Semantik shox XOM kosinusni emas, hublik tuzatmasini ishlatadi."""
     section("A. Hublik tuzatmasi")
@@ -848,6 +913,7 @@ def main() -> int:
     test_qaror_sxema_qulflari()
     test_navbat_qaror_filtri_kodda()
     test_moslik_sql_faol_korinishdan()
+    test_match_javobi_holat_beradi()
     test_semantik_hublik()
     test_takror_hisob_yoq()
 
