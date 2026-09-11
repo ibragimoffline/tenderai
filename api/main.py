@@ -4100,9 +4100,22 @@ def kod_takliflar(product_id: int, request: Request, limit: int = 6):
     if not p:
         raise xatolar.Xato("PRODUCT_NOT_FOUND")
 
-    keng = kodlash.takliflar(dict(p), level=5, limit=limit)
-    aniq = kodlash.takliflar(dict(p), level=8, limit=limit)
-    kodlash.taklif_yoz(cid, product_id, keng + aniq)
+    # TASHXIS — NEGA bo'sh degan savolga javob.
+    #
+    # O'LCHANGAN HOLAT (2026-09-11): ekran bo'sh qaytdi va sababni
+    # aniqlash uchun bazaga to'rt marta so'rov yuborishga to'g'ri
+    # keldi. Lug'at to'la edi, 842 vektor markazlangan edi, `SQL_SEM`
+    # uchun 457 nomzod bor edi -- signal nega ishlamagani esa hech
+    # qayerda ko'rinmasdi.
+    #
+    # Endi sabab JAVOBDA keladi. U sir tutmaydi: faqat istisno turi,
+    # naqsh soni va shox holati.
+    tashxis: Dict[str, Any] = {}
+    keng = kodlash.takliflar(dict(p), level=5, limit=limit, tashxis=tashxis)
+    aniq = kodlash.takliflar(dict(p), level=8, limit=limit, tashxis=tashxis)
+    yozildi = kodlash.taklif_yoz(cid, product_id, keng + aniq)
+    tashxis["yozildi"] = yozildi
+    tashxis["nomzod"] = len(keng) + len(aniq)
 
     # Inson allaqachon qaror qilganlarini belgilab qaytaramiz.
     qaror = {r["code"]: r for r in db.query(
@@ -4114,6 +4127,7 @@ def kod_takliflar(product_id: int, request: Request, limit: int = 6):
         x["tasdiqlandi"] = _iso(q.get("tasdiqlandi"))
         x["rad_etildi"] = _iso(q.get("rad_etildi"))
     return {"product_id": product_id, "keng": keng, "aniq": aniq,
+            "tashxis": tashxis,
             # Eski maydon — birinchi versiyaga tayangan chaqiruvchilar uchun.
             "takliflar": keng}
 

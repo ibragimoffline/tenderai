@@ -122,6 +122,18 @@ export default function KodTasdiq({ product, onClose, onChanged }: KodTasdiqProp
             </Empty>
           )}
 
+          {/* TASHXIS — faqat bo'sh natijada va faqat SIGNAL YIQILGANDA.
+              Hammasi joyida bo'lsa (`ok` / `nomzodsiz`) bu qator
+              shovqin bo'lardi. Yiqilgan bo'lsa esa sabab AYNAN shu
+              yerda kerak: usiz uni faqat bazadan topish mumkin edi. */}
+          {bosh && data?.tashxis?.semantik
+            && !['ok', 'nomzodsiz', 'yurmadi'].includes(data.tashxis.semantik) && (
+            <div data-tashxis="semantik"
+                 className="rounded-lg border border-soon/40 bg-soon-soft px-3 py-2 text-caption text-soon-strong">
+              {t('kod.semFailed', { sabab: data.tashxis.semantik })}
+            </div>
+          )}
+
           {data && data.aniq.length > 0 && (
             <Guruh nom={t('kod.exact')} izoh={t('kod.exactHint')}
                    items={data.aniq} band={band} onQaror={qaror} />

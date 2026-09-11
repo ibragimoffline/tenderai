@@ -81,6 +81,7 @@ export const uz = {
   'kod.reject': 'Rad etish',
   'kod.approved': 'Tasdiqlangan',
   'kod.rejected': 'Rad etilgan',
+  'kod.semFailed': 'Ma’no bo‘yicha qidiruv ishlamadi — {sabab}. Faqat nom bo‘yicha qidirildi.',
   'kod.emptyTitle': 'Bu mahsulot uchun nomzod kod topilmadi',
   'kod.emptyBody':
     'Nomzodlar mahsulot NOMI va kalit so‘zlari bo‘yicha qidiriladi. '

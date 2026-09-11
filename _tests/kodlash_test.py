@@ -509,6 +509,95 @@ def test_match_javobi_holat_beradi():
           f"kodlash.holat( {tana.count('kodlash.holat(')} marta")
 
 
+def test_signal_xatosi_jim_qolmaydi():
+    """Semantik shox yiqilsa SABAB yoziladi — jim yutilmaydi.
+
+    O'LCHANGAN NARX (2026-09-11). Tasdiqlash ekrani ishlab
+    chiqarishda bo'sh qaytdi. Sababni topish uchun bazaga TO'RT
+    marta so'rov yuborishga to'g'ri keldi: lug'at to'la ekanini,
+    842 vektor markazlanganini va `SQL_SEM` uchun 457 nomzod
+    borligini alohida-alohida tekshirib chiqdik. Signal nega
+    ishlamagani esa hech qayerda ko'rinmasdi -- na jurnalda,
+    na javobda.
+
+    "AI IXTIYORIY" TAMOYILI KUCHDA QOLADI: xato baribir yutiladi
+    va leksik shox ishlayveradi. Sinov talab qiladigan narsa --
+    SABAB YOZILISHI. Ixtiyoriylik "jimlik" degani emas.
+    """
+    section("A3. Signal tashxisi")
+    from api import kodlash
+
+    tana = _ast_tana("takliflar")
+
+    # AST BILAN, MATN QIDIRUVI BILAN EMAS.
+    #
+    # Birinchi yozuvda bu tekshiruv manbadan "except Exception:"
+    # satrini qidirardi va O'Z IZOHIMNI ushladi -- izohda aynan
+    # o'sha naqsh keltirilgan ("Ilgari bu yerda ... turardi").
+    # Yolg'on ogohlantirish tekshiruvni o'ldiradi.
+    import ast as _ast
+    jim = []
+    for _t in _ast.walk(_ast.parse(tana.lstrip())):
+        if isinstance(_t, _ast.ExceptHandler):
+            # Tanasi FAQAT `pass` (yoki `...`) bo'lsa -- jim yutish.
+            if len(_t.body) == 1 and isinstance(_t.body[0], (_ast.Pass,)):
+                jim.append(_t.lineno)
+            elif (len(_t.body) == 1 and isinstance(_t.body[0], _ast.Expr)
+                  and isinstance(_t.body[0].value, _ast.Constant)
+                  and _t.body[0].value.value is Ellipsis):
+                jim.append(_t.lineno)
+    check("jim `except ...: pass` YO'Q", not jim, f"qatorlar: {jim}")
+    check("sabab jurnalga yoziladi", "logging.getLogger" in tana)
+    check("sabab chaqiruvchiga beriladi", 'tashxis["semantik"]' in tana)
+    check("istisno TURI yoziladi", "type(e).__name__" in tana)
+    # SIR CHIQMASIN: to'liq izlanma emas, qisqartirilgan matn.
+    check("matn qisqartiriladi", "[:120]" in tana)
+    check("leksik shox ham o'lchanadi", 'tashxis["naqsh"]' in tana)
+
+    # --- XULQ: xato bo'lsa SABAB QAYTADI, funksiya YIQILMAYDI ---
+    asl = kodlash.db
+    try:
+        class SoxtaDB:
+            def query(self, sql, params=None):
+                return []
+        kodlash.db = SoxtaDB()
+        import sys as _sys
+        soxta_mod = type(_sys)("api.ai_chat")
+
+        def _portlat(*a, **k):
+            raise RuntimeError("model yuklanmadi")
+        soxta_mod.embed_query = _portlat
+        soxta_mod.vec_literal = lambda v: v
+        eski_mod = _sys.modules.get("api.ai_chat")
+        _sys.modules["api.ai_chat"] = soxta_mod
+        try:
+            tx = {}
+            natija = kodlash.takliflar({"name": "kamera", "keywords": []},
+                                       level=8, tashxis=tx)
+            check("xato bo'lsa ham YIQILMAYDI", natija == [], str(natija))
+            check("sabab `tashxis` da qaytadi",
+                  "RuntimeError" in str(tx.get("semantik")), str(tx))
+        finally:
+            if eski_mod is not None:
+                _sys.modules["api.ai_chat"] = eski_mod
+            else:
+                _sys.modules.pop("api.ai_chat", None)
+    finally:
+        kodlash.db = asl
+
+
+def _ast_tana(nom: str) -> str:
+    """`api/kodlash.py` dagi funksiya manbasi."""
+    import ast as _ast
+    import io as _io
+    manba = _io.open(os.path.join(ROOT, "api", "kodlash.py"),
+                     encoding="utf-8").read()
+    for t in _ast.walk(_ast.parse(manba)):
+        if isinstance(t, _ast.FunctionDef) and t.name == nom:
+            return _ast.get_source_segment(manba, t) or ""
+    return ""
+
+
 def test_semantik_hublik():
     """Semantik shox XOM kosinusni emas, hublik tuzatmasini ishlatadi."""
     section("A. Hublik tuzatmasi")
@@ -1022,6 +1111,7 @@ def main() -> int:
     test_navbat_qaror_filtri_kodda()
     test_moslik_sql_faol_korinishdan()
     test_match_javobi_holat_beradi()
+    test_signal_xatosi_jim_qolmaydi()
     test_semantik_hublik()
     test_takror_hisob_yoq()
 

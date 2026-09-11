@@ -138,6 +138,24 @@ describe('KodTasdiq', () => {
     expect(screen.getByText(uz['kod.emptyBody'])).toBeTruthy()
   })
 
+  it('semantik shox YIQILSA sabab ko`rsatiladi', async () => {
+    // O'LCHANGAN NARX: ishlab chiqarishda ekran bo'sh qaytdi va
+    // sababni topish to'rt marta bazaga so'rov yuborishni talab
+    // qildi. Endi u EKRANDA.
+    ekran({ product_id: 42, keng: [], aniq: [],
+            tashxis: { semantik: 'RuntimeError: model yuklanmadi' } })
+    expect(await screen.findByText(/RuntimeError/)).toBeTruthy()
+  })
+
+  it('hammasi joyida bo`lsa tashxis qatori CHIQMAYDI', async () => {
+    // `ok`/`nomzodsiz` — normal holat. Uni ko'rsatish shovqin
+    // bo'lardi va haqiqiy xato o'sha shovqin ichida yo'qolardi.
+    ekran({ product_id: 42, keng: [], aniq: [],
+            tashxis: { semantik: 'nomzodsiz', naqsh: 0 } })
+    await screen.findByText(uz['kod.emptyTitle'])
+    expect(document.querySelector('[data-tashxis="semantik"]')).toBeNull()
+  })
+
   it('notanish signal YASHIRILMAYDI', async () => {
     ekran({ product_id: 42, keng: [],
             aniq: [taklif({ signallar: ['yangi_signal'] })] })

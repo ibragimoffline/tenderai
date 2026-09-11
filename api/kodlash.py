@@ -54,6 +54,7 @@ Manba ma'lumoti ham mukammal emas: 21.31 (farmatsevtika) kodi ostida
 "Стол психолога" uchraydi — xaridor pozitsiyani noto'g'ri kodlagan.
 Inson tasdig'i aynan shuni ushlaydi.
 """
+import logging
 import json
 import re
 from functools import lru_cache
@@ -321,7 +322,8 @@ WHERE d.level = %(level)s
 def takliflar(product: Dict[str, Any],
               level: int = DEFAULT_LEVEL,
               limit: int = DEFAULT_LIMIT,
-              cap: int = 40) -> List[Dict[str, Any]]:
+              cap: int = 40,
+              tashxis: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Mahsulot uchun nomzod kodlar — RRF bilan birlashtirilgan.
 
     `product`: `name`, `keywords`, `category_code` (ixtiyoriy).
@@ -349,6 +351,9 @@ def takliflar(product: Dict[str, Any],
             ranklar.setdefault(r["code"], {})[nom] = int(r["rnk"])
 
     # --- Signal 1: leksik (trigram, ikki alifboda) ---
+    if tashxis is not None:
+        tashxis["naqsh"] = len(naqsh_juft)
+        tashxis["leksik"] = "naqshsiz" if not naqsh_juft else "ok"
     if naqsh_juft:
         yig("leksik", db.query(SQL_LEX,
                                {"level": level,
@@ -359,15 +364,40 @@ def takliflar(product: Dict[str, Any],
     # --- Signal 2: semantik (markazlangan vektor) ---
     # AI IXTIYORIY: model yo'q bo'lsa yoki lug'at hali vektorlanmagan
     # bo'lsa, leksik signal ishlayveradi. Jimgina bo'sh natija emas.
+    #
+    # XATO ENDI JIM YUTILMAYDI (o'lchangan, 2026-09-11).
+    #
+    # Ilgari bu yerda `except Exception: pass` turardi. Ishlab
+    # chiqarishda tasdiqlash ekrani bo'sh qaytdi va sababni aniqlash
+    # UCH AYLANISH oldi: lug'at to'la, 842 vektor markazlangan,
+    # `SQL_SEM` uchun 457 nomzod bor -- lekin signal nega ishlamagani
+    # HECH QAYERDA ko'rinmasdi. Jurnal ham yo'q, javobda ham yo'q.
+    #
+    # "AI ixtiyoriy" tamoyili KUCHDA QOLADI: xato baribir yutiladi va
+    # leksik shox ishlayveradi. O'zgargani -- SABAB YOZILADI va
+    # chaqiruvchiga BERILADI. Ixtiyoriylik "jimlik" degani emas.
     try:
         from api import ai_chat
         qvec = ai_chat.vec_literal(ai_chat.embed_query(qmatn))
-        yig("semantik", db.query(SQL_SEM,
-                                 {"qvec": qvec, "level": level, "cap": cap}))
-    except Exception:                                        # noqa: BLE001
-        pass
+        _sem = db.query(SQL_SEM, {"qvec": qvec, "level": level, "cap": cap})
+        yig("semantik", _sem)
+        if tashxis is not None:
+            tashxis["semantik"] = "ok" if _sem else "nomzodsiz"
+    except Exception as e:                                   # noqa: BLE001
+        # SIRSIZ: faqat istisno TURI va qisqartirilgan matn.
+        _sabab = f"{type(e).__name__}: {str(e)[:120]}"
+        logging.getLogger("api").warning(
+            "kod taklifi: semantik shox ishlamadi -- %s", _sabab)
+        if tashxis is not None:
+            tashxis["semantik"] = _sabab
 
     if not ranklar:
+        # IKKALA SHOX HAM BO'SH. Chaqiruvchi NEGA bo'shligini
+        # `tashxis` dan o'qiydi -- "nomzod yo'q" o'zi hech narsa
+        # tushuntirmaydi.
+        if tashxis is not None:
+            tashxis.setdefault("semantik", "yurmadi")
+            tashxis["natija"] = "bosh"
         return []
 
     # --- Prior: A'ZOLIK bonusi (rang emas) ---

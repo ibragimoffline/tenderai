@@ -74,6 +74,7 @@ export const en: Dict = {
   'kod.reject': 'Reject',
   'kod.approved': 'Approved',
   'kod.rejected': 'Rejected',
+  'kod.semFailed': 'Meaning-based search failed — {sabab}. Only the name was searched.',
   'kod.emptyTitle': 'No candidate codes for this product',
   'kod.emptyBody':
     'Candidates are searched by the product NAME and its keywords. '

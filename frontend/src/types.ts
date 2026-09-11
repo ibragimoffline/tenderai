@@ -1157,8 +1157,29 @@ export interface MahsulotKodTaklif {
   rad_etildi: Nullable<string>
 }
 
+/**
+ * NEGA bo'sh degan savolga javob. Sirsiz: istisno TURI, naqsh soni
+ * va shox holati.
+ *
+ * Bu maydon bo'sh natijani TUSHUNTIRISH uchun. Usiz ekran shunchaki
+ * "nomzod yo'q" derdi va sabab -- masalan semantik shoxning xatosi --
+ * hech qayerda ko'rinmasdi (o'lchandi: sababni topish to'rt aylanish
+ * oldi).
+ */
+export interface KodTashxis {
+  /** `ok` · `nomzodsiz` · `yurmadi` · yoki istisno matni. */
+  semantik?: string
+  leksik?: string
+  /** Nechta leksik naqsh qurildi. 0 — nomda qidiradigan so'z yo'q. */
+  naqsh?: number
+  nomzod?: number
+  yozildi?: number
+  natija?: string
+}
+
 export interface MahsulotKodTakliflar {
   product_id: number
+  tashxis?: KodTashxis
   /** 5 belgi — GURUH. Ko'proq tender topadi, begonasini ham. */
   keng: MahsulotKodTaklif[]
   /** 8 belgi — SINF. Kamroq, lekin toza. */
