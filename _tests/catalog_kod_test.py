@@ -276,6 +276,57 @@ def test_ommaviy_ochirish_xulqi():
         M.db, M.company_id_of, M.kimlik_of, M.audit_yoz = asl
 
 
+def test_tashxis_asbobi_yozmaydi():
+    """`kod_tashxis.py` FAQAT o'qiydi.
+
+    Asbob ishlab chiqarishda yurgiziladi. Agar u yo'l-yo'lakay
+    `taklif_yoz()` chaqirsa, "o'lchash" ma'lumotni O'ZGARTIRARDI va
+    keyingi o'lchov allaqachon buzilgan holatni ko'rsatardi.
+    """
+    import ast as _ast
+    import io as _io
+    bolim("8. Tashxis asbobi — faqat o'qiydi")
+
+    yol = os.path.join(ROOT, "kod_tashxis.py")
+    check("asbob mavjud", os.path.exists(yol))
+    if not os.path.exists(yol):
+        return
+    daraxt = _ast.parse(_io.open(yol, encoding="utf-8").read())
+
+    # IZOHLAR VA DOCSTRING HISOBGA OLINMAYDI -- faqat HAQIQIY
+    # chaqiruvlar. Matn qidiruvi bugun ikki marta yolg'on signal
+    # bergan edi.
+    chaqiruvlar = set()
+    for t in _ast.walk(daraxt):
+        if isinstance(t, _ast.Call):
+            f = t.func
+            if isinstance(f, _ast.Attribute):
+                chaqiruvlar.add(f.attr)
+            elif isinstance(f, _ast.Name):
+                chaqiruvlar.add(f.id)
+
+    for yomon in ("taklif_yoz", "tasdiqla", "rad_et", "execute_returning",
+                  "scalar_write"):
+        check(f"`{yomon}()` chaqirilmaydi", yomon not in chaqiruvlar,
+              str(sorted(chaqiruvlar)[:8]))
+
+    # SQL matnlarida ham yozuv bo'lmasin.
+    xom = []
+    for t in _ast.walk(daraxt):
+        if isinstance(t, _ast.Constant) and isinstance(t.value, str):
+            v = " ".join(t.value.split()).upper()
+            if v.startswith(("INSERT ", "UPDATE ", "DELETE ", "TRUNCATE ")):
+                xom.append(v[:50])
+    check("yozuvchi SQL yo'q", not xom, str(xom[:2]))
+
+    # `tashxis` chiqishi ishlatilsin -- aks holda asbob signal
+    # holatini ko'rsatmasdi va foydasi qolmasdi.
+    manba = _io.open(yol, encoding="utf-8").read()
+    check("`tashxis=` uzatiladi", "tashxis=tx" in manba)
+    check("har ikki daraja o'lchanadi", "(8, \"aniq\")" in manba
+          and "(5, \"keng\")" in manba)
+
+
 def test_lugat():
     bolim("2. Sabab lug'ati — Python va SQL BIR XIL")
     from api import catalog_auto as C
@@ -596,6 +647,7 @@ def main():
     test_qolla_qorovuli()
     test_ommaviy_ochirish()
     test_ommaviy_ochirish_xulqi()
+    test_tashxis_asbobi_yozmaydi()
 
     if args.bazasiz or not os.environ.get("XT_DB_DSN"):
         print("\n[i] Bazali tekshiruvlar o'tkazib yuborildi.")
