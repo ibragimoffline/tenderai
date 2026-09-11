@@ -110,7 +110,18 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         # Katta fayl uzoq o'qiladi -- 120s yetmasligi mumkin.
         proxy_read_timeout 300s;
-        proxy_request_buffering off;
+        # `proxy_request_buffering off` QO'YILMAYDI.
+        #
+        # 2026-09-11 da qo'yilgandi -- "katta fayl uchun yaxshiroq"
+        # degan O'LCHANMAGAN taxmin bilan. Oqibati jurnalda ko'rindi:
+        #
+        #   19:49  INTERNAL_ERROR (400): There was an error parsing the body
+        #   20:41  INTERNAL_ERROR (400): There was an error parsing the body
+        #
+        # Buferlash o'chirilganda nginx tanani to'plamasdan uzatadi va
+        # sekin ulanishda multipart oqimi uzilib qoladi. Yoqilgan
+        # holda esa nginx butun faylni (kerak bo'lsa diskka) yig'ib,
+        # keyin to'liq uzatadi -- 50 MB uchun aynan shu ishonchli.
     }
 
     # --- Statik qurilma ----------------------------------------------------
@@ -189,7 +200,18 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         # Katta fayl uzoq o'qiladi -- 120s yetmasligi mumkin.
         proxy_read_timeout 300s;
-        proxy_request_buffering off;
+        # `proxy_request_buffering off` QO'YILMAYDI.
+        #
+        # 2026-09-11 da qo'yilgandi -- "katta fayl uchun yaxshiroq"
+        # degan O'LCHANMAGAN taxmin bilan. Oqibati jurnalda ko'rindi:
+        #
+        #   19:49  INTERNAL_ERROR (400): There was an error parsing the body
+        #   20:41  INTERNAL_ERROR (400): There was an error parsing the body
+        #
+        # Buferlash o'chirilganda nginx tanani to'plamasdan uzatadi va
+        # sekin ulanishda multipart oqimi uzilib qoladi. Yoqilgan
+        # holda esa nginx butun faylni (kerak bo'lsa diskka) yig'ib,
+        # keyin to'liq uzatadi -- 50 MB uchun aynan shu ishonchli.
     }
 
     root /opt/tenderai/staging/current/frontend/dist;

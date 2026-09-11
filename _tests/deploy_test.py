@@ -4436,6 +4436,21 @@ def test_import_chegarasi_qatlamlararo() -> None:
     check("hujjat yo'li chegarasi ko'tarilmagan (<= 32m)",
           all(x <= 32 for x in server_chegara), str(server_chegara))
 
+    # `proxy_request_buffering off` QAYTIB KELMASIN.
+    #
+    # O'LCHANGAN ZARAR (2026-09-11): u qo'yilgach multipart tanasi
+    # uzilib, import ikki marta `400: There was an error parsing the
+    # body` bilan yiqildi. Buferlash yoqilgan holda nginx butun
+    # faylni yig'ib keyin uzatadi -- 50 MB uchun aynan shu ishonchli.
+    #
+    # IZOH HISOBGA OLINMAYDI: fayl ichida sabab yozilgan va u
+    # `proxy_request_buffering` so'zini o'z ichiga oladi.
+    buferlash = [q for q in ngx.splitlines()
+                 if "proxy_request_buffering" in q
+                 and not q.lstrip().startswith("#")]
+    check("`proxy_request_buffering off` YO'Q", not buferlash,
+          str(buferlash[:2]))
+
     # INTERFEYSDAGI NUSXA. U yuklashdan OLDIN rad etadi, ya'ni undan
     # kichik bo'lsa server qabul qiladigan fayl brauzerda TO'XTAB
     # qolardi va sabab hech qayerda ko'rinmasdi.
