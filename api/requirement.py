@@ -1360,7 +1360,16 @@ def review_bulk(tender_id: int, company_id: int, status: str,
         raise xatolar.Xato("TRUST_LEVEL_INVALID", {"ishonch": ishonch})
     if ishonch in ("erp_sessiya", "aktor_elon") and not actor_id:
         raise xatolar.Xato("ACTOR_REQUIRED_FOR_TRUST", {"ishonch": ishonch})
-    rows = db.query("""
+    # CTE + `execute_returning()` -- YOZUV YO'LI.
+    #
+    # O'LCHANGAN NUQSON (2026-09-11): bu yerda `db.query()` turardi.
+    # U ATAYLAB `rollback()` qiladi (o'qish uchun), `RETURNING id`
+    # esa qatorlarni baribir qaytaradi. Ya'ni funksiya "N ta talab
+    # ko'rildi" deb qaytarardi, audit ham shunday yozardi, bazada
+    # esa HECH NARSA o'zgarmasdi. Ommaviy tasdiq hech qachon
+    # ishlamagan va buni hech narsa ko'rsatmagan.
+    natija = db.execute_returning("""
+        WITH tegdi AS (
         UPDATE tender_requirement
            SET review_status = %(status)s,
                reviewed_by   = %(by)s,
@@ -1370,10 +1379,15 @@ def review_bulk(tender_id: int, company_id: int, status: str,
                review_action = %(amal)s
          WHERE company_id = %(c)s AND tender_id = %(t)s
            AND review_status = 'pending_review'
-        RETURNING id""",
+        RETURNING id)
+        SELECT count(*) AS n FROM tegdi""",
+        # `actor_id` va `ishonch` SQL da ISHLATILADI, lug'atda esa
+        # YO'Q edi -- ya'ni chaqiruv `psycopg2.ProgrammingError` bilan
+        # yiqilardi. Yuqoridagi `rollback` nuqsoni bilan birga bu
+        # funksiya HECH QACHON ishlamagan.
         {"c": company_id, "t": tender_id, "status": status, "by": by,
-         "amal": AMAL[status]})
-    return len(rows)
+         "amal": AMAL[status], "actor_id": actor_id, "ishonch": ishonch})
+    return int((natija or {}).get("n") or 0)
 
 
 # TODO(§16.51): `compliance.check()` bu funksiyani HALI

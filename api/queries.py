@@ -1013,13 +1013,33 @@ CATALOG_DELETE_SQL = ("DELETE FROM catalog_product "
 #
 # `RETURNING id` — HAQIQATDA o'chirilganlari. So'ralgan son bilan
 # bajarilgan son BIR XIL EMAS: id eskirgan yoki begona bo'lishi mumkin.
-CATALOG_BULK_DELETE_SQL = ("DELETE FROM catalog_product "
-                           "WHERE company_id=%(company_id)s "
-                           "  AND id = ANY(%(ids)s) RETURNING id")
+# BITTA QATOR QAYTARADI -- `db.execute_returning()` shuni talab
+# qiladi va FAQAT O'SHA funksiya commit qiladi.
+#
+# O'LCHANGAN NUQSON (2026-09-11): bu SQL lar `db.query()` orqali
+# yurgizilgandi. `query()` ATAYLAB `rollback()` qiladi (u o'qish
+# uchun), lekin `RETURNING id` qatorlarni BARIBIR qaytaradi. Ya'ni
+# son to'g'ri chiqdi, ekran "1796 ta o'chirildi" dedi va bazada
+# HECH NARSA o'zgarmadi. Qaytarib bo'lmaydigan amal haqida
+# YOLG'ON MUVAFFAQIYAT -- eng yomon sinf.
+#
+# `RETURNING id` ni `execute_returning()` bilan ishlatib bo'lmaydi:
+# u `fetchone()` qiladi va ko'p qatorda BIRINCHISINI oladi, ya'ni
+# son har doim 1 bo'lardi. Shuning uchun CTE: o'chirish ichkarida,
+# tashqarida esa SANOQ -- bitta qator.
+CATALOG_BULK_DELETE_SQL = (
+    "WITH ochirildi AS ("
+    "  DELETE FROM catalog_product "
+    "   WHERE company_id=%(company_id)s AND id = ANY(%(ids)s)"
+    "  RETURNING id) "
+    "SELECT count(*) AS n FROM ochirildi")
 
 # BUTUN KATALOGNI TOZALASH. Shart faqat ijarachi bo'yicha.
-CATALOG_CLEAR_SQL = ("DELETE FROM catalog_product "
-                     "WHERE company_id=%(company_id)s RETURNING id")
+CATALOG_CLEAR_SQL = (
+    "WITH ochirildi AS ("
+    "  DELETE FROM catalog_product WHERE company_id=%(company_id)s"
+    "  RETURNING id) "
+    "SELECT count(*) AS n FROM ochirildi")
 
 CATALOG_COUNT_SQL = ("SELECT count(*) AS n FROM catalog_product "
                      "WHERE company_id=%(company_id)s")

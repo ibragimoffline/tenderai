@@ -150,7 +150,28 @@ def test_ommaviy_ochirish():
     # `len(body.ids)` qaytarilsa interfeys "hammasi o'chdi" deb
     # ko'rsatardi, holbuki eskirgan id topilmagan bo'lishi mumkin.
     check("qaytadi: HAQIQATDA o'chirilgan son",
-          "n = len(qatorlar)" in tana and '"ochirildi": n' in tana)
+          'natija or {}' in tana and '"ochirildi": n' in tana, tana[:0])
+    # SON BAZADAN KELADI, so'rovdan emas.
+    check("son `len(body.ids)` dan OLINMAYDI",
+          "n = len(body.ids)" not in tana)
+    # YOZUV YO'LI. `db.query()` rollback qiladi -- o'chirish bekor
+    # bo'lardi, `RETURNING` esa sonni baribir qaytarib, YOLG'ON
+    # muvaffaqiyat ko'rsatardi (o'lchandi 2026-09-11).
+    # AST BILAN -- IZOH HISOBGA OLINMAYDI.
+    #
+    # Matn qidiruvi bugun UCH marta yolg'on signal berdi va uchalasida
+    # ham aybdor MENING O'Z IZOHIM bo'ldi: izohda `db.query()`
+    # eslatilgani uchun tekshiruv qizarardi. Izoh -- hujjat, kod emas.
+    _db_chaqiruv = set()
+    for _n in _ast.walk(fn):
+        if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Attribute)
+                and isinstance(_n.func.value, _ast.Name)
+                and _n.func.value.id == "db"):
+            _db_chaqiruv.add(_n.func.attr)
+    check("yozuv `execute_returning()` orqali",
+          "execute_returning" in _db_chaqiruv, str(sorted(_db_chaqiruv)))
+    check("yozuv `query()` orqali O'TMAYDI",
+          "query" not in _db_chaqiruv, str(sorted(_db_chaqiruv)))
 
     # --- XATO KODI RO'YXATDA ---
     from api import xatolar
@@ -176,6 +197,21 @@ def test_ommaviy_ochirish_xulqi():
     from api import main as M, xatolar
 
     class SoxtaDB:
+        """Qo'g'irchoq HAQIQATNI aks ettiradi.
+
+        `query()` YOZUVNI RAD ETADI. Sabab -- o'lchangan nuqson
+        (2026-09-11): ommaviy o'chirish `db.query()` orqali
+        yozilgandi, u esa `rollback()` qiladi. `RETURNING` qatorlarni
+        baribir qaytargani uchun son to'g'ri chiqdi va ekran
+        "1796 ta o'chirildi" dedi -- bazada esa hech narsa
+        o'zgarmadi.
+
+        Birinchi yozuvda bu qo'g'irchoq `query()` da yozuvni QABUL
+        QILARDI, ya'ni sinov nuqsonni KODLAB QO'YGANDI: haqiqiy
+        xulq bilan sinov xulqi bir-biriga mos kelmasdi va sinov
+        yashil turardi.
+        """
+
         def __init__(self, soni):
             self.soni = soni
             self.ochirildi = []      # (sql, params) -- BAJARILGAN ishlar
@@ -184,11 +220,17 @@ def test_ommaviy_ochirish_xulqi():
             return {"n": self.soni}
 
         def query(self, sql, params=None):
+            q = " ".join(str(sql).split()).upper()
+            if any(x in q for x in ("DELETE FROM", "UPDATE ", "INSERT INTO")):
+                raise AssertionError(
+                    "YOZUV `query()` orqali o'tdi -- u rollback qiladi")
+            return []
+
+        def execute_returning(self, sql, params=None):
             self.ochirildi.append((" ".join(str(sql).split()), params))
-            # Har o'chirilgan qator uchun bitta `id`.
             if "id = ANY" in str(sql):
-                return [{"id": i} for i in (params or {}).get("ids", [])]
-            return [{"id": i} for i in range(self.soni)]
+                return {"n": len((params or {}).get("ids", []))}
+            return {"n": self.soni}
 
     asl = (M.db, M.company_id_of, M.kimlik_of, M.audit_yoz)
     auditlar = []

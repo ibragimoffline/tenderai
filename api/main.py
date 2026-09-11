@@ -3791,18 +3791,24 @@ def catalog_ommaviy_ochir(body: CatalogOmmaviyOchirIn, request: Request):
             # o'zgargan va foydalanuvchi buni bilishi kerak.
             raise xatolar.Xato("CATALOG_COUNT_MISMATCH",
                                ichki=f"kutilgan={body.kutilgan} hozir={hozir}")
-        qatorlar = db.query(queries.CATALOG_CLEAR_SQL, {"company_id": cid})
+        natija = db.execute_returning(queries.CATALOG_CLEAR_SQL,
+                                      {"company_id": cid})
         rejim = "hammasi"
     else:
         if len(body.ids) > OMMAVIY_OCHIR_CHEK:
             raise xatolar.Xato(
                 "FIELD_INVALID",
                 ichki=f"bir so'rovda {OMMAVIY_OCHIR_CHEK} tadan ko'p bo'lmaydi")
-        qatorlar = db.query(queries.CATALOG_BULK_DELETE_SQL,
-                            {"company_id": cid, "ids": list(body.ids)})
+        natija = db.execute_returning(
+            queries.CATALOG_BULK_DELETE_SQL,
+            {"company_id": cid, "ids": list(body.ids)})
         rejim = "tanlangan"
 
-    n = len(qatorlar)
+    # `execute_returning()` -- YOZUV YO'LI. `db.query()` bu yerda
+    # ishlatilmaydi: u `rollback()` qiladi va o'chirish bekor bo'lardi,
+    # `RETURNING` esa qatorlarni baribir qaytarib, YOLG'ON muvaffaqiyat
+    # ko'rsatardi (o'lchandi 2026-09-11).
+    n = int((natija or {}).get("n") or 0)
 
     # OMMAVIY AMAL BITTA audit qatori bilan yoziladi -- `talab_ommaviy_*`
     # bilan ayni qoida. Har mahsulot uchun alohida qator yozish "har
