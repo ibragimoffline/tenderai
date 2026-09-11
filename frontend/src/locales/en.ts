@@ -56,6 +56,30 @@ export const en: Dict = {
   'app.matchedBy.code': 'Exact product line match: {items}',
   'cat.fNameNote': 'Be specific, for example: “Computer monitor”.',
   'cat.moreOptions': 'Additional details',
+  // --- PRODUCT CODE APPROVAL ---
+  'cat.thCode': 'Code',
+  'cat.codeAssign': 'Assign code',
+  'cat.uncoded': 'no code',
+  'kod.lead': 'Once you approve a code, open tenders under it appear '
+    + 'in "Matches for you".',
+  'kod.exact': 'Exact code',
+  'kod.exactHint': 'Narrow class — fewer tenders, but little noise.',
+  'kod.broad': 'Broad code',
+  'kod.broadHint': 'Group — more tenders, but unrelated ones come too.',
+  'kod.openTenders': '{n} open tenders',
+  'kod.signal.leksik': 'by name',
+  'kod.signal.semantik': 'by meaning',
+  'kod.signal.oila': 'category family',
+  'kod.approve': 'Approve',
+  'kod.reject': 'Reject',
+  'kod.approved': 'Approved',
+  'kod.rejected': 'Rejected',
+  'kod.emptyTitle': 'No candidate codes for this product',
+  'kod.emptyBody':
+    'Candidates are searched by the product NAME and its keywords. '
+    + 'If the name is only a model number (for example "DS-2CD1043G2"), '
+    + 'there is nothing to search on. Add the product type to the '
+    + 'name — for example "Video camera DS-2CD1043G2".',
 
   // --- BULK CATALOG CLEANUP ---
   'cat.select': 'Select',

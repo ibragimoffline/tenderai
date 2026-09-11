@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '@/api'
 import Icon from './Icon'
 import CatalogImport from './CatalogImport'
+import KodTasdiq from './KodTasdiq'
 import { useFormat } from '@/format'
 import { useT } from '@/i18n'
 import { Button } from '@/components/ui/button'
@@ -119,6 +120,9 @@ export default function CatalogView({
       setBand(false)
     }
   }
+
+  // Kod tasdiqlash ekrani ochiq bo'lgan mahsulot.
+  const [kodlanadigan, setKodlanadigan] = useState<Product | null>(null)
 
   const confirmBulk = useConfirm<number[]>()
   const confirmClear = useConfirm<number>()
@@ -238,6 +242,7 @@ export default function CatalogView({
                 </TableHead>
                 <TableHead>{t('cat.thProduct')}</TableHead>
                 <TableHead className="w-[180px]">{t('cat.thCategory')}</TableHead>
+                <TableHead className="w-[150px]">{t('cat.thCode')}</TableHead>
                 <TableHead className="w-[140px] text-right">{t('cat.thPrice')}</TableHead>
                 <TableHead className="w-[110px] text-right">{t('cat.thStock')}</TableHead>
                 <TableHead className="w-[110px] text-right">{t('cat.thMatches')}</TableHead>
@@ -265,6 +270,24 @@ export default function CatalogView({
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {catName(categories, p.category_code) ?? t('cat.noCategory')}
+                  </TableCell>
+                  {/* KOD — TASDIQLANGANI. `codes` bo'sh bo'lsa mahsulot
+                      moslashtirishda UMUMAN qatnashmaydi va buni
+                      ekran ANIQ aytishi kerak: jimgina bo'sh katak
+                      "hammasi joyida" deb o'qilardi. */}
+                  <TableCell>
+                    {p.codes && p.codes.length > 0 ? (
+                      <button
+                        className="tabular text-left font-medium text-primary underline-offset-2 hover:underline"
+                        onClick={() => setKodlanadigan(p)}
+                        title={t('cat.codeAssign')}
+                      >{p.codes.join(', ')}</button>
+                    ) : (
+                      <button
+                        className="text-caption text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                        onClick={() => setKodlanadigan(p)}
+                      >{t('cat.uncoded')}</button>
+                    )}
                   </TableCell>
                   <TableCell className="tabular text-right">
                     {p.price != null ? f.money(p.price, p.currency) : '—'}
@@ -313,6 +336,14 @@ export default function CatalogView({
           page={page} totalPages={totalPages}
           onPrev={() => setPage((p) => Math.max(1, p - 1))}
           onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+        />
+      )}
+
+      {kodlanadigan && (
+        <KodTasdiq
+          product={kodlanadigan}
+          onClose={() => setKodlanadigan(null)}
+          onChanged={onChanged}
         />
       )}
 

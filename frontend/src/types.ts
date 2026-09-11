@@ -467,6 +467,17 @@ export interface Product {
   match_count: Nullable<number>
   match_count_deferred?: boolean
   notify: boolean
+  /**
+   * TASDIQLANGAN tasniflagich kodlari (`v_catalog_code_active`).
+   *
+   * Backend buni ANCHADAN BERI qaytaradi, interfeys esa tipda
+   * e'lon qilmagani uchun uni JIMGINA tashlab yuborardi — ya'ni
+   * "bu mahsulot kodlanganmi" degan savolga javob ekranda umuman
+   * yo'q edi. `holat` bilan ayni sinf.
+   *
+   * Bo'sh massiv — kodlanmagan. `undefined` — eski javob.
+   */
+  codes?: string[]
 }
 
 export interface ProductSuggestion {
@@ -1118,6 +1129,40 @@ export interface KodTaklif {
   /** DALIL — kod ostidagi HAQIQIY pozitsiyalar. Qaror shundan chiqadi:
    *  kod nomi begona bo'lishi mumkin, pozitsiyalar esa tanish. */
   pozitsiyalar: { nom: Nullable<string>; n_ochiq: number }[]
+}
+
+/**
+ * MAHSULOT uchun nomzod kod (tasdiqlash ekrani).
+ *
+ * `KodTaklif` dan FARQ QILADI: u ATAMA navbatiniki va `pozitsiyalar`
+ * saqlaydi. Ikkalasi boshqa endpointdan keladi va bitta tipga
+ * yig'ilsa, birining maydoni ikkinchisida jimgina `undefined`
+ * bo'lardi.
+ */
+export interface MahsulotKodTaklif {
+  code: string
+  name_ru: Nullable<string>
+  /** Kod ostidagi HAQIQIY nomlar — inson aynan shularga qarab qaror
+   *  qiladi. Kod nomi begona bo'lishi mumkin, namunalar esa tanish. */
+  namunalar: string[]
+  /** OQIBAT: tasdiqlansa nechta OCHIQ tender ko'rinadi. */
+  n_tender_open: number
+  n_position: number
+  /** RRF yig'indisi — FOIZ EMAS, faqat tartiblash uchun. Ekranda
+   *  RAQAM sifatida ko'rsatilmaydi. */
+  skor: number
+  /** Qaysi signal bu kodni ko'rsatdi: `leksik`, `semantik`, `oila`. */
+  signallar: string[]
+  tasdiqlandi: Nullable<string>
+  rad_etildi: Nullable<string>
+}
+
+export interface MahsulotKodTakliflar {
+  product_id: number
+  /** 5 belgi — GURUH. Ko'proq tender topadi, begonasini ham. */
+  keng: MahsulotKodTaklif[]
+  /** 8 belgi — SINF. Kamroq, lekin toza. */
+  aniq: MahsulotKodTaklif[]
 }
 
 export interface KodAtama {

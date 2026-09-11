@@ -22,11 +22,13 @@ import CatalogView from './CatalogView'
 
 const catalogBulkDelete = vi.fn()
 const deleteProduct = vi.fn()
+const kodTakliflar = vi.fn()
 
 vi.mock('@/api', () => ({
   api: {
     catalogBulkDelete: (...a: unknown[]) => catalogBulkDelete(...a),
     deleteProduct: (...a: unknown[]) => deleteProduct(...a),
+    kodTakliflar: (...a: unknown[]) => kodTakliflar(...a),
   },
 }))
 
@@ -63,9 +65,32 @@ async function tasdiqla(user: ReturnType<typeof userEvent.setup>) {
 beforeEach(() => {
   catalogBulkDelete.mockReset().mockResolvedValue({ ochirildi: 2, rejim: 'tanlangan' })
   deleteProduct.mockReset().mockResolvedValue(null)
+  kodTakliflar.mockReset().mockResolvedValue({ product_id: 1, keng: [], aniq: [] })
 })
 
 describe('CatalogView — ommaviy tozalash', () => {
+  it('KODLANMAGAN mahsulot shunday deb AYTILADI', () => {
+    // Bo'sh katak "hammasi joyida" deb o'qilardi. Kodsiz mahsulot
+    // moslashtirishda UMUMAN qatnashmaydi va buni ekran aytishi shart.
+    ekran()
+    expect(screen.getAllByText(uz['cat.uncoded']).length).toBe(3)
+  })
+
+  it('kodlangan mahsulotda KOD ko`rinadi', () => {
+    ekran([{ ...mahsulot(1, 'Kamera'), codes: ['26.40.33'] } as Product])
+    expect(screen.getByText('26.40.33')).toBeTruthy()
+    expect(screen.queryByText(uz['cat.uncoded'])).toBeNull()
+  })
+
+  it('kod ustiga bosilsa TASDIQLASH ekrani ochiladi', async () => {
+    const user = userEvent.setup()
+    ekran()
+    await user.click(screen.getAllByText(uz['cat.uncoded'])[0])
+    // Ekran ochilishining O'ZI emas, u SO'ROV yuborishi muhim:
+    // aynan shu chaqiruv nomzodlarni navbatga yozadi.
+    await waitFor(() => expect(kodTakliflar).toHaveBeenCalledWith(1))
+  })
+
   it('belgilanmaganda ommaviy panel KO`RINMAYDI', () => {
     ekran()
     expect(screen.queryByText(/belgilandi/)).toBeNull()

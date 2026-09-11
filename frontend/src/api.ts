@@ -12,7 +12,7 @@ import type {
   Talab, TalabHolat, TalabNavbat,
   AiQaror, InsonQaror, MalakaNatija, NavbatFiltr, RoutingHolat,
   RoutingItem, TalabFiltr,
-  KodNavbat, KodQaror, KodQidiruv, KodOlchov, Manba,
+  KodNavbat, KodQaror, KodQidiruv, KodOlchov, MahsulotKodTakliflar, Manba,
   RoutingMoslik,
   TalabXulosa,
   TelegramSubscriber, TenderDetail, TenderRow, NotifySettingsData, Nullable,
@@ -689,6 +689,23 @@ export const api = {
   catalogNewCount: () => request<{ new: number; total: number; deferred?: boolean }>(
     'GET', '/catalog/new-count'),
   catalogSeen: () => request<null>('POST', '/catalog/seen'),
+
+  // --- MAHSULOT KODINI TASDIQLASH (inson halqasi) ---
+  //
+  // Uch endpoint backendda ANCHADAN BERI bor edi, interfeys esa
+  // ularning BIRORTASINI ham chaqirmasdi. Oqibati: `catalog_product_code`
+  // hech qachon to'lmasdi, `v_catalog_code_active` bo'sh qolardi va
+  // "Sizga mos" hech qachon natija bermasdi.
+  //
+  // `kodTakliflar()` — FAQAT o'qish emas: server nomzodlarni
+  // ko'rib chiqish navbatiga ham yozadi (`taklif_yoz`).
+  kodTakliflar: (productId: number, limit = 6) =>
+    request<MahsulotKodTakliflar>(
+      'GET', `/catalog/${productId}/kod-takliflar`, { params: { limit } }),
+  kodTasdiq: (productId: number, code: string) =>
+    request<null>('POST', `/catalog/${productId}/kod-tasdiq`, { body: { code } }),
+  kodRad: (productId: number, code: string) =>
+    request<null>('POST', `/catalog/${productId}/kod-rad`, { body: { code } }),
 
   // --- AI CHAT TARIXI ---------------------------------------------------
   // Backend bu uchtasini ANCHADAN BERI beradi (`GET /chat/sessions`,

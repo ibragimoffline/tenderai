@@ -63,6 +63,30 @@ export const uz = {
   'app.matchedBy.code': 'Mahsulot lotiga aniq mos: {items}',
   'cat.fNameNote': 'Turini aniq yozing, masalan: “Kompyuter monitori”.',
   'cat.moreOptions': 'Qo‘shimcha ma’lumotlar',
+  // --- MAHSULOT KODINI TASDIQLASH ---
+  'cat.thCode': 'Kod',
+  'cat.codeAssign': 'Kod biriktirish',
+  'cat.uncoded': 'kodlanmagan',
+  'kod.lead': 'Kodni tasdiqlasangiz, shu kod bo‘yicha ochiq tenderlar '
+    + '“Sizga mos” bo‘limida chiqadi.',
+  'kod.exact': 'Aniq kod',
+  'kod.exactHint': 'Tor sinf — kamroq tender topadi, lekin begonasi kam.',
+  'kod.broad': 'Keng kod',
+  'kod.broadHint': 'Guruh — ko‘proq tender topadi, begonasi ham qo‘shiladi.',
+  'kod.openTenders': '{n} ta ochiq tender',
+  'kod.signal.leksik': 'nom bo‘yicha',
+  'kod.signal.semantik': 'ma’no bo‘yicha',
+  'kod.signal.oila': 'kategoriya oilasi',
+  'kod.approve': 'Tasdiqlash',
+  'kod.reject': 'Rad etish',
+  'kod.approved': 'Tasdiqlangan',
+  'kod.rejected': 'Rad etilgan',
+  'kod.emptyTitle': 'Bu mahsulot uchun nomzod kod topilmadi',
+  'kod.emptyBody':
+    'Nomzodlar mahsulot NOMI va kalit so‘zlari bo‘yicha qidiriladi. '
+    + 'Nom faqat model raqamidan iborat bo‘lsa (masalan “DS-2CD1043G2”), '
+    + 'qidiradigan so‘zning o‘zi bo‘lmaydi. Nomga tovar turini '
+    + 'qo‘shing — masalan “Videokamera DS-2CD1043G2”.',
 
   // --- KATALOGNI OMMAVIY TOZALASH ---
   'cat.select': 'Belgilash',
