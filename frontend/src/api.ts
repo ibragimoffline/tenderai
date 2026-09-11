@@ -671,6 +671,20 @@ export const api = {
   createProduct: (body: unknown) => request<Product>('POST', '/catalog', { body }),
   updateProduct: (id: number, body: unknown) => request<Product>('PUT', `/catalog/${id}`, { body }),
   deleteProduct: (id: number) => request<null>('DELETE', `/catalog/${id}`),
+  /**
+   * Ommaviy o'chirish — IKKI REJIM.
+   *
+   * `{ ids }`                      — belgilanganlar
+   * `{ hammasi: true, kutilgan }`  — butun katalog
+   *
+   * `kutilgan` — foydalanuvchi EKRANDA KO'RGAN son. Server uni o'z
+   * soni bilan solishtiradi va farq bo'lsa 409 (`CATALOG_COUNT_MISMATCH`)
+   * qaytaradi. Oradan import tugagan bo'lsa, odam 12 ta deb o'ylab
+   * 1796 tasini o'chirmasin.
+   */
+  catalogBulkDelete: (body: { ids?: number[]; hammasi?: boolean; kutilgan?: number }) =>
+    request<{ ochirildi: number; rejim: string }>(
+      'POST', '/catalog/ommaviy-ochir', { body }),
   catalogMatch: (body: unknown) => request<CatalogMatchResponse>('POST', '/catalog/match', { body }),
   catalogNewCount: () => request<{ new: number; total: number; deferred?: boolean }>(
     'GET', '/catalog/new-count'),

@@ -79,6 +79,203 @@ def test_chegaralar():
     check("kuchsiz band dalili 4", C.KUCHSIZ_DALIL == 4)
 
 
+def test_ommaviy_ochirish():
+    """`POST /catalog/ommaviy-ochir` shartnomasi.
+
+    OMMAVIY O'CHIRISH — QAYTARIB BO'LMAYDIGAN AMAL. Uning har bir
+    qo'rig'i shu yerda qulflanadi: qo'riq jimgina yo'qolsa, buni
+    faqat ma'lumot yo'qolgandan KEYIN bilish mumkin.
+    """
+    import ast as _ast
+    import io as _io
+    bolim("6. Ommaviy o'chirish shartnomasi")
+
+    q = _io.open(os.path.join(ROOT, "api", "queries.py"),
+                 encoding="utf-8").read()
+    manba = _io.open(os.path.join(ROOT, "api", "main.py"),
+                     encoding="utf-8").read()
+
+    # --- IJARACHI SHARTI SQL DA ---
+    # Python da filtrlash IDOR uchun bitta unutilgan shart masofasida.
+    # HAR KONSTANTA ALOHIDA AJRATILADI, tayinlashning O'ZIDAN.
+    #
+    # Birinchi yozuvda `q[i:i+400]` oynasi ishlatilgandi va u
+    # KEYINGI konstantalarga tegib ketardi: `CATALOG_BULK_DELETE_SQL`
+    # dan `company_id` olib tashlanganda ham sinov O'TIB KETDI,
+    # chunki `company_id` qo'shni `CATALOG_CLEAR_SQL` da bor edi.
+    # Ya'ni qo'riq emas, tasodif edi.
+    def _qiymat(nom: str) -> str:
+        from api import queries as _Q
+        v = getattr(_Q, nom)
+        return " ".join(str(v).split())
+
+    for nom in ("CATALOG_BULK_DELETE_SQL", "CATALOG_CLEAR_SQL",
+                "CATALOG_COUNT_SQL"):
+        v = _qiymat(nom)
+        check(f"{nom}: company_id SQL DA", "%(company_id)s" in v, v[:80])
+
+    check("tanlanganlar: `RETURNING id` — HAQIQATDA o'chirilgani",
+          "RETURNING id" in _qiymat("CATALOG_BULK_DELETE_SQL"))
+    check("tozalash: `RETURNING id`",
+          "RETURNING id" in _qiymat("CATALOG_CLEAR_SQL"))
+
+    # --- ENDPOINT QO'RIQLARI ---
+    fn = None
+    for t in _ast.walk(_ast.parse(manba)):
+        if isinstance(t, _ast.FunctionDef) and t.name == "catalog_ommaviy_ochir":
+            fn = t
+            break
+    check("`catalog_ommaviy_ochir()` bor", fn is not None)
+    if fn is None:
+        return
+    tana = _ast.get_source_segment(manba, fn) or ""
+
+    check("ikki rejim BIRGA berilmaydi",
+          "body.hammasi and body.ids" in tana)
+    check("bitta ham berilmasa RAD ETILADI",
+          "not body.hammasi and not body.ids" in tana)
+    check("`hammasi` uchun `kutilgan` MAJBURIY",
+          "body.kutilgan is None" in tana)
+
+    check("chegara bor", "OMMAVIY_OCHIR_CHEK" in tana)
+
+    # --- AUDIT: BOR VA BITTA ---
+    check("audit yoziladi", "audit_yoz(" in tana)
+    check("audit BITTA qator (sikl ichida emas)",
+          tana.count("audit_yoz(") == 1, str(tana.count("audit_yoz(")))
+    check("audit `entity_id` — KOMPANIYA",
+          'entity="company"' in tana and "entity_id=cid" in tana)
+
+    # --- QAYTARILGAN SON HAQIQIY ---
+    # `len(body.ids)` qaytarilsa interfeys "hammasi o'chdi" deb
+    # ko'rsatardi, holbuki eskirgan id topilmagan bo'lishi mumkin.
+    check("qaytadi: HAQIQATDA o'chirilgan son",
+          "n = len(qatorlar)" in tana and '"ochirildi": n' in tana)
+
+    # --- XATO KODI RO'YXATDA ---
+    from api import xatolar
+    check("`CATALOG_COUNT_MISMATCH` kodi ro'yxatda",
+          "CATALOG_COUNT_MISMATCH" in xatolar.KODLAR)
+    check("u 409 (nizo), 400 emas",
+          xatolar.KODLAR.get("CATALOG_COUNT_MISMATCH") == 409,
+          str(xatolar.KODLAR.get("CATALOG_COUNT_MISMATCH")))
+
+
+def test_ommaviy_ochirish_xulqi():
+    """Qo'riqlar MATNDA emas, ISHDA sinaladi.
+
+    Birinchi yozuvda bu tekshiruvlar manba matnidan satr qidirardi.
+    Mutatsiya `if int(body.kutilgan) != int(hozir):` ni `if False:`
+    ga almashtirganda sinov O'TIB KETDI -- satrlar joyida turardi.
+    Ya'ni qo'riqchi emas, ko'chirma edi.
+
+    Endi endpoint ROSTDAN chaqiriladi, `db` qo'g'irchoq bilan
+    almashtiriladi va NIMA BAJARILGANI o'lchanadi.
+    """
+    bolim("7. Ommaviy o'chirish XULQI")
+    from api import main as M, xatolar
+
+    class SoxtaDB:
+        def __init__(self, soni):
+            self.soni = soni
+            self.ochirildi = []      # (sql, params) -- BAJARILGAN ishlar
+
+        def query_one(self, sql, params=None):
+            return {"n": self.soni}
+
+        def query(self, sql, params=None):
+            self.ochirildi.append((" ".join(str(sql).split()), params))
+            # Har o'chirilgan qator uchun bitta `id`.
+            if "id = ANY" in str(sql):
+                return [{"id": i} for i in (params or {}).get("ids", [])]
+            return [{"id": i} for i in range(self.soni)]
+
+    asl = (M.db, M.company_id_of, M.kimlik_of, M.audit_yoz)
+    auditlar = []
+    try:
+        M.company_id_of = lambda *a, **k: 7
+        M.kimlik_of = lambda *a, **k: object()
+        M.audit_yoz = lambda *a, **k: auditlar.append(k)
+
+        # --- SON MOS KELMASA: HECH NARSA O'CHMAYDI ---
+        # Ekranda 12 ta, serverda 1796 ta (oradan import tugagan).
+        soxta = SoxtaDB(1796); M.db = soxta
+        xato = None
+        try:
+            M.catalog_ommaviy_ochir(
+                M.CatalogOmmaviyOchirIn(hammasi=True, kutilgan=12), None)
+        except Exception as e:                               # noqa: BLE001
+            xato = e
+        check("son mos kelmasa XATO qaytadi",
+              getattr(xato, "kod", None) == "CATALOG_COUNT_MISMATCH",
+              f"{type(xato).__name__}: {xato}")
+        # ENG QIMMAT DA'VO: o'chirish BAJARILMADI.
+        check("son mos kelmasa HECH NARSA o'chmaydi",
+              not soxta.ochirildi, str(soxta.ochirildi[:1]))
+        check("bajarilmagan amal auditga yozilmaydi", not auditlar,
+              str(auditlar[:1]))
+
+        # --- SON MOS KELSA: O'CHADI ---
+        soxta = SoxtaDB(3); M.db = soxta
+        r = M.catalog_ommaviy_ochir(
+            M.CatalogOmmaviyOchirIn(hammasi=True, kutilgan=3), None)
+        check("son mos kelsa o'chadi", r["ochirildi"] == 3, str(r))
+        check("tozalash SQL i ishlatiladi",
+              any("DELETE FROM catalog_product" in sql and "id = ANY" not in sql
+                  for sql, _p in soxta.ochirildi), str(soxta.ochirildi))
+        check("audit BITTA marta yoziladi", len(auditlar) == 1, str(len(auditlar)))
+
+        # --- TANLANGANLAR: AYNAN O'SHA id lar ---
+        soxta = SoxtaDB(9); M.db = soxta
+        auditlar.clear()
+        r = M.catalog_ommaviy_ochir(
+            M.CatalogOmmaviyOchirIn(ids=[4, 8]), None)
+        check("tanlanganlar: aynan berilgan id lar",
+              soxta.ochirildi and soxta.ochirildi[0][1].get("ids") == [4, 8],
+              str(soxta.ochirildi[:1]))
+        check("tanlanganlar: ijarachi params da",
+              soxta.ochirildi[0][1].get("company_id") == 7,
+              str(soxta.ochirildi[0][1]))
+        check("tanlanganlar: o'chirilgan son qaytadi", r["ochirildi"] == 2, str(r))
+
+        # --- IKKI REJIM BIRGA: RAD ---
+        soxta = SoxtaDB(5); M.db = soxta
+        xato = None
+        try:
+            M.catalog_ommaviy_ochir(
+                M.CatalogOmmaviyOchirIn(ids=[1], hammasi=True, kutilgan=5), None)
+        except Exception as e:                               # noqa: BLE001
+            xato = e
+        check("ikki rejim birga -> XATO", isinstance(xato, xatolar.Xato),
+              f"{type(xato).__name__}")
+        check("ikki rejim birga -> hech narsa o'chmaydi",
+              not soxta.ochirildi, str(soxta.ochirildi[:1]))
+
+        # --- BO'SH SO'ROV: RAD ---
+        soxta = SoxtaDB(5); M.db = soxta
+        xato = None
+        try:
+            M.catalog_ommaviy_ochir(M.CatalogOmmaviyOchirIn(), None)
+        except Exception as e:                               # noqa: BLE001
+            xato = e
+        check("bo'sh so'rov -> XATO", isinstance(xato, xatolar.Xato))
+        check("bo'sh so'rov -> hech narsa o'chmaydi", not soxta.ochirildi)
+
+        # --- CHEGARA ---
+        soxta = SoxtaDB(99999); M.db = soxta
+        xato = None
+        try:
+            M.catalog_ommaviy_ochir(
+                M.CatalogOmmaviyOchirIn(
+                    ids=list(range(M.OMMAVIY_OCHIR_CHEK + 1))), None)
+        except Exception as e:                               # noqa: BLE001
+            xato = e
+        check("chegaradan ko'p -> XATO", isinstance(xato, xatolar.Xato))
+        check("chegaradan ko'p -> hech narsa o'chmaydi", not soxta.ochirildi)
+    finally:
+        M.db, M.company_id_of, M.kimlik_of, M.audit_yoz = asl
+
+
 def test_lugat():
     bolim("2. Sabab lug'ati — Python va SQL BIR XIL")
     from api import catalog_auto as C
@@ -397,6 +594,8 @@ def main():
     test_tokenlar()
     test_manba_qism_soz()
     test_qolla_qorovuli()
+    test_ommaviy_ochirish()
+    test_ommaviy_ochirish_xulqi()
 
     if args.bazasiz or not os.environ.get("XT_DB_DSN"):
         print("\n[i] Bazali tekshiruvlar o'tkazib yuborildi.")

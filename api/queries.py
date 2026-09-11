@@ -1004,6 +1004,26 @@ RETURNING {_CP_COLS}
 CATALOG_DELETE_SQL = ("DELETE FROM catalog_product "
                       "WHERE id=%(id)s AND company_id=%(company_id)s RETURNING id")
 
+# OMMAVIY O'CHIRISH — IJARACHI SHARTI `WHERE` DA, Python da EMAS.
+#
+# Agar id lar avval o'qilib, keyin Python da filtrlansa, bitta unutilgan
+# tekshiruv BEGONA kompaniyaning mahsulotini o'chirardi. Shart SQL da
+# bo'lsa uni unutib bo'lmaydi: begona id shunchaki mos kelmaydi va
+# qaytmaydi.
+#
+# `RETURNING id` — HAQIQATDA o'chirilganlari. So'ralgan son bilan
+# bajarilgan son BIR XIL EMAS: id eskirgan yoki begona bo'lishi mumkin.
+CATALOG_BULK_DELETE_SQL = ("DELETE FROM catalog_product "
+                           "WHERE company_id=%(company_id)s "
+                           "  AND id = ANY(%(ids)s) RETURNING id")
+
+# BUTUN KATALOGNI TOZALASH. Shart faqat ijarachi bo'yicha.
+CATALOG_CLEAR_SQL = ("DELETE FROM catalog_product "
+                     "WHERE company_id=%(company_id)s RETURNING id")
+
+CATALOG_COUNT_SQL = ("SELECT count(*) AS n FROM catalog_product "
+                     "WHERE company_id=%(company_id)s")
+
 # `catalog_state` endi HAR KOMPANIYAGA bitta qator (singleton sindirilgan).
 # Yozuv bo'lmasligi mumkin — SEEN uni o'zi yaratadi (uq_catalog_state_company).
 CATALOG_STATE_GET_SQL = ("SELECT last_seen_at FROM catalog_state "

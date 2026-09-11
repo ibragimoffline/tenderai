@@ -3733,6 +3733,91 @@ def delete_product(product_id: int, request: Request):
     return None
 
 
+class CatalogOmmaviyOchirIn(BaseModel):
+    """Ommaviy o'chirish — IKKI REJIM, ikkalasi ham ANIQ so'raladi.
+
+    `ids`      — foydalanuvchi belgilagan mahsulotlar.
+    `hammasi`  — butun katalog. Bunda `kutilgan` MAJBURIY.
+
+    NEGA `kutilgan` MAJBURIY. "Hammasini o'chir" — qaytarib bo'lmaydigan
+    amal va uning hajmi foydalanuvchi EKRANDA KO'RGAN songa bog'liq.
+    Oradan import tugagan yoki boshqa oyna mahsulot qo'shgan bo'lsa,
+    u 12 ta deb o'ylab 1 796 tasini o'chirardi. Son mos kelmasa amal
+    BAJARILMAYDI va foydalanuvchi yangi sonni ko'radi.
+    """
+    ids: List[int] = []
+    hammasi: bool = False
+    kutilgan: Optional[int] = None
+
+
+#: Bir so'rovda o'chiriladigan mahsulotlar chegarasi. Undan ko'pi
+#: `hammasi` rejimi bilan qilinadi -- u alohida qo'riqqa ega.
+OMMAVIY_OCHIR_CHEK = 5000
+
+
+@app.post("/catalog/ommaviy-ochir")
+def catalog_ommaviy_ochir(body: CatalogOmmaviyOchirIn, request: Request):
+    """Belgilangan mahsulotlarni yoki BUTUN katalogni o'chiradi.
+
+    IJARACHI SHARTI SQL DA (`queries.CATALOG_BULK_DELETE_SQL`) —
+    begona id shunchaki mos kelmaydi. Python da filtrlash IDOR uchun
+    bitta unutilgan shart masofasida turardi.
+
+    QAYTADI: `ochirildi` — HAQIQATDA o'chirilgan son. So'ralgan son
+    bilan bir xil bo'lmasligi mumkin (id eskirgan yoki begona) va
+    interfeys aynan shu sonni ko'rsatishi kerak.
+    """
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+
+    # IKKI REJIM BIR VAQTDA BO'LMAYDI. "Hammasini o'chir" va "shularni
+    # o'chir" — boshqa-boshqa niyat; ikkisi birga kelsa qaysi biri
+    # bajarilgani NOANIQ bo'lardi.
+    if body.hammasi and body.ids:
+        raise xatolar.Xato("FIELD_INVALID",
+                           ichki="`hammasi` va `ids` birga berilmaydi")
+    if not body.hammasi and not body.ids:
+        raise xatolar.Xato("FIELD_INVALID",
+                           ichki="`ids` bo'sh va `hammasi` berilmagan")
+
+    if body.hammasi:
+        if body.kutilgan is None:
+            raise xatolar.Xato("FIELD_INVALID",
+                               ichki="`hammasi` uchun `kutilgan` majburiy")
+        hozir = (db.query_one(queries.CATALOG_COUNT_SQL,
+                              {"company_id": cid}) or {}).get("n") or 0
+        if int(body.kutilgan) != int(hozir):
+            # 409 — nizo. Bu XATO EMAS, HOLAT: katalog oradan
+            # o'zgargan va foydalanuvchi buni bilishi kerak.
+            raise xatolar.Xato("CATALOG_COUNT_MISMATCH",
+                               ichki=f"kutilgan={body.kutilgan} hozir={hozir}")
+        qatorlar = db.query(queries.CATALOG_CLEAR_SQL, {"company_id": cid})
+        rejim = "hammasi"
+    else:
+        if len(body.ids) > OMMAVIY_OCHIR_CHEK:
+            raise xatolar.Xato(
+                "FIELD_INVALID",
+                ichki=f"bir so'rovda {OMMAVIY_OCHIR_CHEK} tadan ko'p bo'lmaydi")
+        qatorlar = db.query(queries.CATALOG_BULK_DELETE_SQL,
+                            {"company_id": cid, "ids": list(body.ids)})
+        rejim = "tanlangan"
+
+    n = len(qatorlar)
+
+    # OMMAVIY AMAL BITTA audit qatori bilan yoziladi -- `talab_ommaviy_*`
+    # bilan ayni qoida. Har mahsulot uchun alohida qator yozish "har
+    # birini ko'rib chiqdim" degan yolg'on taassurot berardi.
+    #
+    # `entity_id` — KOMPANIYA, chunki qaror aynan shu darajada qabul
+    # qilingan (bitta mahsulot emas, katalogning bir qismi).
+    audit_yoz(k, request, amal=f"katalog_ommaviy_ochir_{rejim}",
+              entity="company", entity_id=cid,
+              keyin={"ochirildi": n, "rejim": rejim,
+                     "soralgan": len(body.ids) if not body.hammasi else n},
+              izoh=f"{n} ta mahsulot bir amalda o'chirildi")
+    return {"ochirildi": n, "rejim": rejim}
+
+
 @app.post("/catalog/match")
 def catalog_match(body: CatalogMatchIn, request: Request):
     """Katalogga kod bo'yicha mos ochiq tenderlar, lot dalili bilan.

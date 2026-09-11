@@ -63,6 +63,26 @@ export const uz = {
   'app.matchedBy.code': 'Mahsulot lotiga aniq mos: {items}',
   'cat.fNameNote': 'Turini aniq yozing, masalan: “Kompyuter monitori”.',
   'cat.moreOptions': 'Qo‘shimcha ma’lumotlar',
+
+  // --- KATALOGNI OMMAVIY TOZALASH ---
+  'cat.select': 'Belgilash',
+  'cat.selectAll': 'Sahifadagi hammasini belgilash',
+  'cat.selected': '{n} ta belgilandi',
+  'cat.clearSelection': 'Belgilashni bekor qilish',
+  'cat.deleteSelected': 'Belgilanganlarni o‘chirish',
+  'cat.clearAll': 'Katalogni tozalash',
+  'cat.confirmBulk': '{n} ta mahsulot o‘chiriladi',
+  'cat.confirmClear': 'Butun katalog o‘chiriladi — {n} ta mahsulot',
+  'cat.confirmClearBody':
+    'Mahsulotlar bilan birga ularga biriktirilgan kodlar va tahlil '
+    + 'natijalari ham o‘chadi. Bu amalni qaytarib bo‘lmaydi.',
+  'cat.deleted': '{n} ta mahsulot o‘chirildi',
+  'cat.deletedPartial':
+    '{n} ta o‘chirildi, {yoq} tasi topilmadi — katalog oradan o‘zgargan '
+    + 'bo‘lishi mumkin.',
+  'cat.staleCount':
+    'Katalog oradan o‘zgargan — hech narsa o‘chirilmadi. Ro‘yxat '
+    + 'yangilandi, qaytadan urinib ko‘ring.',
   // ── Umumiy ────────────────────────────────────────────────────────────
   'common.save': 'Saqlash',
   'common.saving': 'Saqlanmoqda…',
@@ -998,6 +1018,7 @@ export const uz = {
   'err.DOCUMENT_NOT_FOUND': 'Hujjat topilmadi.',
   'err.DOCUMENT_TEXT_NOT_FOUND': 'Hujjat matni hali ajratilmagan.',
   'err.PRODUCT_NOT_FOUND': 'Mahsulot topilmadi.',
+  'err.CATALOG_COUNT_MISMATCH': 'Katalog oradan o‘zgargan — hech narsa o‘chirilmadi. Ro‘yxatni yangilab, qaytadan urinib ko‘ring.',
   'err.REQUIREMENT_NOT_FOUND': 'Talab topilmadi.',
   'err.PILOT_NOT_FOUND': 'Pilot avlodi topilmadi (yoki allaqachon arxivlangan).',
   'err.SEARCH_NOT_FOUND': 'Saqlangan qidiruv topilmadi.',

@@ -56,6 +56,25 @@ export const en: Dict = {
   'app.matchedBy.code': 'Exact product line match: {items}',
   'cat.fNameNote': 'Be specific, for example: “Computer monitor”.',
   'cat.moreOptions': 'Additional details',
+
+  // --- BULK CATALOG CLEANUP ---
+  'cat.select': 'Select',
+  'cat.selectAll': 'Select all on this page',
+  'cat.selected': '{n} selected',
+  'cat.clearSelection': 'Clear selection',
+  'cat.deleteSelected': 'Delete selected',
+  'cat.clearAll': 'Clear catalog',
+  'cat.confirmBulk': '{n} products will be deleted',
+  'cat.confirmClear': 'The entire catalog will be deleted — {n} products',
+  'cat.confirmClearBody':
+    'The codes assigned to these products and their analysis results '
+    + 'are deleted too. This cannot be undone.',
+  'cat.deleted': '{n} products deleted',
+  'cat.deletedPartial':
+    '{n} deleted, {yoq} not found — the catalog may have changed.',
+  'cat.staleCount':
+    'The catalog changed — nothing was deleted. The list has been '
+    + 'refreshed, please try again.',
   // ── Common ────────────────────────────────────────────────────────────
   'common.save': 'Save',
   'common.saving': 'Saving…',
@@ -982,6 +1001,7 @@ export const en: Dict = {
   'err.DOCUMENT_NOT_FOUND': 'Document not found.',
   'err.DOCUMENT_TEXT_NOT_FOUND': 'The document text has not been extracted yet.',
   'err.PRODUCT_NOT_FOUND': 'Product not found.',
+  'err.CATALOG_COUNT_MISMATCH': 'The catalog changed — nothing was deleted. Refresh the list and try again.',
   'err.REQUIREMENT_NOT_FOUND': 'Requirement not found.',
   'err.PILOT_NOT_FOUND': 'Pilot generation not found (or already archived).',
   'err.SEARCH_NOT_FOUND': 'Saved search not found.',

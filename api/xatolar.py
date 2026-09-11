@@ -113,6 +113,9 @@ KODLAR: Dict[str, int] = {
     "DOCUMENT_NOT_FOUND": 404,
     "DOCUMENT_TEXT_NOT_FOUND": 404,
     "PRODUCT_NOT_FOUND": 404,
+    # Katalogni to'liq tozalash: mijoz ko'rgan son server sonidan
+    # farq qiladi, ya'ni katalog oradan o'zgargan.
+    "CATALOG_COUNT_MISMATCH": 409,
     "REQUIREMENT_NOT_FOUND": 404,
     "PILOT_NOT_FOUND": 404,
     "SEARCH_NOT_FOUND": 404,

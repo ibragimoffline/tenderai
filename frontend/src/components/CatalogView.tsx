@@ -16,6 +16,7 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ConfirmDialog, useConfirm } from '@/components/ui/confirm-dialog'
+import { Checkbox } from '@/components/ui/checkbox'
 import Pagination from './Pagination'
 import { cn } from '@/lib/utils'
 import type { Category, Product } from '@/types'
@@ -52,6 +53,75 @@ export default function CatalogView({
   // O'chirish xatosi KO'RINISHI kerak. Ilgari `await api.deleteProduct(...)`
   // to'g'ridan-to'g'ri onClick ichida edi: rad etilgan promise jimgina yo'qolar,
   // foydalanuvchi esa "tugma ishlamayapti" deb ko'rardi.
+  // BELGILANGANLAR — id TO'PLAMI, indeks EMAS.
+  //
+  // Indeks bo'yicha saqlash saralash yoki sahifa o'zgarganda jimgina
+  // BOSHQA mahsulotni belgilab qo'yardi va o'chirish paytida buni
+  // hech narsa ko'rsatmasdi.
+  const [tanlangan, setTanlangan] = useState<Set<number>>(() => new Set())
+  const [xabar, setXabar] = useState<string | null>(null)
+  const [band, setBand] = useState(false)
+
+  // Katalog o'zgarsa (import, o'chirish) belgilash TOZALANADI: ro'yxatda
+  // yo'q id ni belgilab turish "12 ta tanlandi" degan yolg'on hisob
+  // berardi.
+  useEffect(() => {
+    setTanlangan((oldingi) => {
+      if (oldingi.size === 0) return oldingi
+      const bor = new Set(items.map((p) => p.id))
+      const yangi = new Set([...oldingi].filter((id) => bor.has(id)))
+      return yangi.size === oldingi.size ? oldingi : yangi
+    })
+  }, [items])
+
+  function belgila(id: number, on: boolean) {
+    setTanlangan((oldingi) => {
+      const n = new Set(oldingi)
+      if (on) n.add(id); else n.delete(id)
+      return n
+    })
+  }
+
+  const sahifaBelgilangan = shownItems.length > 0
+    && shownItems.every((p) => tanlangan.has(p.id))
+
+  function sahifaniBelgila(on: boolean) {
+    setTanlangan((oldingi) => {
+      const n = new Set(oldingi)
+      for (const p of shownItems) { if (on) n.add(p.id); else n.delete(p.id) }
+      return n
+    })
+  }
+
+  /** Ommaviy o'chirish. `hammasi` — butun katalog. */
+  async function ommaviyOchir(hammasi: boolean) {
+    setError(null); setXabar(null); setBand(true)
+    const soralgan = hammasi ? items.length : tanlangan.size
+    try {
+      const r = hammasi
+        ? await api.catalogBulkDelete({ hammasi: true, kutilgan: items.length })
+        : await api.catalogBulkDelete({ ids: [...tanlangan] })
+      setTanlangan(new Set())
+      // SO'RALGAN VA BAJARILGAN BIR XIL EMAS. Id eskirgan bo'lsa server
+      // uni topmaydi va JIMGINA o'tkazib yuborardi -- foydalanuvchi esa
+      // hammasi o'chdi deb o'ylardi.
+      setXabar(r.ochirildi === soralgan
+        ? t('cat.deleted', { n: r.ochirildi })
+        : t('cat.deletedPartial', { n: r.ochirildi, yoq: soralgan - r.ochirildi }))
+      onChanged()
+    } catch (e) {
+      const kod = (e as { code?: string }).code
+      // 409 — XATO EMAS, HOLAT: katalog oradan o'zgargan.
+      setError(kod === 'CATALOG_COUNT_MISMATCH'
+        ? t('cat.staleCount') : (e as Error).message)
+      if (kod === 'CATALOG_COUNT_MISMATCH') onChanged()
+    } finally {
+      setBand(false)
+    }
+  }
+
+  const confirmBulk = useConfirm<number[]>()
+  const confirmClear = useConfirm<number>()
   const confirmDelete = useConfirm<Product>()
   async function remove(p: Product) {
     setError(null)
@@ -78,6 +148,16 @@ export default function CatalogView({
           <Button variant="outline" onClick={() => setImporting((v) => !v)}>
             <Icon name="download" size={14} /> {t('cat.import')}
           </Button>
+          {/* TOZALASH — faqat katalog BO'SH EMAS bo'lganda. Bo'sh
+              katalogda u hech narsa qilmaydi va tugmaning o'zi
+              "bu yerda nimadir bor" degan yolg'on ishora bo'lardi. */}
+          {items.length > 0 && (
+            <Button variant="outline" disabled={band}
+                    onClick={() => confirmClear.ask(items.length)}
+                    className="text-urgent-strong hover:bg-urgent-soft">
+              <Icon name="trash" size={14} /> {t('cat.clearAll')}
+            </Button>
+          )}
           <Button onClick={() => setEditing('new')}>
             <Icon name="plus" size={14} /> {t('cat.addProduct')}
           </Button>
@@ -89,6 +169,12 @@ export default function CatalogView({
       {error && (
         <div className="mb-3 rounded-lg border border-urgent/40 bg-urgent-soft px-3 py-2 text-body text-urgent-strong">
           {error}
+        </div>
+      )}
+
+      {xabar && (
+        <div className="mb-3 rounded-lg border border-ok/40 bg-ok-soft px-3 py-2 text-body text-ok-strong">
+          {xabar}
         </div>
       )}
 
@@ -118,11 +204,38 @@ export default function CatalogView({
         </Empty>
       )}
 
+      {/* OMMAVIY PANEL — faqat belgilangan BO'LSA ko'rinadi.
+          Doim turgan bo'sh panel joy egallaydi va "nimadir tanlangan"
+          degan yolg'on ishora beradi. */}
+      {tanlangan.size > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border bg-secondary px-3 py-2">
+          <span className="text-body font-semibold">
+            {t('cat.selected', { n: tanlangan.size })}
+          </span>
+          <Button size="sm" variant="outline" disabled={band}
+                  onClick={() => setTanlangan(new Set())}>
+            {t('cat.clearSelection')}
+          </Button>
+          <Button size="sm" variant="outline" disabled={band}
+                  onClick={() => confirmBulk.ask([...tanlangan])}
+                  className="text-urgent-strong hover:bg-urgent-soft">
+            <Icon name="trash" size={14} /> {t('cat.deleteSelected')}
+          </Button>
+        </div>
+      )}
+
       {items.length > 0 && (
         <div className="overflow-x-auto rounded-xl border bg-card">
           <Table className="text-body">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[44px]">
+                  <Checkbox
+                    checked={sahifaBelgilangan}
+                    onCheckedChange={(v) => sahifaniBelgila(v === true)}
+                    aria-label={t('cat.selectAll')}
+                  />
+                </TableHead>
                 <TableHead>{t('cat.thProduct')}</TableHead>
                 <TableHead className="w-[180px]">{t('cat.thCategory')}</TableHead>
                 <TableHead className="w-[140px] text-right">{t('cat.thPrice')}</TableHead>
@@ -133,7 +246,15 @@ export default function CatalogView({
             </TableHeader>
             <TableBody>
               {shownItems.map((p) => (
-                <TableRow key={p.id} className="hover:bg-transparent">
+                <TableRow key={p.id} className="hover:bg-transparent"
+                          data-tanlangan={tanlangan.has(p.id) ? 'ha' : undefined}>
+                  <TableCell>
+                    <Checkbox
+                      checked={tanlangan.has(p.id)}
+                      onCheckedChange={(v) => belgila(p.id, v === true)}
+                      aria-label={`${p.name} — ${t('cat.select')}`}
+                    />
+                  </TableCell>
                   <TableCell>
                     <div className="font-medium">{p.name}</div>
                     {p.keywords.length > 0 && (
@@ -194,6 +315,22 @@ export default function CatalogView({
           onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
         />
       )}
+
+      <ConfirmDialog
+        {...confirmBulk.props}
+        title={t('cat.confirmBulk', { n: confirmBulk.target?.length ?? 0 })}
+        onConfirm={() => void ommaviyOchir(false)}
+      />
+
+      {/* TOZALASHDA SON SARLAVHADA. "Hammasini o'chirasizmi?" degan
+          savol hajmni yashiradi -- 12 ta bilan 1796 ta bir xil
+          ko'rinardi. */}
+      <ConfirmDialog
+        {...confirmClear.props}
+        title={t('cat.confirmClear', { n: confirmClear.target ?? 0 })}
+        description={t('cat.confirmClearBody')}
+        onConfirm={() => void ommaviyOchir(true)}
+      />
 
       <ConfirmDialog
         {...confirmDelete.props}
