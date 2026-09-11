@@ -122,7 +122,19 @@ _SPACES = "    "                     # NBSP va boshqa probellar
 #: Raqamlar amaliy: haqiqiy katalog fayllari (o'lchandi: sinov
 #: fixture'lari va shablonlar) 1 MB dan kichik ochiladi va nisbati
 #: 20:1 dan past.
-MAX_OCHILGAN_MB = 80
+#: 80 dan 500 ga ko'tarildi (2026-09-11): kirish chegarasi 5 -> 50 MB
+#: bo'lgach, qonuniy 50 MB lik `.xlsx` eski cheklovga TUSHIB QOLARDI
+#: va import "zip bomba" deb rad etilardi.
+#:
+#: 500 -- xotira bo'yicha o'lchangan tanlov, kirish hajmiga
+#: proporsiya EMAS. Serverda 7.7 GB dan 1.7 GB bo'sh (o'lchandi
+#: 2026-09-11) va unda ikki API jarayoni bilan embedding modeli
+#: turadi. Proporsional 800 MB xavfli bo'lardi.
+#:
+#: XOTIRAGA 500 MB TUSHMAYDI: `load_workbook(..., read_only=True)`
+#: varaqni OQIM bilan o'qiydi. Bu son ZIP katalogidan olinadi va
+#: fayl OCHILMASDAN tekshiriladi, ya'ni tekshiruvning o'zi arzon.
+MAX_OCHILGAN_MB = 500
 MAX_SIQISH_NISBATI = 200
 
 

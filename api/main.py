@@ -2104,7 +2104,21 @@ def tender_documents_text(
 # ---------------------------------------------------------------------------
 # KATALOG IMPORTI (TZ P0-4) — Excel/CSV/Google Sheets dan mahsulot + qoldiq
 # ---------------------------------------------------------------------------
-MAX_IMPORT_MB = 5
+#: Katalog importi uchun eng katta fayl (MB).
+#:
+#: 5 dan 50 ga ko'tarildi (2026-09-11, so'rov bo'yicha). Bu son
+#: YOLG'IZ O'ZI YETARLI EMAS: proksi chegarasi undan KICHIK bo'lsa,
+#: so'rov ilovagacha YETIB BORMAYDI va foydalanuvchi 413 oladi --
+#: ilovadagi "chegara 50 MB" xabari esa YOLG'ON bo'lib qolardi.
+#: Shuning uchun `tender-nginx` da `/api/catalog/import` uchun
+#: ALOHIDA `client_max_body_size` bor va sinov ikkisini
+#: solishtiradi (`deploy_test`).
+#:
+#: NEGA ALOHIDA JOY, umumiy chegara EMAS: hujjat yuklash yo'lida
+#: proksi ATAYLAB 30 MB ni to'xtatadi va buni E2E tekshiradi
+#: (`e2e-fayl.sh --proksi`). Umumiy chegarani ko'tarish o'sha
+#: qo'riqni o'chirardi.
+MAX_IMPORT_MB = 50
 
 
 def _yuklangani(file: UploadFile, max_mb: int = MAX_IMPORT_MB) -> bytes:

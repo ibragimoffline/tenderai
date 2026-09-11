@@ -4381,6 +4381,81 @@ def test_orama_siljishi():
         shutil.rmtree(baza, ignore_errors=True)
 
 
+def test_import_chegarasi_qatlamlararo() -> None:
+    """Proksi chegarasi ilova chegarasidan KICHIK bo'lmasin.
+
+    O'LCHANGAN XAVF (2026-09-11). Katalog importi chegarasi 5 -> 50 MB
+    ga ko'tarildi. Proksi esa 26 MB da turardi: 50 MB li fayl
+    ilovagacha YETIB BORMAY, 413 bilan qaytardi -- ilovaning
+    "chegara 50 MB" xabari esa YOLG'ON bo'lib qolardi.
+
+    Ikki qatlam ikki joyda yozilgan va ular bir-birini BILMAYDI.
+    Bu sinov ularni bog'laydi.
+
+    HUJJAT YO'LI TEGILMAYDI: u yerda proksi ATAYLAB ~26 MB da
+    to'xtatadi va buni E2E tekshiradi. Shuning uchun import uchun
+    ALOHIDA `location` bo'lishi ham talab qilinadi -- umumiy
+    chegarani ko'tarish o'sha qo'riqni jimgina o'chirardi.
+    """
+    import re as _re
+    bolim("8y. Import chegarasi — ilova va proksi")
+
+    ilova = _oqi_ildiz("api/main.py")
+    m = _re.search(r"^MAX_IMPORT_MB\s*=\s*(\d+)", ilova, _re.M)
+    check("`MAX_IMPORT_MB` topildi", bool(m))
+    if not m:
+        return
+    app_mb = int(m.group(1))
+
+    ngx = _oqi_ildiz("deploy/bin/tender-nginx.namuna")
+    check("import uchun ALOHIDA `location` bor",
+          "location = /api/catalog/import" in ngx,
+          "umumiy chegara ko'tarilgan bo'lishi mumkin")
+
+    # Aynan SHU blokdagi chegara olinadi, server darajasidagisi emas.
+    bloklar = _re.findall(
+        r"location = /api/catalog/import \{(.*?)\n    \}", ngx, _re.S)
+    check("blok(lar) topildi", len(bloklar) >= 1, f"{len(bloklar)} ta")
+    kichik = []
+    for b in bloklar:
+        mm = _re.search(r"client_max_body_size\s+(\d+)m", b)
+        if not mm:
+            kichik.append("chegara yo'q")
+            continue
+        if int(mm.group(1)) < app_mb:
+            kichik.append(f"{mm.group(1)}m < {app_mb} MB")
+    check(f"proksi chegarasi >= ilova ({app_mb} MB)", not kichik,
+          "; ".join(kichik))
+
+    # HUJJAT YO'LI: server darajasidagi chegara KO'TARILMAGAN bo'lsin.
+    # Aks holda `e2e-fayl.sh --proksi` dagi "30 MB ni PROKSI
+    # to'xtatdi" da'vosi jimgina yolg'onga aylanardi.
+    server_chegara = [int(x) for x in
+                      _re.findall(r"^    client_max_body_size (\d+)m;", ngx, _re.M)]
+    check("server darajasidagi chegara topildi", bool(server_chegara))
+    check("hujjat yo'li chegarasi ko'tarilmagan (<= 32m)",
+          all(x <= 32 for x in server_chegara), str(server_chegara))
+
+    # INTERFEYSDAGI NUSXA. U yuklashdan OLDIN rad etadi, ya'ni undan
+    # kichik bo'lsa server qabul qiladigan fayl brauzerda TO'XTAB
+    # qolardi va sabab hech qayerda ko'rinmasdi.
+    fe = _oqi_ildiz("frontend/src/components/CatalogImport.tsx")
+    mf = _re.search(r"^const MAX_MB = (\d+)", fe, _re.M)
+    check("interfeysda `MAX_MB` topildi", bool(mf))
+    if mf:
+        check(f"interfeys chegarasi ilova bilan BIR XIL ({app_mb})",
+              int(mf.group(1)) == app_mb, f"{mf.group(1)} vs {app_mb}")
+
+    # OCHILGAN HAJM chegarasi kirishdan KICHIK bo'lmasin -- aks holda
+    # qonuniy fayl "zip bomba" deb rad etilardi.
+    imp = _oqi_ildiz("api/importer.py")
+    mo = _re.search(r"^MAX_OCHILGAN_MB\s*=\s*(\d+)", imp, _re.M)
+    check("`MAX_OCHILGAN_MB` topildi", bool(mo))
+    if mo:
+        check("ochilgan chegara kirishdan KATTA",
+              int(mo.group(1)) > app_mb, f"{mo.group(1)} vs {app_mb}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Joylashtirish sinovi")
     rejim.bayroqlar(ap)
@@ -4439,6 +4514,7 @@ def main():
     test_sozlama_tekshiruvi()
     test_zaxira_oramasi()
     test_uzoqdan_tiklash()
+    test_import_chegarasi_qatlamlararo()
 
     otdi = sum(1 for _n, ok, _d in _natija if ok)
     jami = len(_natija)

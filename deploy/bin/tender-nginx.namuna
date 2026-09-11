@@ -87,6 +87,32 @@ server {
         proxy_read_timeout 120s;
     }
 
+    # --- KATALOG IM8010I: ALOHIDA CHEGARA -----------------------------------
+    # Ilovada `MAX_IM8010_MB = 50`. Proksi chegarasi undan KICHIK
+    # bo'lsa so'rov ilovagacha YETIB BORMAYDI: foydalanuvchi 413
+    # oladi va ilovaning "chegara 50 MB" xabari YOLG'ON bo'lib
+    # qoladi. 64m -- 50 MB ustiga multipart qo'shimchasi va zaxira.
+    #
+    # NEGA ALOHIDA JOY, server darajasida EMAS: hujjat yuklash
+    # yo'lida proksi ATAYLAB ~26 MB da to'xtatadi va buni E2E
+    # tekshiradi (`e2e-fayl.sh --proksi`: "30 MB ni PROKSI
+    # to'xtatdi"). Umumiy chegarani ko'tarish o'sha qo'riqni
+    # jimgina o'chirardi.
+    #
+    # `=` — ANIQ moslik: u prefiksli `/api/` dan ustun turadi.
+    location = /api/catalog/import {
+        client_max_body_size 64m;
+        proxy_pass http://127.0.0.1:8010/catalog/import;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Katta fayl uzoq o'qiladi -- 120s yetmasligi mumkin.
+        proxy_read_timeout 300s;
+        proxy_request_buffering off;
+    }
+
     # --- Statik qurilma ----------------------------------------------------
     # `current` — RELIZGA simvolik havola. nginx uni HAR SO'ROVDA
     # yechadi, ya'ni joylashtirishdan keyin qayta yuklash SHART EMAS.
@@ -138,6 +164,32 @@ server {
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 120s;
+    }
+
+    # --- KATALOG IM8011I: ALOHIDA CHEGARA -----------------------------------
+    # Ilovada `MAX_IM8011_MB = 50`. Proksi chegarasi undan KICHIK
+    # bo'lsa so'rov ilovagacha YETIB BORMAYDI: foydalanuvchi 413
+    # oladi va ilovaning "chegara 50 MB" xabari YOLG'ON bo'lib
+    # qoladi. 64m -- 50 MB ustiga multipart qo'shimchasi va zaxira.
+    #
+    # NEGA ALOHIDA JOY, server darajasida EMAS: hujjat yuklash
+    # yo'lida proksi ATAYLAB ~26 MB da to'xtatadi va buni E2E
+    # tekshiradi (`e2e-fayl.sh --proksi`: "30 MB ni PROKSI
+    # to'xtatdi"). Umumiy chegarani ko'tarish o'sha qo'riqni
+    # jimgina o'chirardi.
+    #
+    # `=` — ANIQ moslik: u prefiksli `/api/` dan ustun turadi.
+    location = /api/catalog/import {
+        client_max_body_size 64m;
+        proxy_pass http://127.0.0.1:8011/catalog/import;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Katta fayl uzoq o'qiladi -- 120s yetmasligi mumkin.
+        proxy_read_timeout 300s;
+        proxy_request_buffering off;
     }
 
     root /opt/tenderai/staging/current/frontend/dist;

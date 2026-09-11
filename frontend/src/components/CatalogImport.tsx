@@ -18,7 +18,15 @@ import type { ImportResult } from '@/types'
 //
 // Yuklash `fetch` bilan to'g'ridan-to'g'ri bajariladi: api.ts dagi `request()`
 // JSON uchun mo'ljallangan, multipart (FormData) ni yubora olmaydi.
-const MAX_MB = 5
+// SERVERDAGI `MAX_IMPORT_MB` BILAN BIR XIL BO'LISHI SHART.
+//
+// Bu yerdagi tekshiruv QULAYLIK uchun: fayl tarmoqqa chiqmasdan
+// rad etiladi. Haqiqiy qo'riq serverda. Ikki son ajralib ketsa,
+// foydalanuvchi serverda O'TADIGAN faylni yuklay olmasdi va sabab
+// hech qayerda ko'rinmasdi.
+//
+// `deploy_test` ikkisini solishtiradi.
+const MAX_MB = 50
 
 interface CatalogImportProps {
   onImported?: () => void
