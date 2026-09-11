@@ -56,6 +56,11 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=5)
     a = ap.parse_args()
 
+    # HAVZA ANIQ ISHGA TUSHIRILADI. `db.query()` uni O'ZI ko'tarmaydi
+    # va "DB pool ishga tushmagan" deb yiqiladi -- xabar to'g'ri,
+    # lekin sabab skriptda. `catalog_kodla.py` bilan ayni qadam.
+    db.init_pool()
+
     rows = _mahsulotlar(a.company, a.product or None, a.limit)
     if not rows:
         print("Mahsulot topilmadi.")
