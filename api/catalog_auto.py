@@ -171,6 +171,101 @@ def suggest_exact_code(product: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             ("code", "confidence", "evidence", "total", "examples", "source")}
 
 
+# ---------------------------------------------------------------------
+# AVTOMATIK TASDIQ SIYOSATI
+#
+# `tahlil()` "qaysi kod" degan savolga javob beradi. Bu yerda BOSHQA
+# savol turadi: "bu javobni ODAM KO'RMASDAN faollashtirsa bo'ladimi?"
+#
+# Ikkisini ajratish ATAYLAB. `sabab='kod'` -- algoritm qarori;
+# `qaror='auto'` -- shu qarorga INSON NAZORATISIZ ishonish. Ikkinchisi
+# birinchisidan QAT'IYROQ bo'lishi shart.
+#
+# NEGA KERAK (2026-09-12 o'lchovi): `teskari` qoida qamrovni 0.2% dan
+# 10.2% ga ko'tardi, lekin 14 talik namunada 1 ta xato chiqdi -- server
+# SHKAFI `Сервер` deb kodlandi. Bunday xato inson ko'rmasdan
+# faollashsa, u HAR IMPORTDA takrorlanadi.
+#
+# BESH SIGNAL, hammasi `tahlil()` da ALLAQACHON bor -- yangi hisob
+# qo'shilmaydi:
+#
+#     dalil        -- top1 ni tasdiqlagan tarixiy lot soni
+#     ulush        -- top1 / jami (`confidence`)
+#     farq         -- top1 ulushi - top2 ulushi
+#     oila         -- nomzodlar bitta NACE bo'limida turibdimi
+#     kategoriya   -- mahsulot kategoriyasi kod bo'limiga ziddimi
+#
+# CHEGARALAR O'LCHOVSIZ TANLANMAYDI. Presetlar `kod_nima_bolardi.py
+# --siyosat` bilan taqqoslanadi va shundan keyin bittasi standart
+# qilinadi.
+# ---------------------------------------------------------------------
+SIYOSAT_PRESET: Dict[str, Dict[str, Any]] = {
+    # Hozirgi amaldagi xulq: siyosat YO'Q, `sabab='kod'` bo'lsa
+    # faollashadi (faqat `kuchsiz_dalil` to'sadi). Taqqoslash uchun.
+    "yoq":     {"dalil": 2, "ulush": 0.75, "farq": 0.00,
+                "oila": False, "kategoriya": False},
+    "yumshoq": {"dalil": 3, "ulush": 0.85, "farq": 0.30,
+                "oila": False, "kategoriya": True},
+    "orta":    {"dalil": 4, "ulush": 0.90, "farq": 0.50,
+                "oila": True,  "kategoriya": True},
+    "qattiq":  {"dalil": 6, "ulush": 1.00, "farq": 0.75,
+                "oila": True,  "kategoriya": True},
+}
+
+#: STANDART SIYOSAT. O'lchovdan keyin tanlanadi.
+STANDART_SIYOSAT = "orta"
+
+
+def siyosat_qarori(bosh: Dict[str, Any], product: Dict[str, Any],
+                   siyosat: str = "") -> Dict[str, Any]:
+    """`tahlil()` natijasini UCH chelakka ajratadi.
+
+        auto    -- inson ko'rmasdan faollashtirish mumkin
+        navbat  -- taklif yoziladi, TASDIQLANMAYDI (inson ko'radi)
+        kodsiz  -- kod umuman yo'q
+
+    HECH NARSA YOZMAYDI -- faqat qaror qaytaradi.
+    """
+    p = SIYOSAT_PRESET[siyosat or STANDART_SIYOSAT]
+    qaror = {"qaror": "kodsiz", "sabab": bosh.get("sabab"), "tekshiruv": {}}
+
+    if bosh.get("sabab") != "kod":
+        # `dalil_kam` va `noaniq` -- kod NOMZODI bor, faqat zaif.
+        # Ular NAVBATGA tushadi: odam ko'rsa hal bo'ladi.
+        if bosh.get("sabab") in ("dalil_kam", "noaniq") and bosh.get("code"):
+            qaror["qaror"] = "navbat"
+        return qaror
+
+    kodlar = bosh.get("kodlar") or {}
+    jami = sum(kodlar.values()) or (bosh.get("total") or 0)
+    tartib = sorted(kodlar.values(), reverse=True)
+    top1 = (tartib[0] / jami) if jami and tartib else 0.0
+    top2 = (tartib[1] / jami) if jami and len(tartib) > 1 else 0.0
+
+    kod = bosh.get("code") or ""
+    bolimlar = {k[:2] for k in kodlar}
+    kat_bolim = kodlash.divisions_for_category(product.get("category_code"))
+
+    t = {
+        "dalil": (bosh.get("evidence") or 0) >= p["dalil"],
+        "ulush": (bosh.get("confidence") or 0.0) >= p["ulush"],
+        "farq": (top1 - top2) >= p["farq"],
+        # Nomzodlar bitta NACE bo'limida bo'lsa -- to'qnashuv yo'q.
+        "oila": (not p["oila"]) or len(bolimlar) <= 1,
+        # Mahsulotda kategoriya bo'lsa, kod o'sha bo'limdan chiqishi
+        # kerak. HALOL ESLATMA: nomzod SQL i allaqachon shu bo'yicha
+        # filtrlaydi, shuning uchun bu tekshiruv amalda deyarli hech
+        # qachon qizarmaydi -- u REGRESSIYAGA qarshi turibdi.
+        "kategoriya": (not p["kategoriya"]) or (not kat_bolim)
+                      or (kod[:2] in kat_bolim),
+    }
+    qaror["tekshiruv"] = t
+    qaror["qaror"] = "auto" if all(t.values()) else "navbat"
+    if qaror["qaror"] == "navbat":
+        qaror["sabab"] = "siyosat:" + ",".join(k for k, v in t.items() if not v)
+    return qaror
+
+
 def _soz_bor(probe: str, vocab: Set[str]) -> bool:
     """`probe` so'zi `vocab` ichida bormi.
 

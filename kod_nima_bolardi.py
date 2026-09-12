@@ -138,11 +138,72 @@ def olch(company_id: int, qoidalar: List[str], limit: int = 0,
     return 0
 
 
+def olch_siyosat(company_id: int, limit: int = 0, namuna: int = 8) -> int:
+    """Avtomatik tasdiq SIYOSATINI o'lchaydi (qoidani emas).
+
+    Qoida "qaysi kod" ni hal qiladi; siyosat esa "odam ko'rmasdan
+    faollashtirsa bo'ladimi" ni. Bu funksiya ikkinchisini o'lchaydi.
+    """
+    mahsulotlar = _mahsulotlar(company_id, limit)
+    if not mahsulotlar:
+        print("Mahsulot topilmadi.")
+        return 1
+    ochiq = _ochiq_tender(company_id)
+    presetlar = list(catalog_auto.SIYOSAT_PRESET)
+    print(f"Mahsulot: {len(mahsulotlar)}   siyosat: {', '.join(presetlar)}")
+
+    # `tahlil()` BIR MARTA -- siyosat uni o'zgartirmaydi, faqat
+    # natijasini baholaydi. Uni har preset uchun qayta yurgizish
+    # 4 barobar bekor ish bo'lardi.
+    tahlillar = [(p, catalog_auto.tahlil(p)) for p in mahsulotlar]
+
+    jadval: Dict[str, Dict[str, int]] = {}
+    qiymat: Dict[str, int] = {}
+    tushgan: Dict[str, List[Any]] = {}
+    for s_nom in presetlar:
+        sanoq = {"auto": 0, "navbat": 0, "kodsiz": 0}
+        qiymat[s_nom] = 0
+        tushgan[s_nom] = []
+        for p, h in tahlillar:
+            q = catalog_auto.siyosat_qarori(h, p, s_nom)
+            sanoq[q["qaror"]] += 1
+            if q["qaror"] == "auto":
+                qiymat[s_nom] += ochiq.get(p["id"], 0)
+            elif h.get("sabab") == "kod":
+                # Algoritm kod topdi, SIYOSAT to'sdi -- eng qiziq chelak.
+                tushgan[s_nom].append((p, h, q))
+        jadval[s_nom] = sanoq
+
+    kenglik = max(len(x) for x in presetlar) + 2
+    print(f"\n{'siyosat':<{kenglik}}{'auto':>8}{'navbat':>9}{'kodsiz':>9}"
+          f"{'auto ochiq tender':>20}")
+    for s_nom in presetlar:
+        j = jadval[s_nom]
+        print(f"{s_nom:<{kenglik}}{j['auto']:>8}{j['navbat']:>9}"
+              f"{j['kodsiz']:>9}{qiymat[s_nom]:>20}")
+
+    rnd = random.Random(20260912)
+    for s_nom in presetlar:
+        rows = tushgan[s_nom]
+        if not rows:
+            continue
+        print(f"\n--- SIYOSAT TO'SGANLARI: {s_nom}  ({len(rows)} ta, "
+              f"{min(namuna, len(rows))} tasi TASODIFIY) ---")
+        for p, h, q in rnd.sample(rows, min(namuna, len(rows))):
+            yiqilgan = [k for k, v in (q.get("tekshiruv") or {}).items() if not v]
+            print(f"  {(p.get('name') or '')[:48]:<48} -> {h.get('code')}  "
+                  f"ulush {h.get('confidence')}  dalil {h.get('evidence')}"
+                  f"/{h.get('total')}  yiqildi: {','.join(yiqilgan)}")
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Moslik qoidasi -- nima bo'lardi")
     ap.add_argument("--company", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--namuna", type=int, default=8)
+    ap.add_argument("--siyosat", action="store_true",
+                    help="QOIDA emas, avtomatik tasdiq SIYOSATINI o'lchaydi")
     ap.add_argument("--qoida", default="",
                     help="vergul bilan; standart -- hammasi")
     args = ap.parse_args()
@@ -153,6 +214,9 @@ def main() -> None:
         from api import auth
         cid = auth.sole_company_id()
     print(f"Ijarachi: {cid}")
+
+    if args.siyosat:
+        sys.exit(olch_siyosat(cid, args.limit, args.namuna))
 
     qoidalar = ([q.strip() for q in args.qoida.split(",") if q.strip()]
                 or list(catalog_auto.QOIDALAR))
