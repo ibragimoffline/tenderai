@@ -276,6 +276,50 @@ def nomzod_oilalari(product: Dict[str, Any]) -> Dict[str, Any]:
     return natija
 
 
+#: Qavs ichi -- deyarli har doim IZOH yoki maqsad, bosh ot emas:
+#: "Gofra truba (kabel uchun)", "Simsiz klaviatura (boshqaruv paneli)".
+_QAVS_RE = re.compile(r"\([^)]*\)")
+#: Kirill bo'lagi -- odatda ruscha TAKRORIY nom ("... Штекер питания").
+#: Bosh ot o'zbekcha bo'lagidan olinadi, aks holda brend/model tushadi.
+_KIRIL_RE = re.compile(r"[\u0400-\u04FF]")
+
+
+def bosh_ot(name: str) -> str:
+    """Mahsulot nomining BOSH OTINI qaytaradi (yoki bo'sh satr).
+
+    O'zbekchada aniqlovchi oldin, BOSH OT oxirida keladi:
+    "Server shkafi" -> shkaf;  "DC quvvat konnektori" -> konnektor.
+    Shu sababli maqsad/izoh bo'laklari olib tashlangach OXIRGI
+    ma'noli so'z olinadi.
+
+    IKKI MAQSAD BELGISI:
+        qavs ichi        "(kabel uchun)", "(boshqaruv paneli)"
+        "... uchun"      "Kommutator/NVR uchun metall shit"
+
+    O'LCHANGAN SABAB (2026-09-12): ziddiyat signalining 4 ta noto'g'ri
+    belgisining HAMMASI raqib oilaning aynan shu bo'laklardagi so'zdan
+    oziqlanishidan chiqqandi:
+
+        Gofra truba (kabel uchun)   -> raqib "kabel" ustida
+        DC quvvat konnektori        -> raqib "питания" ustida
+
+    QORA RO'YXAT EMAS: bu grammatik tuzilish, so'z ro'yxati emas.
+    """
+    matn = _QAVS_RE.sub(" ", name or "")
+    m = _KIRIL_RE.search(matn)
+    if m:
+        matn = matn[:m.start()]
+    # "... uchun" -- undan OLDINGISI maqsad, keyingisi predmet.
+    past = matn.lower()
+    i = past.rfind(" uchun")
+    if i >= 0:
+        matn = matn[i + len(" uchun"):]
+    sozlar = [w for w in re.findall(r"[^\W\d_]+",
+                                    atama.normal(matn), flags=re.UNICODE)
+              if len(w) >= 3 and w not in _STOP]
+    return sozlar[-1] if sozlar else ""
+
+
 def bosh_ot_ziddiyati(bosh: Dict[str, Any],
                       product: Dict[str, Any]) -> Dict[str, Any]:
     """G'olib oilaga BOSHQA token bilan raqobat qiladigan oila bormi?
@@ -296,6 +340,8 @@ def bosh_ot_ziddiyati(bosh: Dict[str, Any],
     if not golib:
         return javob
     javob["golib_tokens"] = sorted(golib["tokens"])
+    bosh = bosh_ot(product.get("name") or "")
+    javob["bosh_ot"] = bosh
     for bolim, o in oilalar.items():
         if bolim == kod[:2]:
             continue
@@ -305,6 +351,14 @@ def bosh_ot_ziddiyati(bosh: Dict[str, Any],
         # ikkalasi bir xil tokendan oziqlansa, bu ma'no ziddiyati
         # emas -- shunchaki bitta so'zning ikki kod oilasida uchrashi.
         if o["tokens"] & golib["tokens"]:
+            continue
+        # RAQIB BOSH OTGA TAYANISHI SHART. Maqsad/izoh bo'lagidagi
+        # so'z ustida turgan raqib -- bu ma'no ziddiyati EMAS:
+        # "Gofra truba (kabel uchun)" da mahsulot GOFRA, kabel esa
+        # u nima uchun ekanligi. Bosh ot aniqlanmasa (bo'sh satr)
+        # eski xulq saqlanadi -- signal YO'QOLMAYDI.
+        if bosh and not any(_soz_bor(bosh, {t}) or _soz_bor(t, {bosh})
+                            for t in o["tokens"]):
             continue
         javob.update({"ziddiyat": True, "raqib": bolim,
                       "raqib_nom": o["nom"],
