@@ -214,7 +214,8 @@ def nomzod_oilalari(product: Dict[str, Any]) -> Dict[str, Any]:
     nomzodlar ham saqlanadi.
     """
     tokens = _tokens(product)
-    natija: Dict[str, Any] = {"tokens": tokens, "oilalar": {}}
+    natija: Dict[str, Any] = {"tokens": tokens, "oilalar": {},
+                              "kodlar": {}}
     if not tokens:
         return natija
     clauses, params = _token_clauses(tokens)
@@ -255,6 +256,23 @@ def nomzod_oilalari(product: Dict[str, Any]) -> Dict[str, Any]:
             o["max_qoplam"] = qoplam
             o["nom"] = row["name"]
         o["tokens"] |= dalil_tok
+
+        # KOD darajasi ALOHIDA. G'olibning tokenlarini BO'LIM bo'yicha
+        # olish XATO edi: bo'lim o'z ichiga raqibning tokenini ham
+        # yutib yuboradi va ziddiyat ko'rinmay qoladi. O'lchangan
+        # holat (#2850 server shkafi):
+        #
+        #     26.*  tokens=[server, shkaf]   <- bo'lim darajasi
+        #     26.20.14 dalil lotlari: "Сервер" -> tokens=[server]
+        #     31.*  tokens=[shkaf]  lot=43
+        #
+        # Bo'lim bilan kesishma bor -> o'tkazib yuborilardi.
+        # Kod bilan kesishma YO'Q -> ziddiyat ko'rinadi.
+        if qoplam >= 1.0:
+            kd = (row["good_code"] or "")[:8]
+            k = natija["kodlar"].setdefault(kd, {"lot": 0, "tokens": set()})
+            k["lot"] += 1
+            k["tokens"] |= dalil_tok
     return natija
 
 
@@ -270,8 +288,11 @@ def bosh_ot_ziddiyati(bosh: Dict[str, Any],
     kod = bosh.get("code") or ""
     if not kod:
         return javob
-    oilalar = nomzod_oilalari(product)["oilalar"]
-    golib = oilalar.get(kod[:2])
+    tahl = nomzod_oilalari(product)
+    oilalar = tahl["oilalar"]
+    # G'olib TOKENLARI uning o'z dalil lotlaridan (kod darajasi),
+    # bo'limdan EMAS -- yuqoridagi izohga qarang.
+    golib = tahl["kodlar"].get(kod[:8]) or oilalar.get(kod[:2])
     if not golib:
         return javob
     javob["golib_tokens"] = sorted(golib["tokens"])
