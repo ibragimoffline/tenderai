@@ -329,6 +329,20 @@ def korik_chop(company_id: int) -> Dict[str, int]:
     return {r["manba"]: r["n"] for r in rows}
 
 
+def _faol_ijarachilar() -> List[int]:
+    """Barcha FAOL ijarachilar.
+
+    NEGA KERAK: soatlik ETL `sole_company_id()` ga tayana OLMAYDI --
+    u bir nechta faol kompaniya bo'lsa `COMPANY_AMBIGUOUS` bilan
+    YIQILADI. Bu staging'da aniqlandi (sinov ijarachilari bor), va
+    ishlab chiqarishda ikkinchi ijarachi paydo bo'lgan kuni soatlik
+    qadam JIMGINA yiqilardi -- xato `post_xatolar` ga tushardi va
+    katalog tahlili to'xtab qolardi.
+    """
+    return [r["id"] for r in db.query(
+        "SELECT id FROM company_account WHERE active ORDER BY id")]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Katalog kodlash")
     g = ap.add_mutually_exclusive_group()
@@ -353,11 +367,30 @@ def main() -> None:
                     help="--yangilash uchun: kodsiz mahsulot tahlili necha "
                          "soatdan keyin eskirgan hisoblanadi (standart 24)")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--hamma-ijarachi", dest="hamma_ijarachi",
+                    action="store_true",
+                    help="--tahlil bilan: BARCHA faol ijarachilar bo'ylab "
+                         "(soatlik ETL shuni ishlatadi)")
     ap.add_argument("--company", type=int, default=0,
                     help="Ijarachi id (bo'sh: yagona faol hisob)")
     args = ap.parse_args()
 
     db.init_pool()
+
+    # BARCHA IJARACHILAR -- faqat tahlil uchun. Qolgan buyruqlar
+    # bitta ijarachi ustida ishlaydi va ular QO'LDA yurgiziladi.
+    if args.hamma_ijarachi:
+        if not args.tahlil:
+            print("--hamma-ijarachi faqat --tahlil bilan ishlaydi")
+            sys.exit(1)
+        idlar = _faol_ijarachilar()
+        print(f"Faol ijarachi: {len(idlar)} ta -> {idlar}")
+        for i in idlar:
+            print(f"\n--- ijarachi {i} ---")
+            tahlil_yurgiz(i, args.limit, yangilash=args.yangilash,
+                          eskirish_soat=args.eskirish)
+        return
+
     cid = args.company
     if not cid:
         from api import auth

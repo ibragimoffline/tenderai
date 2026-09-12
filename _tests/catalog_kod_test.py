@@ -583,6 +583,17 @@ def test_etl_qolla_ni_chaqirmaydi():
                 if "--qolla" in q), ""))
     check("ETL `--yangilash` bilan chaqiradi", '"--yangilash"' in kod)
 
+    # KO'P-IJARACHILIK. `sole_company_id()` bir nechta faol kompaniya
+    # bo'lsa `COMPANY_AMBIGUOUS` bilan YIQILADI -- bu staging'da
+    # o'lchandi (sinov ijarachilari bor). Ishlab chiqarishda ikkinchi
+    # ijarachi paydo bo'lgan kuni soatlik qadam JIMGINA to'xtardi.
+    check("ETL BARCHA ijarachilar bo'ylab yuradi",
+          '"--hamma-ijarachi"' in kod)
+    ck = io.open(os.path.join(ROOT, "catalog_kodla.py"),
+                 encoding="utf-8").read()
+    check("`--hamma-ijarachi` faol hisoblarni o'zi oladi",
+          "FROM company_account WHERE active" in ck)
+
 
 def test_qayta_baho_faollikka_tegmaydi():
     bolim("4d. QAYTA BAHOLASH FAOLLIKNI BEKOR QILMAYDI")

@@ -1210,10 +1210,14 @@ def main() -> None:
     # KODSIZ mahsulotlar. O'LCHANDI (ishlab chiqarish, 1840 mahsulot):
     # to'liq yurish 195.6s, o'zgarishsiz inkremental yurish 0.0s.
     #
-    # IJARACHI: skript standarti -- yagona faol hisob. Qadam yiqilsa
-    # `post_xatolar` ga tushadi va ETL ning qolganini TO'XTATMAYDI.
+    # IJARACHI: BARCHA faol hisoblar. `sole_company_id()` ga
+    # tayanish XATO edi -- u bir nechta faol kompaniya bo'lsa
+    # `COMPANY_AMBIGUOUS` bilan yiqiladi (staging'da aniqlandi).
+    # Qadam yiqilsa `post_xatolar` ga tushadi va ETL ning
+    # qolganini TO'XTATMAYDI.
     _ok, _err, _dt, out, _kod = run_script(
-        "catalog_kodla.py", ["--tahlil", "--yangilash"])
+        "catalog_kodla.py",
+        ["--tahlil", "--yangilash", "--hamma-ijarachi"])
     emit(["\n===== post: katalog kod tahlili =====", *out])
     if not _ok:
         post_xatolar.append(f"catalog_kodla --tahlil: {_err}")
