@@ -399,13 +399,13 @@ SIYOSAT_PRESET: Dict[str, Dict[str, Any]] = {
     # Hozirgi amaldagi xulq: siyosat YO'Q, `sabab='kod'` bo'lsa
     # faollashadi (faqat `kuchsiz_dalil` to'sadi). Taqqoslash uchun.
     "yoq":     {"dalil": 2, "ulush": 0.75, "farq": 0.00,
-                "oila": False, "kategoriya": False},
+                "oila": False, "kategoriya": False, "ziddiyat": False},
     "yumshoq": {"dalil": 3, "ulush": 0.85, "farq": 0.30,
-                "oila": False, "kategoriya": True},
+                "oila": False, "kategoriya": True, "ziddiyat": True},
     "orta":    {"dalil": 4, "ulush": 0.90, "farq": 0.50,
-                "oila": True,  "kategoriya": True},
+                "oila": True,  "kategoriya": True, "ziddiyat": True},
     "qattiq":  {"dalil": 6, "ulush": 1.00, "farq": 0.75,
-                "oila": True,  "kategoriya": True},
+                "oila": True,  "kategoriya": True, "ziddiyat": True},
 }
 
 #: STANDART SIYOSAT. O'lchovdan keyin tanlanadi.
@@ -413,7 +413,8 @@ STANDART_SIYOSAT = "orta"
 
 
 def siyosat_qarori(bosh: Dict[str, Any], product: Dict[str, Any],
-                   siyosat: str = "") -> Dict[str, Any]:
+                   siyosat: str = "",
+                   ziddiyat: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """`tahlil()` natijasini UCH chelakka ajratadi.
 
         auto    -- inson ko'rmasdan faollashtirish mumkin
@@ -455,6 +456,18 @@ def siyosat_qarori(bosh: Dict[str, Any], product: Dict[str, Any],
         "kategoriya": (not p["kategoriya"]) or (not kat_bolim)
                       or (kod[:2] in kat_bolim),
     }
+    # BOSH SO'Z ZIDDIYATI -- semantik qavat. Statistik signallar uni
+    # KO'RMAYDI: server shkafi holati dalil 8/8, ulush 1.0 bilan
+    # to'rt presetning hammasidan o'tib ketgandi.
+    #
+    # QIMMAT: bu qo'shimcha SQL so'rovi. Shuning uchun faqat shu
+    # yergacha yetib kelganda -- ya'ni boshqa hamma tekshiruv o'tgan
+    # nomzod uchun -- hisoblanadi. Chaqiruvchi tayyor natijani
+    # uzatishi ham mumkin (ommaviy yo'l shundan foydalanadi).
+    if p.get("ziddiyat") and all(t.values()):
+        z = ziddiyat if ziddiyat is not None else bosh_ot_ziddiyati(bosh, product)
+        t["ziddiyat"] = not z.get("ziddiyat")
+        qaror["raqib"] = z.get("raqib")
     qaror["tekshiruv"] = t
     qaror["qaror"] = "auto" if all(t.values()) else "navbat"
     if qaror["qaror"] == "navbat":
