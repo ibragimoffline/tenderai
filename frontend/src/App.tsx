@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils'
 // ochgan HAR BIR foydalanuvchi hech qachon ko'rmasligi mumkin bo'lgan grafik
 // kutubxonasini yuklab olardi.
 const StatsView = lazy(() => import('./components/StatsView'))
+const KodKorik = lazy(() => import('./components/KodKorik'))
 // LAZY: tasdiqlash paneli kundalik ish emas — broker unga
 // vaqti-vaqti bilan kiradi. Boshlang'ich yuklamaga qo'shmaymiz.
 const RequirementReview = lazy(() =>
@@ -542,6 +543,7 @@ export default function App() {
             onOpenMatch={openProductMatch}
           />
         )}
+        {view === 'kod-korik' && <KodKorik />}
         {/* Saqlangach yon paneldagi ism/email darhol yangilanadi */}
         {view === 'account' && <AccountSettings onSaved={setAccount} />}
         {view === 'documents' && <CompanyDocuments focusType={docFocus} />}

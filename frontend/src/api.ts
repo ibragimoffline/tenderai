@@ -12,7 +12,8 @@ import type {
   Talab, TalabHolat, TalabNavbat,
   AiQaror, InsonQaror, MalakaNatija, NavbatFiltr, RoutingHolat,
   RoutingItem, TalabFiltr,
-  KodNavbat, KodQaror, KodQidiruv, KodOlchov, MahsulotKodTakliflar, Manba,
+  KodKorikQator, KodNavbat, KodQaror, KodQidiruv, KodOlchov,
+  MahsulotKodTakliflar, Manba,
   RoutingMoslik,
   TalabXulosa,
   TelegramSubscriber, TenderDetail, TenderRow, NotifySettingsData, Nullable,
@@ -702,6 +703,16 @@ export const api = {
   kodTakliflar: (productId: number, limit = 6) =>
     request<MahsulotKodTakliflar>(
       'GET', `/catalog/${productId}/kod-takliflar`, { params: { limit } }),
+  /**
+   * KO'RIK NAVBATI. Amallar uchun YANGI endpoint YO'Q:
+   *   Saqlash    -> kodTasdiq(o'sha kod) — tizim qarori inson qaroriga
+   *   Boshqa kod -> kodTakliflar paneli
+   *   Rad etish  -> kodRad
+   * Ikkala qaror ham `korib_chiqilsin` ni tushiradi (server tomonda).
+   */
+  kodKorik: (limit = 200) =>
+    request<{ jami: number; qatorlar: KodKorikQator[] }>(
+      'GET', '/catalog/kod-korik', { params: { limit } }),
   kodTasdiq: (productId: number, code: string) =>
     request<null>('POST', `/catalog/${productId}/kod-tasdiq`, { body: { code } }),
   kodRad: (productId: number, code: string) =>

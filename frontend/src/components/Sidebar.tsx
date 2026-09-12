@@ -13,6 +13,7 @@ const NAV: { key: string; icon: string; label: TKey; section?: TKey }[] = [
   { key: 'tenders', icon: 'tenders', label: 'nav.tenders', section: 'nav.section.main' },
   { key: 'match', icon: 'match', label: 'nav.match' },
   { key: 'catalog', icon: 'box', label: 'nav.catalog' },
+  { key: 'kod-korik', icon: 'check', label: 'nav.codeReview' },
   { key: 'documents', icon: 'clip', label: 'nav.documents' },
   { key: 'requirements', icon: 'check', label: 'nav.requirements' },
   // Talablardan KEYIN: zanjir tender -> talab -> malaka -> NAVBAT.

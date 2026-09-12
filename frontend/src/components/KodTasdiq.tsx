@@ -41,7 +41,13 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/u
 import type { MahsulotKodTaklif, MahsulotKodTakliflar, Product } from '@/types'
 
 interface KodTasdiqProps {
-  product: Product
+  /**
+   * Panel FAQAT `id` va `name` ni ishlatadi. Tur ataylab TOR:
+   * ko'rik navbati (`KodKorik`) to'liq `Product` ni yuklamaydi --
+   * unga faqat shu ikkisi keladi, va soxta to'liq obyekt yasash
+   * bo'sh maydonlarni haqiqat sifatida ko'rsatardi.
+   */
+  product: Pick<Product, 'id' | 'name'>
   onClose: () => void
   /** Qaror yozilgach katalog ro'yxati yangilanadi (`codes` o'zgaradi). */
   onChanged: () => void

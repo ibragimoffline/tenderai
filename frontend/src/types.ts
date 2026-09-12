@@ -1186,6 +1186,24 @@ export interface MahsulotKodTakliflar {
   aniq: MahsulotKodTaklif[]
 }
 
+/**
+ * KO'RIK NAVBATI qatori — siyosatdan o'tmagan, LEKIN hali FAOL kod.
+ *
+ * `korib_chiqilsin` faollikni BEKOR QILMAYDI: kod ishlashda davom
+ * etadi va bog'lanish faqat INSON qaroridan keyin o'zgaradi.
+ */
+export interface KodKorikQator {
+  product_id: number
+  mahsulot: string
+  code: string
+  tasdiqlagan: string | null
+  tasdiqlandi: string | null
+  /** Qaysi tekshiruv yiqilgani, masalan `siyosat:dalil,ziddiyat`. */
+  siyosat_sabab: string | null
+  siyosat_at: string | null
+  ochiq_tender: number
+}
+
 export interface KodAtama {
   kalit: string
   atama: string

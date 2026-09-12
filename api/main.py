@@ -4092,6 +4092,46 @@ def catalog_seen(request: Request):
 # Oqim: taklif -> INSON tasdig'i -> moslik. Tasdiqlanmagan taklif
 # hech qachon moslikka aylanmaydi (`v_catalog_code_active`).
 # ---------------------------------------------------------------------------
+@app.get("/catalog/kod-korik")
+def kod_korik(request: Request, limit: int = 200):
+    """KO'RIK NAVBATI — siyosatdan o'tmagan, LEKIN hali FAOL kodlar.
+
+    NEGA FAOL: `korib_chiqilsin` bayrog'i faollikni BEKOR QILMAYDI
+    (`schema_patch_kod_siyosat.sql`). 187 ta kod siyosat yozilishidan
+    OLDIN qo'llangan va yangi siyosat 49 tasini o'tkazmaydi. Ular
+    orasida haqiqiy xato bor, lekin HAMMASI xato degani emas --
+    birdan o'chirish to'g'ri kodlarni ham yo'qotardi.
+
+    Shuning uchun bu ekran HOLATNI ko'rsatadi, kodni o'zgartirmaydi.
+    Uch amal ham MAVJUD endpointlar orqali:
+
+        Saqlash    -> POST kod-tasdiq (o'sha kod bilan) -- tizim
+                      qarori INSON qaroriga aylanadi
+        Boshqa kod -> GET kod-takliflar paneli
+        Rad etish  -> POST kod-rad
+
+    Ikkalasi ham `korib_chiqilsin` ni tushiradi (`kodlash.py`).
+    """
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    ruxsat(k, "korib_chiq")
+    lim = max(1, min(int(limit), 500))
+    jami = db.query_one(
+        "SELECT count(*) AS n FROM v_catalog_kod_korik "
+        "WHERE company_id = %(c)s", {"c": cid}) or {"n": 0}
+    qatorlar = db.query(
+        "SELECT product_id, mahsulot, code, tasdiqlagan, tasdiqlandi, "
+        "       siyosat_sabab, siyosat_at, ochiq_tender "
+        "  FROM v_catalog_kod_korik "
+        " WHERE company_id = %(c)s "
+        # BIZNES QIYMATI bo'yicha: ko'p ochiq tenderli mahsulotdagi
+        # xato ko'proq zarar keltiradi, u birinchi ko'rilsin.
+        " ORDER BY ochiq_tender DESC, product_id "
+        " LIMIT %(l)s",
+        {"c": cid, "l": lim})
+    return {"jami": jami.get("n", 0), "qatorlar": qatorlar}
+
+
 @app.get("/catalog/{product_id}/kod-takliflar")
 def kod_takliflar(product_id: int, request: Request, limit: int = 6):
     """Mahsulot uchun nomzod kodlar (tasdiqlash ekrani uchun).

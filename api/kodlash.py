@@ -500,6 +500,12 @@ def tasdiqla(company_id: int, product_id: int, code: str, kim: str,
         "UPDATE catalog_product_code "
         "SET tasdiqlandi = now(), tasdiqlagan = %(kim)s, rad_etildi = NULL, "
         "    tasdiq_ishonch = %(ish)s, tasdiq_actor_id = %(aid)s, "
+        # INSON QARORI KO'RIKNI YOPADI. `korib_chiqilsin` bayrog'ini
+        # siyosat qo'yadi (`catalog_auto`), va uni FAQAT odam tushira
+        # oladi -- bayroqning ma'nosi aynan "odam ko'rsin". Qaror
+        # kelgach u o'z vazifasini bajargan bo'ladi.
+        "    korib_chiqilsin = false, "
+
         # `COALESCE` — mavjud bog'lanish YO'QOLMAYDI: qayta tasdiqlash
         # audit izini o'chirib yubormasin.
         "    qaror_id = COALESCE(%(q)s, qaror_id) "
@@ -523,6 +529,11 @@ def rad_et(company_id: int, product_id: int, code: str, *,
     row = db.execute_returning(
         "UPDATE catalog_product_code "
         "SET rad_etildi = now(), tasdiqlandi = NULL, tasdiqlagan = NULL, "
+        # INSON QARORI KO'RIKNI YOPADI. `korib_chiqilsin` bayrog'ini
+        # siyosat qo'yadi (`catalog_auto`), va uni FAQAT odam tushira
+        # oladi -- bayroqning ma'nosi aynan "odam ko'rsin". Qaror
+        # kelgach u o'z vazifasini bajargan bo'ladi.
+        "    korib_chiqilsin = false, "
         "    tasdiq_ishonch = %(ish)s, tasdiq_actor_id = %(aid)s "
         "WHERE product_id = %(p)s AND code = %(k)s AND company_id = %(c)s "
         "RETURNING product_id",
