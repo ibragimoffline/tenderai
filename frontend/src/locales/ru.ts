@@ -149,6 +149,7 @@ export const ru: Dict = {
   'korik.thCode': 'Текущий код',
   'korik.thReason': 'Причина',
   'korik.thTenders': 'Открытые тендеры',
+  'korik.open': 'Проверить',
   'korik.keep': 'Оставить',
   'korik.other': 'Другой код',
   'korik.reject': 'Отклонить',

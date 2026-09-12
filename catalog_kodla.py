@@ -70,10 +70,10 @@ TAHLIL_UPSERT = """
 INSERT INTO catalog_kod_tahlil
     (company_id, product_id, sabab, taklif_code, ishonch, dalil, jami,
      nomzod, tokenlar, kodlar, misollar, ochiq_tender, tarixiy_lot,
-     kuchsiz_dalil, tahlil_at)
+     kuchsiz_dalil, siyosat_qaror, siyosat_sabab, tahlil_at)
 VALUES (%(c)s, %(p)s, %(sabab)s, %(code)s, %(ishonch)s, %(dalil)s, %(jami)s,
         %(nomzod)s, %(tokenlar)s, %(kodlar)s::jsonb, %(misollar)s,
-        %(ochiq)s, %(lot)s, %(kuchsiz)s, now())
+        %(ochiq)s, %(lot)s, %(kuchsiz)s, %(sq)s, %(ss)s, now())
 ON CONFLICT (company_id, product_id) DO UPDATE SET
     sabab = EXCLUDED.sabab, taklif_code = EXCLUDED.taklif_code,
     ishonch = EXCLUDED.ishonch, dalil = EXCLUDED.dalil,
@@ -81,7 +81,9 @@ ON CONFLICT (company_id, product_id) DO UPDATE SET
     tokenlar = EXCLUDED.tokenlar, kodlar = EXCLUDED.kodlar,
     misollar = EXCLUDED.misollar, ochiq_tender = EXCLUDED.ochiq_tender,
     tarixiy_lot = EXCLUDED.tarixiy_lot,
-    kuchsiz_dalil = EXCLUDED.kuchsiz_dalil, tahlil_at = now()
+    kuchsiz_dalil = EXCLUDED.kuchsiz_dalil,
+    siyosat_qaror = EXCLUDED.siyosat_qaror,
+    siyosat_sabab = EXCLUDED.siyosat_sabab, tahlil_at = now()
 RETURNING product_id
 """
 
@@ -112,19 +114,68 @@ def _qamrov_chop(sarlavha: str, q: Dict[str, Any]) -> None:
     print(f"  har qanday kod     {q.get('har_qanday_foiz', 0)}%")
 
 
-def tahlil_yurgiz(company_id: int, limit: int = 0) -> Dict[str, int]:
+def _yangilanadigan(company_id: int, eskirish_soat: int,
+                    limit: int = 0) -> List[Dict[str, Any]]:
+    """Qayta tahlil qilinadigan mahsulotlar -- UCH SABAB.
+
+        1. hech qachon tahlil qilinmagan
+        2. mahsulot tahlildan KEYIN o'zgargan
+        3. hali kodsiz VA tahlili eskirgan
+
+    UCHINCHISI NEGA KERAK: kodsiz mahsulotning tahlili o'zgarishi
+    mumkin, chunki tarixiy lot korpusi har soatda o'sadi -- kecha
+    nomzod bo'lmagan mahsulotga bugun nomzod chiqishi mumkin.
+
+    UCHINCHISI NEGA CHEGARALANGAN: 1 653 kodsiz mahsulotni HAR
+    SOATDA qayta ishlash 186 soniya va u deyarli har doim AYNI
+    natijani beradi. `eskirish_soat` shu bekor ishni kesadi.
+    """
+    return db.query(
+        "SELECT p.id, p.name, p.category_code, p.keywords "
+        "  FROM catalog_product p "
+        "  LEFT JOIN catalog_kod_tahlil t "
+        "    ON t.product_id = p.id AND t.company_id = p.company_id "
+        " WHERE p.company_id = %(c)s "
+        "   AND (t.product_id IS NULL "
+        "        OR p.updated_at > t.tahlil_at "
+        "        OR (t.tahlil_at < now() - make_interval(hours => %(e)s) "
+        "            AND NOT EXISTS (SELECT 1 FROM v_catalog_code_active v "
+        "                             WHERE v.product_id = p.id "
+        "                               AND v.company_id = p.company_id "
+        "                               AND length(v.code) >= 8))) "
+        " ORDER BY p.id"
+        + (f" LIMIT {int(limit)}" if limit else ""),
+        {"c": company_id, "e": int(eskirish_soat)})
+
+
+def tahlil_yurgiz(company_id: int, limit: int = 0, *,
+                  yangilash: bool = False,
+                  eskirish_soat: int = 24) -> Dict[str, int]:
     """Har mahsulotni tahlil qiladi va SABABI bilan saqlaydi.
 
-    KOD YOZMAYDI. Faqat `catalog_kod_tahlil` ga yozadi.
+    KOD YOZMAYDI va `catalog_product_code` ga UMUMAN TEGMAYDI.
+    Faqat `catalog_kod_tahlil` ga yozadi, u esa
+    `(company_id, product_id)` bo'yicha UPSERT -- ya'ni takror
+    yurish DUBLIKAT YARATA OLMAYDI.
+
+    SIYOSAT QARORI ham shu yerda yoziladi (`siyosat_qaror`). Ko'rik
+    navbati shundan oziqlanadi, shuning uchun ETL ga faqat shu
+    buyruq ulanishi yetarli -- `--qolla` cron da KERAK EMAS.
+
+    `yangilash=True` -- faqat yangi, o'zgargan yoki tahlili eskirgan
+    KODSIZ mahsulotlar (`_yangilanadigan()` izohiga qarang).
     """
-    rows = _mahsulotlar(company_id, limit)
+    rows = (_yangilanadigan(company_id, eskirish_soat, limit)
+            if yangilash else _mahsulotlar(company_id, limit))
     print(f"Tahlil: {len(rows)} ta mahsulot")
     sanoq: Dict[str, int] = {}
     t0 = time.time()
     for i, p in enumerate(rows, 1):
         t = catalog_auto.tahlil(p)
         bq = catalog_auto.biznes_qiymati(p)
+        q = catalog_auto.siyosat_qarori(t, p)
         sanoq[t["sabab"]] = sanoq.get(t["sabab"], 0) + 1
+        sanoq["~" + q["qaror"]] = sanoq.get("~" + q["qaror"], 0) + 1
         db.execute_returning(TAHLIL_UPSERT, {
             "c": company_id, "p": p["id"], "sabab": t["sabab"],
             "code": t["code"] if t["sabab"] == "kod" else t["code"],
@@ -134,7 +185,8 @@ def tahlil_yurgiz(company_id: int, limit: int = 0) -> Dict[str, int]:
             "kodlar": json.dumps(t["kodlar"], ensure_ascii=False),
             "misollar": t["examples"],
             "ochiq": bq["ochiq_tender"], "lot": bq["tarixiy_lot"],
-            "kuchsiz": bool(t.get("kuchsiz_dalil"))})
+            "kuchsiz": bool(t.get("kuchsiz_dalil")),
+            "sq": q["qaror"], "ss": (q.get("sabab") or "")[:200]})
         if i % 200 == 0:
             print(f"  ... {i}/{len(rows)}")
     print(f"  tugadi: {time.time() - t0:.1f}s\n")
@@ -255,6 +307,28 @@ def qayta_baho(company_id: int, quruq: bool = True) -> Dict[str, int]:
     return natija
 
 
+def korik_chop(company_id: int) -> Dict[str, int]:
+    """KO'RIK NAVBATI sanog'i -- manba bo'yicha (faqat o'qish)."""
+    rows = db.query(
+        "SELECT manba, count(*) AS n, coalesce(sum(ochiq_tender), 0) AS t "
+        "  FROM v_catalog_kod_korik WHERE company_id = %(c)s "
+        " GROUP BY manba ORDER BY manba", {"c": company_id})
+    jami = sum(r["n"] for r in rows)
+    print(f"\nKO'RIK NAVBATI: {jami}")
+    for r in rows:
+        print(f"  {r['manba']:<10}{r['n']:>7}   ochiq tender {r['t']}")
+    # TAHLIL JADVALI -- dublikat bo'lishi MUMKIN EMAS (UPSERT), lekin
+    # sanoq baribir chop etiladi: "mumkin emas" degan gap o'lchov
+    # o'rnini bosmaydi.
+    t = db.query_one(
+        "SELECT count(*) AS n, count(DISTINCT product_id) AS d "
+        "  FROM catalog_kod_tahlil WHERE company_id = %(c)s",
+        {"c": company_id}) or {}
+    print(f"  tahlil qatori {t.get('n')} / turli mahsulot {t.get('d')}"
+          + ("   DUBLIKAT BOR!" if t.get("n") != t.get("d") else ""))
+    return {r["manba"]: r["n"] for r in rows}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Katalog kodlash")
     g = ap.add_mutually_exclusive_group()
@@ -265,11 +339,19 @@ def main() -> None:
     g.add_argument("--qayta-baho", dest="qayta_baho", action="store_true",
                    help="FAOL kodlarni yangi siyosat bilan qayta baholaydi "
                         "(faollikni BEKOR QILMAYDI)")
+    g.add_argument("--korik", action="store_true",
+                   help="Ko'rik navbati sanog'i (faqat o'qish)")
     g.add_argument("--qamrov", action="store_true", help="Qamrov o'lchovi")
     g.add_argument("--navbat", action="store_true", help="Ko'rib chiqish navbati")
     ap.add_argument("--quruq", action="store_true",
                     help="--qolla bilan: nima bo'lardi, yozmaydi")
     ap.add_argument("--sabab", default="", help="--navbat uchun filtr")
+    ap.add_argument("--yangilash", action="store_true",
+                    help="--tahlil bilan: FAQAT yangi, o'zgargan yoki "
+                         "tahlili eskirgan kodsiz mahsulotlar")
+    ap.add_argument("--eskirish", type=int, default=24,
+                    help="--yangilash uchun: kodsiz mahsulot tahlili necha "
+                         "soatdan keyin eskirgan hisoblanadi (standart 24)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--company", type=int, default=0,
                     help="Ijarachi id (bo'sh: yagona faol hisob)")
@@ -281,6 +363,10 @@ def main() -> None:
         from api import auth
         cid = auth.sole_company_id()
     print(f"Ijarachi: {cid}")
+
+    if args.korik:
+        korik_chop(cid)
+        return
 
     if args.qayta_baho:
         qayta_baho(cid, quruq=args.quruq)
@@ -316,7 +402,8 @@ def main() -> None:
         return
 
     # Standart — tahlil.
-    tahlil_yurgiz(cid, limit=args.limit)
+    tahlil_yurgiz(cid, args.limit, yangilash=args.yangilash,
+                  eskirish_soat=args.eskirish)
     _qamrov_chop("QAMROV (o'zgarmadi — tahlil kod yozmaydi)", qamrov(cid))
 
 

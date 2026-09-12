@@ -4121,7 +4121,7 @@ def kod_korik(request: Request, limit: int = 200):
         "WHERE company_id = %(c)s", {"c": cid}) or {"n": 0}
     qatorlar = db.query(
         "SELECT product_id, mahsulot, code, tasdiqlagan, tasdiqlandi, "
-        "       siyosat_sabab, siyosat_at, ochiq_tender "
+        "       siyosat_sabab, siyosat_at, ochiq_tender, manba "
         "  FROM v_catalog_kod_korik "
         " WHERE company_id = %(c)s "
         # BIZNES QIYMATI bo'yicha: ko'p ochiq tenderli mahsulotdagi

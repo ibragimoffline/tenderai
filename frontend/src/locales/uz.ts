@@ -152,6 +152,7 @@ export const uz = {
   'korik.thCode': 'Hozirgi kod',
   'korik.thReason': 'Sabab',
   'korik.thTenders': 'Ochiq tender',
+  'korik.open': 'Ko`rib chiqish',
   'korik.keep': 'Saqlash',
   'korik.other': 'Boshqa kod',
   'korik.reject': 'Rad etish',

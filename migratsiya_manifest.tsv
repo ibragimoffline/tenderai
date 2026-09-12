@@ -105,3 +105,4 @@
 860	0084_erp_chegara	schema_patch_erp_chegara.sql
 870	0085_auth_eski_tozalash	schema_patch_auth_eski_tozalash.sql
 880	0086_kod_siyosat	schema_patch_kod_siyosat.sql
+890	0087_kod_navbat	schema_patch_kod_navbat.sql

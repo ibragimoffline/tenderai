@@ -117,21 +117,28 @@ export default function KodKorik() {
                       {r.ochiq_tender}
                     </TableCell>
                     <TableCell className="space-x-2 text-right">
-                      <Button size="sm" variant="outline"
-                              disabled={band === r.product_id}
-                              onClick={() => qaror(r, true)}>
-                        {t('korik.keep')}
-                      </Button>
+                      {/* `taklif` qatorida bazada bog'lanish YO'Q --
+                          to'g'ridan-to'g'ri tasdiq `LINK_NOT_FOUND`
+                          berardi. Panel avval taklifni yozadi. */}
+                      {r.manba === 'faol' && (
+                        <Button size="sm" variant="outline"
+                                disabled={band === r.product_id}
+                                onClick={() => qaror(r, true)}>
+                          {t('korik.keep')}
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline"
                               disabled={band === r.product_id}
                               onClick={() => setBoshqa(r)}>
-                        {t('korik.other')}
+                        {r.manba === 'faol' ? t('korik.other') : t('korik.open')}
                       </Button>
-                      <Button size="sm" variant="ghost"
-                              disabled={band === r.product_id}
-                              onClick={() => qaror(r, false)}>
-                        {t('korik.reject')}
-                      </Button>
+                      {r.manba === 'faol' && (
+                        <Button size="sm" variant="ghost"
+                                disabled={band === r.product_id}
+                                onClick={() => qaror(r, false)}>
+                          {t('korik.reject')}
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

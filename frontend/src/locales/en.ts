@@ -145,6 +145,7 @@ export const en: Dict = {
   'korik.thCode': 'Current code',
   'korik.thReason': 'Reason',
   'korik.thTenders': 'Open tenders',
+  'korik.open': 'Review',
   'korik.keep': 'Keep',
   'korik.other': 'Another code',
   'korik.reject': 'Reject',

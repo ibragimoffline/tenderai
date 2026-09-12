@@ -1202,6 +1202,15 @@ export interface KodKorikQator {
   siyosat_sabab: string | null
   siyosat_at: string | null
   ochiq_tender: number
+  /**
+   * `faol`   — tasdiqlangan, lekin shubhali deb belgilangan kod.
+   *            Uch amal ham mumkin.
+   * `taklif` — hali kod YO'Q; tahlil nomzod topdi, siyosat avtomatik
+   *            tasdiqqa yetarli emas dedi. Bu qator uchun bazada
+   *            bog'lanish qatori YO'Q, shuning uchun to'g'ridan-to'g'ri
+   *            tasdiq/rad ishlamaydi -- panel ochiladi.
+   */
+  manba: 'faol' | 'taklif'
 }
 
 export interface KodAtama {

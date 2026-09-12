@@ -511,6 +511,60 @@ def test_standart_qoida():
           C.QOIDALAR["teskari"](tok2, lot2), str(tok2))
 
 
+def test_soatlik_tahlil_xavfsiz():
+    bolim("4e. SOATLIK TAHLIL — IDEMPOTENT va BOG'LANISHGA TEGMAYDI")
+    import re
+    src = io.open(os.path.join(ROOT, "catalog_kodla.py"),
+                  encoding="utf-8").read()
+    sql = io.open(os.path.join(ROOT, "schema_patch_kod_navbat.sql"),
+                  encoding="utf-8").read()
+
+    # 1. DUBLIKAT CHIQMAYDI -- mexanizm darajasida, tartib-intizom
+    #    bilan emas. `catalog_kod_tahlil` UPSERT qilinadi, ya'ni
+    #    takror yurish YANGI QATOR YARATA OLMAYDI.
+    check("tahlil UPSERT (company_id, product_id) bo'yicha",
+          "ON CONFLICT (company_id, product_id) DO UPDATE" in src)
+
+    # 2. ETL BOG'LANISHGA TEGMAYDI. Bu eng qimmat invariant: soatlik
+    #    ish inson tasdig'isiz kod faollashtira olmasligi kerak.
+    m = re.search(r"def tahlil_yurgiz\(.*?\n(?=\ndef |\Z)", src, flags=re.S)
+    check("`tahlil_yurgiz()` mavjud", bool(m))
+    tana = m.group(0) if m else ""
+    # IZOH VA DOKSATR HISOBGA OLINMAYDI. Funksiyaning o'z doksatri
+    # "`catalog_product_code` ga UMUMAN TEGMAYDI" deb yozadi va oddiy
+    # matn qidiruvi AYNAN SHUNI ushlab, YOLG'ON qizarardi. Bugun bu
+    # sinf xatosi to'rtinchi marta uchradi -- shuning uchun tekshiruv
+    # BAJARILADIGAN kodga cheklanadi.
+    q3, a3 = chr(34) * 3, chr(39) * 3
+    kod = re.sub(q3 + "[\\s\\S]*?" + q3, "", tana)
+    kod = re.sub(a3 + "[\\s\\S]*?" + a3, "", kod)
+    kod = "\n".join(q.split("#")[0] for q in kod.splitlines())
+    check("tahlil `catalog_product_code` ga YOZMAYDI",
+          "catalog_product_code" not in kod,
+          next((q.strip()[:70] for q in kod.splitlines()
+                if "catalog_product_code" in q), ""))
+    check("tahlil `classify_product` ni chaqirmaydi",
+          "classify_product" not in kod)
+
+    # 3. INSON QARORI QAYTA CHIQMAYDI. Ikki qo'riq: faol aniq kod
+    #    bo'lsa `taklif` tarmog'iga tushmaydi, rad etilgan taklif esa
+    #    navbatga qaytmaydi.
+    check("navbat: faol aniq kodli mahsulot `taklif` ga tushmaydi",
+          "v_catalog_code_active" in sql and "length(v.code) >= 8" in sql)
+    check("navbat: RAD ETILGAN taklif qaytmaydi",
+          "r.rad_etildi IS NOT NULL" in sql)
+
+    # 4. BELGILANGAN FAOL KOD NAVBATDA QOLADI (birinchi tarmoq).
+    check("navbat: `korib_chiqilsin` tarmog'i saqlangan",
+          "pc.korib_chiqilsin" in sql and "pc.tasdiqlandi IS NOT NULL" in sql)
+
+    # 5. INKREMENTAL TANLASH -- uchala sabab ham bor.
+    check("yangilash: tahlil qilinmagan", "t.product_id IS NULL" in src)
+    check("yangilash: mahsulot o'zgargan", "p.updated_at > t.tahlil_at" in src)
+    check("yangilash: kodsiz va eskirgan",
+          "make_interval(hours" in src and "v_catalog_code_active" in src)
+
+
 def test_qayta_baho_faollikka_tegmaydi():
     bolim("4d. QAYTA BAHOLASH FAOLLIKNI BEKOR QILMAYDI")
     import re
@@ -807,6 +861,7 @@ def main():
     test_standart_qoida()
     test_tasdiq_ishonch_majburiy()
     test_qayta_baho_faollikka_tegmaydi()
+    test_soatlik_tahlil_xavfsiz()
     test_qolla_qorovuli()
     test_ommaviy_ochirish()
     test_ommaviy_ochirish_xulqi()

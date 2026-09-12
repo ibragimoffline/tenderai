@@ -47,6 +47,7 @@ const QATOR: KodKorikQator = {
   siyosat_sabab: 'siyosat:ziddiyat',
   siyosat_at: '2026-09-12T20:45:04+05:00',
   ochiq_tender: 37,
+  manba: 'faol',
 }
 
 beforeEach(() => {
@@ -57,6 +58,18 @@ beforeEach(() => {
 })
 
 describe('KodKorik', () => {
+  it('`taklif` qatorida TASDIQ/RAD tugmasi YO`Q (bazada bog`lanish yo`q)', async () => {
+    kodKorik.mockResolvedValue({
+      jami: 1,
+      qatorlar: [{ ...QATOR, manba: 'taklif' as const, tasdiqlagan: null }],
+    })
+    render(<KodKorik />)
+    await screen.findByText(QATOR.mahsulot)
+    expect(screen.queryByRole('button', { name: /Saqlash/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Rad etish/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /Ko.rib chiqish/i })).toBeTruthy()
+  })
+
   it('navbatni o`qiydi va qatorni ko`rsatadi', async () => {
     render(<KodKorik />)
     expect(await screen.findByText(QATOR.mahsulot)).toBeTruthy()
