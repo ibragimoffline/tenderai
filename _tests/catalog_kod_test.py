@@ -434,6 +434,49 @@ def test_manba_qism_soz():
     check("sabab `sozlar_mos_emas` mavjud", "sozlar_mos_emas" in src)
 
 
+def test_tasdiq_ishonch_majburiy():
+    bolim("4c. TASDIQ QATORI DALILSIZ YOZILMAYDI")
+    # O'LCHANGAN NOSOZLIK (2026-09-12, ishlab chiqarish):
+    #
+    #     CheckViolation: catalog_product_code_tasdiq_manba_chk
+    #     Failing row: (3251, 1, 27.33.13, taklif, 0.999, tizim:auto, ...)
+    #
+    # `schema_patch_inson_dalil.sql` tasdiqlangan qatordan
+    # `tasdiq_ishonch` ni TALAB qiladi, avtomatik yo'l esa o'sha
+    # patchdan keyin yangilanmagandi -- `--qolla` BUTUNLAY o'lik edi
+    # va buni hech narsa ushlamasdi (qamrov 0 bo'lgani uchun
+    # ko'rinmasdi ham).
+    #
+    # Bu tekshiruv SATR QIDIRMAYDI: `catalog_product_code` ni
+    # yangilaydigan har bir SQL topiladi va `tasdiqlandi` qo'yadigan
+    # har biri `tasdiq_ishonch` ham qo'yishi TALAB qilinadi.
+    import re
+    nosoz = []
+    for fayl in ("catalog_auto.py", "kodlash.py", "main.py"):
+        yol = os.path.join(ROOT, "api", fayl)
+        if not os.path.exists(yol):
+            continue
+        src = io.open(yol, encoding="utf-8").read()
+        # Qo'shni satrlardagi SQL bo'laklari bitta matnga yig'iladi:
+        # Python da uzun SQL qo'shni literal sifatida yoziladi.
+        tekis = re.sub(r'"\s*\n\s*"', "", src)
+        for m in re.finditer(r"UPDATE catalog_product_code(.{0,400}?)WHERE",
+                             tekis, flags=re.S):
+            blok = m.group(1)
+            if re.search(r"tasdiqlandi\s*=\s*now\(\)", blok) \
+                    and "tasdiq_ishonch" not in blok:
+                nosoz.append(f"{fayl}: {blok.strip()[:70]}")
+    check("tasdiqlandi qo'yadigan HAR BIR UPDATE tasdiq_ishonch ham qo'yadi",
+          not nosoz, "; ".join(nosoz[:2]))
+
+    # `servis` -- odam yo'q. Aktor izchilligi cheklovi unga
+    # `tasdiq_actor_id IS NULL` ni talab qiladi.
+    src = io.open(os.path.join(ROOT, "api", "catalog_auto.py"),
+                  encoding="utf-8").read()
+    check("avtomatik yo'l `servis` dalilini ishlatadi",
+          "tasdiq_ishonch='servis'" in src.replace(" = ", "="))
+
+
 def test_standart_qoida():
     bolim("4b. STANDART MOSLIK QOIDASI -- o'lchov bilan tanlangan")
     from api import atama
@@ -736,6 +779,7 @@ def main():
     test_tokenlar()
     test_manba_qism_soz()
     test_standart_qoida()
+    test_tasdiq_ishonch_majburiy()
     test_qolla_qorovuli()
     test_ommaviy_ochirish()
     test_ommaviy_ochirish_xulqi()

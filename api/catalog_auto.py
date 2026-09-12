@@ -430,9 +430,21 @@ def classify_product(company_id: int, product_id: int, *, force: bool = False
     kodlash.taklif_yoz(company_id, product_id, [{
         "code": code, "skor": min(float(suggestion["confidence"]), 0.999),
     }])
+    # `tasdiq_ishonch` MAJBURIY. `catalog_product_code_tasdiq_manba_chk`
+    # tasdiqlangan har bir qatordan uni TALAB qiladi
+    # (`schema_patch_inson_dalil.sql`). Bu yo'l o'sha patchdan keyin
+    # YANGILANMAGAN edi va `--qolla` butunlay o'lik bo'lib qolgandi:
+    #
+    #     CheckViolation: new row for relation "catalog_product_code"
+    #     violates check constraint "catalog_product_code_tasdiq_manba_chk"
+    #
+    # `servis` = "odam yo'q" -- aynan `tizim:auto` ning ma'nosi.
+    # `catalog_product_code_aktor_izchil_chk` unga `tasdiq_actor_id
+    # IS NULL` ni talab qiladi, shuning uchun u QO'YILMAYDI.
     row = db.execute_returning(
         "UPDATE catalog_product_code "
-        "SET tasdiqlandi=now(), tasdiqlagan=%(actor)s, rad_etildi=NULL "
+        "SET tasdiqlandi=now(), tasdiqlagan=%(actor)s, rad_etildi=NULL, "
+        "    tasdiq_ishonch='servis', tasdiq_actor_id=NULL "
         "WHERE product_id=%(p)s AND company_id=%(c)s AND code=%(code)s "
         "AND rad_etildi IS NULL RETURNING product_id",
         {"p": product_id, "c": company_id, "code": code,
