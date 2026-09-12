@@ -231,6 +231,29 @@ def _qoida_kamida2(tokens: List[str], words: Set[str]) -> bool:
     return n >= min(2, len(tokens))
 
 
+#: STANDART QOIDA. 2026-09-12 da `hozirgi` dan `teskari` ga
+#: o'tkazildi -- O'LCHOV bilan (ishlab chiqarish, 1840 mahsulot):
+#:
+#:     qoida          kod   qamrov   ochiq tender
+#:     hozirgi          3     0.2%              4
+#:     teskari        187    10.2%           2154
+#:     qisqa_tomon    188    10.2%           2156
+#:     kamida2         23     1.2%            290
+#:
+#: `qisqa_tomon` bir dona ko'p qamradi, lekin namunada ratsiyani
+#: `Клавиатура` deb kodladi -- shu sabab RAD ETILDI.
+#:
+#: HALOL CHEKLOV: `teskari` namunasi 14 ta edi (13 to'g'ri, 1 xato --
+#: server SHKAFI `Сервер` deb kodlandi). Bu aniqlik haqida qat'iy
+#: gapirish uchun KICHIK namuna. Ma'lum zaiflik: qisqa lot nomi
+#: ("Сервер") uzun mahsulot nomi ichiga kirib ketadi, bosh so'z esa
+#: boshqa ("shkaf"). `MIN_SHARE` uni USHLAMAYDI -- tarixiy lotlarning
+#: hammasi bir kodda bo'lsa ulush 1.0 chiqadi.
+#:
+#: QAROR loyiha egasiniki (2026-09-12): qamrov foydasi shu xatar
+#: evaziga qabul qilindi va kodlar AVTOMATIK faollashtiriladi.
+STANDART_QOIDA = "teskari"
+
 QOIDALAR: Dict[str, Any] = {
     "hozirgi": _qoida_hozirgi,
     "teskari": _qoida_teskari,
@@ -239,7 +262,8 @@ QOIDALAR: Dict[str, Any] = {
 }
 
 
-def tahlil(product: Dict[str, Any], qoida: str = "hozirgi") -> Dict[str, Any]:
+def tahlil(product: Dict[str, Any],
+           qoida: str = STANDART_QOIDA) -> Dict[str, Any]:
     """Kod topish urinishini SABABI bilan qaytaradi.
 
     HAR DOIM lug'at qaytaradi. `sabab` maydoni `SABABLAR` dan biri:

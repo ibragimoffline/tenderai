@@ -434,6 +434,40 @@ def test_manba_qism_soz():
     check("sabab `sozlar_mos_emas` mavjud", "sozlar_mos_emas" in src)
 
 
+def test_standart_qoida():
+    bolim("4b. STANDART MOSLIK QOIDASI -- o'lchov bilan tanlangan")
+    from api import atama
+    from api import catalog_auto as C
+
+    # 2026-09-12 O'LCHOVI (ishlab chiqarish, 1840 mahsulot):
+    #     hozirgi        3 kod   0.2%      4 ochiq tender
+    #     teskari      187 kod  10.2%   2154 ochiq tender
+    #     qisqa_tomon  188 kod  10.2%   2156 ochiq tender  -> RAD (namunada
+    #                                      ratsiya `Клавиатура` deb kodlandi)
+    #     kamida2       23 kod   1.2%    290 ochiq tender
+    check("standart qoida -- `teskari`", C.STANDART_QOIDA == "teskari")
+    check("standart QOIDALAR ichida bor", C.STANDART_QOIDA in C.QOIDALAR)
+
+    # O'LCHOVDA KO'RILGAN ANIQ HOLAT. Mahsulot nomi brend va modelni
+    # olib yuradi, lot nomi esa bitta so'z. Eski qoida shuni rad etardi
+    # va 1294 mahsulot (70.3%) aynan shu yerda yiqilardi.
+    tok = C._tokens({"name": "PoE kommutator (switch) Swich KANIHAD 1006GB"})
+    lot = set(atama.normal("Коммутатор").split())
+    check("ESKI qoida `Коммутатор` ni RAD etardi",
+          not C.QOIDALAR["hozirgi"](tok, lot), str(tok))
+    check("YANGI qoida `Коммутатор` ni QABUL qiladi",
+          C.QOIDALAR["teskari"](tok, lot), str(tok))
+
+    # MA'LUM ZAIFLIK -- YASHIRILMAYDI. Qisqa lot nomi uzun mahsulot
+    # nomi ichiga kirib ketadi, bosh so'z esa boshqa. Bu sinov xatoni
+    # TO'G'RI deb tasdiqlamaydi; u zaiflik MAVJUDLIGINI qayd etadi,
+    # toki keyingi o'quvchi uni kutilmagan hodisa deb o'ylamasin.
+    tok2 = C._tokens({"name": "Server (telekommunikatsiya) shkafi 32U"})
+    lot2 = set(atama.normal("Сервер").split())
+    check("MA'LUM ZAIFLIK: server SHKAFI `Сервер` ga tushadi",
+          C.QOIDALAR["teskari"](tok2, lot2), str(tok2))
+
+
 def test_qolla_qorovuli():
     bolim("5. Kuchsiz dalil bandi avtomatik QO'LLANMAYDI")
     src = io.open(os.path.join(ROOT, "api", "catalog_auto.py"),
@@ -701,6 +735,7 @@ def main():
     test_lugat()
     test_tokenlar()
     test_manba_qism_soz()
+    test_standart_qoida()
     test_qolla_qorovuli()
     test_ommaviy_ochirish()
     test_ommaviy_ochirish_xulqi()
