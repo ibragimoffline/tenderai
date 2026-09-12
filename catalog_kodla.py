@@ -199,6 +199,62 @@ def qolla(company_id: int, quruq: bool = True, limit: int = 0) -> Dict[str, int]
     return natija
 
 
+def qayta_baho(company_id: int, quruq: bool = True) -> Dict[str, int]:
+    """FAOL kodlarni YANGI siyosat bilan qayta baholaydi.
+
+    FAOLLIKNI BEKOR QILMAYDI. O'tmaganlarga `korib_chiqilsin` bayrog'i
+    qo'yiladi va kod ISHLASHDA QOLADI.
+
+    NEGA SHUNDAY (2026-09-12 qarori): 187 ta kod siyosat yozilishidan
+    OLDIN faollashtirilgan. Yangi siyosat 49 tasini o'tkazmaydi.
+    Ular orasida haqiqiy xato bor (server SHKAFI `Сервер` deb
+    kodlangan), lekin HAMMASI xato degani emas -- yangi siyosat
+    qat'iyroq, xatosiz emas. Birdan o'chirish "Sizga mos" ni 49
+    mahsulot bo'yicha kamaytirardi va TO'G'RI kodlarni ham yo'qotardi.
+    Bog'lanish faqat INSON rad etganda o'zgaradi.
+    """
+    rows = db.query(
+        "SELECT pc.product_id, pc.code, p.name, p.category_code, p.keywords "
+        "  FROM catalog_product_code pc "
+        "  JOIN catalog_product p ON p.id = pc.product_id "
+        "   AND p.company_id = pc.company_id "
+        " WHERE pc.company_id = %(c)s AND pc.tasdiqlandi IS NOT NULL "
+        "   AND pc.rad_etildi IS NULL AND pc.tasdiqlagan = %(a)s "
+        " ORDER BY pc.product_id",
+        {"c": company_id, "a": catalog_auto.SYSTEM_ACTOR})
+    print(f"Qayta baholash: {len(rows)} ta FAOL avtomatik kod"
+          + ("  (QURUQ -- yozilmaydi)" if quruq else ""))
+    natija = {"otdi": 0, "belgilandi": 0}
+    for r in rows:
+        p = {"id": r["product_id"], "name": r["name"],
+             "category_code": r["category_code"], "keywords": r["keywords"]}
+        h = catalog_auto.tahlil(p)
+        q = catalog_auto.siyosat_qarori(h, p)
+        # Kod O'ZGARGAN bo'lsa ham faollikka tegmaymiz -- bu ham
+        # odam ko'radigan holat.
+        otdi = (q["qaror"] == "auto" and h.get("code") == r["code"])
+        if otdi:
+            natija["otdi"] += 1
+            continue
+        natija["belgilandi"] += 1
+        sabab = q.get("sabab") or "siyosat"
+        if h.get("code") != r["code"]:
+            sabab = f"kod_ozgardi:{h.get('code')}|{sabab}"
+        if quruq:
+            continue
+        db.execute_returning(
+            "UPDATE catalog_product_code "
+            "SET korib_chiqilsin = true, siyosat_sabab = %(s)s, "
+            "    siyosat_at = now() "
+            "WHERE product_id=%(p)s AND company_id=%(c)s AND code=%(code)s "
+            "RETURNING product_id",
+            {"p": r["product_id"], "c": company_id, "code": r["code"],
+             "s": sabab[:200]})
+    for k, v in sorted(natija.items()):
+        print(f"  {k:<14} {v}")
+    return natija
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Katalog kodlash")
     g = ap.add_mutually_exclusive_group()
@@ -206,6 +262,9 @@ def main() -> None:
                    help="Tahlil qilib saqlaydi (KOD YOZMAYDI) — STANDART")
     g.add_argument("--qolla", action="store_true",
                    help="Ishonchli kodlarni QO'LLAYDI")
+    g.add_argument("--qayta-baho", dest="qayta_baho", action="store_true",
+                   help="FAOL kodlarni yangi siyosat bilan qayta baholaydi "
+                        "(faollikni BEKOR QILMAYDI)")
     g.add_argument("--qamrov", action="store_true", help="Qamrov o'lchovi")
     g.add_argument("--navbat", action="store_true", help="Ko'rib chiqish navbati")
     ap.add_argument("--quruq", action="store_true",
@@ -222,6 +281,10 @@ def main() -> None:
         from api import auth
         cid = auth.sole_company_id()
     print(f"Ijarachi: {cid}")
+
+    if args.qayta_baho:
+        qayta_baho(cid, quruq=args.quruq)
+        return
 
     if args.qamrov:
         _qamrov_chop("QAMROV", qamrov(cid))

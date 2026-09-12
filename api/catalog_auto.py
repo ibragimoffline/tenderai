@@ -730,10 +730,27 @@ def classify_product(company_id: int, product_id: int, *, force: bool = False
             {"p": product_id, "c": company_id, "actor": SYSTEM_ACTOR,
              "code": code})
 
-    # Taklif qatorini yaratamiz, keyin tizim qarori sifatida faollashtiramiz.
+    # SIYOSAT. `sabab='kod'` -- algoritm qarori; faollashtirish esa
+    # ALOHIDA va QAT'IYROQ savol (`siyosat_qarori()` izohiga qarang).
+    # O'tmagan nomzod TAKLIF bo'lib yoziladi, LEKIN faollashtirilmaydi:
+    # u panelda odamni kutadi.
+    qaror = siyosat_qarori(natija, product)
+
+    # Taklif qatorini yaratamiz; faollashtirish siyosatga bog'liq.
     kodlash.taklif_yoz(company_id, product_id, [{
         "code": code, "skor": min(float(suggestion["confidence"]), 0.999),
     }])
+    if qaror["qaror"] != "auto":
+        db.execute_returning(
+            "UPDATE catalog_product_code "
+            "SET korib_chiqilsin = true, siyosat_sabab = %(s)s, "
+            "    siyosat_at = now() "
+            "WHERE product_id=%(p)s AND company_id=%(c)s AND code=%(code)s "
+            "RETURNING product_id",
+            {"p": product_id, "c": company_id, "code": code,
+             "s": qaror.get("sabab")})
+        return {"status": "review", "code": code,
+                "sabab": qaror.get("sabab")}
     # `tasdiq_ishonch` MAJBURIY. `catalog_product_code_tasdiq_manba_chk`
     # tasdiqlangan har bir qatordan uni TALAB qiladi
     # (`schema_patch_inson_dalil.sql`). Bu yo'l o'sha patchdan keyin

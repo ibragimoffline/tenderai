@@ -511,6 +511,32 @@ def test_standart_qoida():
           C.QOIDALAR["teskari"](tok2, lot2), str(tok2))
 
 
+def test_qayta_baho_faollikka_tegmaydi():
+    bolim("4d. QAYTA BAHOLASH FAOLLIKNI BEKOR QILMAYDI")
+    import re
+    src = io.open(os.path.join(ROOT, "catalog_kodla.py"),
+                  encoding="utf-8").read()
+    # QAROR (2026-09-12, loyiha egasi): 187 ta kod siyosat yozilishidan
+    # OLDIN faollashtirilgan. Yangi siyosat 49 tasini o'tkazmaydi, lekin
+    # ular orasida TO'G'RILARI ham bor. Shuning uchun qayta baholash
+    # FAQAT bayroq qo'yadi; bog'lanish inson qaroriga qadar saqlanadi.
+    m = re.search(r"def qayta_baho\(.*?\n(?=\ndef |\Z)", src, flags=re.S)
+    check("`qayta_baho()` mavjud", bool(m))
+    tana = m.group(0) if m else ""
+    tekis = re.sub(r'"\s*\n\s*"', "", tana)
+    yozuv = re.findall(r"UPDATE catalog_product_code(.{0,300}?)WHERE",
+                       tekis, flags=re.S)
+    check("qayta baholash UPDATE yozadi", bool(yozuv))
+    yomon = [b for b in yozuv
+             if "tasdiqlandi" in b or "rad_etildi" in b]
+    check("UPDATE `tasdiqlandi`/`rad_etildi` ga TEGMAYDI",
+          not yomon, str(yomon[:1]))
+    check("faqat bayroq qo'yiladi",
+          all("korib_chiqilsin" in b for b in yozuv))
+    # O'chirish umuman bo'lmasin.
+    check("qayta baholashda DELETE yo'q", "DELETE" not in tana.upper())
+
+
 def test_qolla_qorovuli():
     bolim("5. Kuchsiz dalil bandi avtomatik QO'LLANMAYDI")
     src = io.open(os.path.join(ROOT, "api", "catalog_auto.py"),
@@ -780,6 +806,7 @@ def main():
     test_manba_qism_soz()
     test_standart_qoida()
     test_tasdiq_ishonch_majburiy()
+    test_qayta_baho_faollikka_tegmaydi()
     test_qolla_qorovuli()
     test_ommaviy_ochirish()
     test_ommaviy_ochirish_xulqi()
