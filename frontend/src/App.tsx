@@ -543,7 +543,15 @@ export default function App() {
             onOpenMatch={openProductMatch}
           />
         )}
-        {view === 'kod-korik' && <KodKorik />}
+        {view === 'kod-korik' && (
+          <Suspense fallback={<Skeleton className="h-[420px] w-full rounded-xl" />}>
+            {/* SUSPENSE MAJBURIY: `KodKorik` lazy yuklanadi. Chegarasiz
+                yon menyudan bosish React #426 beradi -- sinxron
+                yangilanish paytida komponent uzilib qoladi va butun
+                bo'lim xato ekraniga tushadi. */}
+            <KodKorik />
+          </Suspense>
+        )}
         {/* Saqlangach yon paneldagi ism/email darhol yangilanadi */}
         {view === 'account' && <AccountSettings onSaved={setAccount} />}
         {view === 'documents' && <CompanyDocuments focusType={docFocus} />}
