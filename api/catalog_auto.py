@@ -10,7 +10,7 @@ bo'sh natija noto'g'ri "mos" tenderdan xavfsizroq va foydalanuvchi texnik
 jarayonni boshqarishga majbur bo'lmaydi.
 """
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from api import atama, db, kodlash, translit
 
@@ -171,7 +171,75 @@ def suggest_exact_code(product: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             ("code", "confidence", "evidence", "total", "examples", "source")}
 
 
-def tahlil(product: Dict[str, Any]) -> Dict[str, Any]:
+def _soz_bor(probe: str, vocab: Set[str]) -> bool:
+    """`probe` so'zi `vocab` ichida bormi.
+
+    Ruscha sifat oxiri kanonik shaklda 1-2 harf qoldirishi mumkin:
+    `ofis` <-> `ofisno`. Uch va undan uzun davom (`monitoring`)
+    ATAYLAB qabul qilinmaydi -- `monitor` `monitoring` ichidan
+    topilmasligi kerak.
+    """
+    bases = {probe}
+    if len(probe) >= 6:
+        bases.add(probe[:-1])
+    return any(
+        base == w
+        or (len(base) >= 4 and w.startswith(base) and len(w) - len(base) <= 2)
+        for base in bases for w in vocab)
+
+
+def _mazmunli(words: Set[str]) -> Set[str]:
+    """Lot nomidan ma'no tashiydiganlarini ajratadi -- `_tokens()` bilan
+    BIR XIL chegara: uch harfdan qisqa va to'xtash so'zlari tashlanadi."""
+    return {w for w in words if len(w) >= 3 and w not in _STOP}
+
+
+# ---------------------------------------------------------------------
+# MOSLIK QOIDALARI
+#
+# `hozirgi` -- amaldagi xulq, STANDART. Qolganlari FAQAT o'lchov uchun
+# (`kod_nima_bolardi.py`); ularni standart qilish AYRIM qaror bo'ladi
+# va raqamsiz qilinmaydi.
+# ---------------------------------------------------------------------
+def _qoida_hozirgi(tokens: List[str], words: Set[str]) -> bool:
+    """MAHSULOT nomining HAR BIR so'zi lot nomida bo'lishi shart."""
+    return all(_soz_bor(t, words) for t in tokens)
+
+
+def _qoida_teskari(tokens: List[str], words: Set[str]) -> bool:
+    """LOT nomining har bir ma'noli so'zi mahsulot ichida bo'lishi shart."""
+    lot = _mazmunli(words)
+    if not lot:
+        return False
+    vocab = set(tokens)
+    return all(_soz_bor(w, vocab) for w in lot)
+
+
+def _qoida_qisqa_tomon(tokens: List[str], words: Set[str]) -> bool:
+    """QISQAROQ tomon to'liq qoplanadi -- yo'nalish uzunlikka qarab."""
+    lot = _mazmunli(words)
+    if not lot:
+        return False
+    if len(lot) <= len(tokens):
+        return _qoida_teskari(tokens, words)
+    return _qoida_hozirgi(tokens, words)
+
+
+def _qoida_kamida2(tokens: List[str], words: Set[str]) -> bool:
+    """Kamida IKKI token mos kelsa yetarli (token bittagina bo'lsa -- bitta)."""
+    n = sum(1 for t in tokens if _soz_bor(t, words))
+    return n >= min(2, len(tokens))
+
+
+QOIDALAR: Dict[str, Any] = {
+    "hozirgi": _qoida_hozirgi,
+    "teskari": _qoida_teskari,
+    "qisqa_tomon": _qoida_qisqa_tomon,
+    "kamida2": _qoida_kamida2,
+}
+
+
+def tahlil(product: Dict[str, Any], qoida: str = "hozirgi") -> Dict[str, Any]:
     """Kod topish urinishini SABABI bilan qaytaradi.
 
     HAR DOIM lug'at qaytaradi. `sabab` maydoni `SABABLAR` dan biri:
@@ -223,25 +291,10 @@ def tahlil(product: Dict[str, Any]) -> Dict[str, Any]:
     bosh["nomzod"] = len(candidates)
     counts: Dict[str, int] = {}
     examples: Dict[str, List[str]] = {}
+    mos_f = QOIDALAR[qoida]
     for row in candidates:
         words = set(atama.normal(row["name"] or "").split())
-        matched = True
-        for token in tokens:
-            bases = {token}
-            if len(token) >= 6:
-                bases.add(token[:-1])
-            # Ruscha sifat oxiri kanonik shaklda 1-2 harf qoldirishi mumkin:
-            # `ofis` <-> `ofisno`. Uch va undan uzun davom (`monitoring`)
-            # ataylab qabul qilinmaydi.
-            token_ok = any(
-                base == word
-                or (len(base) >= 4 and word.startswith(base)
-                    and len(word) - len(base) <= 2)
-                for base in bases for word in words)
-            if not token_ok:
-                matched = False
-                break
-        if not matched:
+        if not mos_f(tokens, words):
             continue
         code = (row["good_code"] or "")[:8]
         counts[code] = counts.get(code, 0) + 1

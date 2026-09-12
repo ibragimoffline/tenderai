@@ -414,8 +414,23 @@ def test_manba_qism_soz():
     # kanonik SO'Z tekshiruvi bilan hal qiladi.
     check("kanonik so'z bo'yicha yakuniy tekshiruv bor",
           "atama.normal(row[\"name\"]" in src or "set(atama.normal(" in src)
-    check("prefiks toleransi CHEKLANGAN (<=2 harf)",
-          "len(word) - len(base) <= 2" in src)
+    from api import catalog_auto as C
+
+    # PREFIKS TOLERANSI -- MATN EMAS, XULQ.
+    #
+    # Ilgari bu yerda `"len(word) - len(base) <= 2" in src` turardi.
+    # U IKKI TOMONLAMA zaif edi: o'zgaruvchi nomi o'zgarsa YOLG'ON
+    # qizarardi (2026-09-12 da aynan shunday bo'ldi), mantiq o'lik
+    # kodga aylansa esa YOLG'ON yashil berardi. Endi predikatning
+    # o'zi chaqiriladi.
+    check("`monitor` `monitoring` ichidan TOPILMAYDI",
+          not C._soz_bor("monitor", {"monitoring"}))
+    check("`ofis` `ofisno` ichidan topiladi (2 harf dum)",
+          C._soz_bor("ofis", {"ofisno"}))
+    check("3 harf dum QABUL QILINMAYDI",
+          not C._soz_bor("ofis", {"ofisnoe"}))
+    check("qisqa so'zda prefiks umuman ishlamaydi (<4 harf)",
+          not C._soz_bor("kab", {"kabel"}))
     check("sabab `sozlar_mos_emas` mavjud", "sozlar_mos_emas" in src)
 
 
