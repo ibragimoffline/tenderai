@@ -238,11 +238,46 @@ def olch_ziddiyat(company_id: int, limit: int = 0, namuna: int = 25) -> int:
     return 0
 
 
+def qidir(company_id: int, matn: str) -> int:
+    """Nomi bo'yicha mahsulot topib, OILA tahlilini ochib ko'rsatadi.
+
+    "Nega bu holat ushlanmadi?" degan savolga javob berish uchun --
+    taxmin qilish o'rniga nomzod oilalarini KO'RSATADI.
+    """
+    rows = db.query(
+        "SELECT id, name, category_code, keywords FROM catalog_product "
+        "WHERE company_id = %(c)s AND name ILIKE %(m)s ORDER BY id LIMIT 4",
+        {"c": company_id, "m": f"%{matn}%"})
+    if not rows:
+        print(f"'{matn}' bo'yicha mahsulot topilmadi.")
+        return 1
+    for p in rows:
+        h = catalog_auto.tahlil(p)
+        z = catalog_auto.bosh_ot_ziddiyati(h, p)
+        print(f"\n#{p['id']}  {p.get('name')}")
+        print(f"  tokenlar : {catalog_auto._tokens(p)}")
+        print(f"  qaror    : sabab={h.get('sabab')}  kod={h.get('code')}  "
+              f"ulush={h.get('confidence')}  dalil={h.get('evidence')}"
+              f"/{h.get('total')}")
+        print(f"  ziddiyat : {z['ziddiyat']}"
+              + (f"  raqib={z['raqib']} {z['raqib_nom']!r}" if z['ziddiyat'] else ""))
+        oilalar = catalog_auto.nomzod_oilalari(p)["oilalar"]
+        print(f"  nomzod oilalari ({len(oilalar)} ta):")
+        for bolim, o in sorted(oilalar.items(),
+                               key=lambda kv: -kv[1]["lot"]):
+            print(f"     {bolim}.*  lot={o['lot']:<4} "
+                  f"max_qoplam={o['max_qoplam']:.2f}  "
+                  f"tokens={sorted(o['tokens'])}  {str(o['nom'])[:38]}")
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Moslik qoidasi -- nima bo'lardi")
     ap.add_argument("--company", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--namuna", type=int, default=8)
+    ap.add_argument("--qidir", default="",
+                    help="nomi bo'yicha mahsulotning OILA tahlili")
     ap.add_argument("--ziddiyat", action="store_true",
                     help="BOSH SO'Z ziddiyatini o'lchaydi")
     ap.add_argument("--siyosat", action="store_true",
@@ -257,6 +292,9 @@ def main() -> None:
         from api import auth
         cid = auth.sole_company_id()
     print(f"Ijarachi: {cid}")
+
+    if args.qidir:
+        sys.exit(qidir(cid, args.qidir))
 
     if args.ziddiyat:
         sys.exit(olch_ziddiyat(cid, args.limit, args.namuna))
