@@ -172,6 +172,127 @@ def suggest_exact_code(product: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------
+# BOSH SO'Z ZIDDIYATI (semantik signal)
+#
+# MUAMMO (o'lchandi 2026-09-12): `teskari` qoida lot nomining HAMMA
+# so'zi mahsulot ichida bo'lishini talab qiladi. Bu QISQA lot nomlarini
+# tizimli afzal ko'radi, qisqa nomlar esa eng umumiylari:
+#
+#     mahsulot : Server (telekommunikatsiya) shkafi 32U (polga)
+#     tokenlar : telekommunikats, server, shkaf, polg
+#     "Сервер"              -> qoplam 1/1 -> OVOZ BERADI  (8/8, ulush 1.0)
+#     "Шкаф металлический"  -> qoplam 1/2 -> RAD ETILADI
+#
+# Natijada raqobatchi oila KO'RINMAY qoladi va statistik signallar
+# (dalil, ulush, farq, oila) "hammasi joyida" deb ko'rsatadi. Xato
+# SEMANTIK: mahsulotning bosh oti `shkaf`, kod esa `server` niki.
+#
+# BU YERDAGI YO'L: nomzodlarni QISMAN qoplam bilan ham hisobga olamiz
+# va ularni KOD BO'LIMI bo'yicha guruhlaymiz. Har oilaga QAYSI token
+# dalil bo'lganini yozamiz. Agar g'olib oilani bir token qo'llab
+# tursa-yu, boshqa oilani BOSHQA token kuchli qo'llab tursa -- bu
+# ziddiyat va qaror odamga boradi.
+#
+# QORA RO'YXAT EMAS. `server`, `shkaf`, `router` kabi so'zlar hech
+# qayerda sanab chiqilmaydi -- signal mavjud nomzodlar va kod
+# oilalaridan kelib chiqadi, shuning uchun yangi mahsulot turiga
+# qo'lda qo'shimcha talab qilmaydi.
+# ---------------------------------------------------------------------
+#: Raqobatchi oila shu ulushdan kam qoplansa -- shovqin, hisobga
+#: olinmaydi. 0.5 = lot nomining kamida yarmi mahsulotda uchraydi.
+ZIDDIYAT_MIN_QOPLAM = 0.5
+
+#: Raqobatchi oilada shu sondan kam lot bo'lsa -- tasodif deb qaraladi.
+ZIDDIYAT_MIN_LOT = 2
+
+
+def nomzod_oilalari(product: Dict[str, Any]) -> Dict[str, Any]:
+    """Nomzodlarni KOD BO'LIMI bo'yicha guruhlaydi (faqat o'qish).
+
+    Har oila uchun: nechta lot, eng yaxshi qoplam va QAYSI tokenlar
+    dalil bo'lgani. `tahlil()` dan farqi -- bu yerda QISMAN qoplangan
+    nomzodlar ham saqlanadi.
+    """
+    tokens = _tokens(product)
+    natija: Dict[str, Any] = {"tokens": tokens, "oilalar": {}}
+    if not tokens:
+        return natija
+    clauses, params = _token_clauses(tokens)
+    if not clauses:
+        return natija
+    divisions = kodlash.divisions_for_category(product.get("category_code"))
+    family = ""
+    if divisions:
+        params["divisions"] = divisions
+        family = "AND substring(g.good_code from 1 for 2) = ANY(%(divisions)s)"
+    rows = db.query(f"""
+        SELECT g.good_code, g.name
+        FROM tender_good g
+        WHERE g.good_code IS NOT NULL
+          AND length(g.good_code) >= 8
+          AND g.name IS NOT NULL
+          AND ({' OR '.join(clauses)})
+          {family}
+    """, params)
+    tok_set = set(tokens)
+    for row in rows:
+        words = _mazmunli(set(atama.normal(row["name"] or "").split()))
+        if not words:
+            continue
+        mos = {w for w in words if _soz_bor(w, tok_set)}
+        if not mos:
+            continue
+        qoplam = len(mos) / len(words)
+        # Qaysi TOKEN shu lotni qo'llab-quvvatladi.
+        dalil_tok = {t for t in tokens
+                     if any(_soz_bor(w, {t}) for w in mos)}
+        bolim = (row["good_code"] or "")[:2]
+        o = natija["oilalar"].setdefault(
+            bolim, {"lot": 0, "max_qoplam": 0.0, "tokens": set(),
+                    "nom": row["name"]})
+        o["lot"] += 1
+        if qoplam > o["max_qoplam"]:
+            o["max_qoplam"] = qoplam
+            o["nom"] = row["name"]
+        o["tokens"] |= dalil_tok
+    return natija
+
+
+def bosh_ot_ziddiyati(bosh: Dict[str, Any],
+                      product: Dict[str, Any]) -> Dict[str, Any]:
+    """G'olib oilaga BOSHQA token bilan raqobat qiladigan oila bormi?
+
+    Qaytaradi: `{"ziddiyat": bool, "raqib": bo'lim, "raqib_nom": ...,
+                 "golib_tokens": [...], "raqib_tokens": [...]}`
+    """
+    javob = {"ziddiyat": False, "raqib": None, "raqib_nom": None,
+             "golib_tokens": [], "raqib_tokens": []}
+    kod = bosh.get("code") or ""
+    if not kod:
+        return javob
+    oilalar = nomzod_oilalari(product)["oilalar"]
+    golib = oilalar.get(kod[:2])
+    if not golib:
+        return javob
+    javob["golib_tokens"] = sorted(golib["tokens"])
+    for bolim, o in oilalar.items():
+        if bolim == kod[:2]:
+            continue
+        if o["lot"] < ZIDDIYAT_MIN_LOT or o["max_qoplam"] < ZIDDIYAT_MIN_QOPLAM:
+            continue
+        # ASOSIY SHART: raqib BOSHQA token ustida turibdi. Agar
+        # ikkalasi bir xil tokendan oziqlansa, bu ma'no ziddiyati
+        # emas -- shunchaki bitta so'zning ikki kod oilasida uchrashi.
+        if o["tokens"] & golib["tokens"]:
+            continue
+        javob.update({"ziddiyat": True, "raqib": bolim,
+                      "raqib_nom": o["nom"],
+                      "raqib_tokens": sorted(o["tokens"])})
+        break
+    return javob
+
+
+# ---------------------------------------------------------------------
 # AVTOMATIK TASDIQ SIYOSATI
 #
 # `tahlil()` "qaysi kod" degan savolga javob beradi. Bu yerda BOSHQA

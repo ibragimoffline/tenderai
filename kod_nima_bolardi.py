@@ -197,11 +197,54 @@ def olch_siyosat(company_id: int, limit: int = 0, namuna: int = 8) -> int:
     return 0
 
 
+def olch_ziddiyat(company_id: int, limit: int = 0, namuna: int = 25) -> int:
+    """BOSH SO'Z ZIDDIYATINI o'lchaydi -- faqat `auto` nomzodlar ustida.
+
+    Savol: statistik signallar "toza" degan qarorlarning nechtasida
+    mahsulot nomi BOSHQA kod oilasiga ishora qilyapti?
+    """
+    mahsulotlar = _mahsulotlar(company_id, limit)
+    if not mahsulotlar:
+        print("Mahsulot topilmadi.")
+        return 1
+    ochiq = _ochiq_tender(company_id)
+    nomzodlar, ziddiyatlar = [], []
+    for p in mahsulotlar:
+        h = catalog_auto.tahlil(p)
+        if h.get("sabab") != "kod":
+            continue
+        nomzodlar.append((p, h))
+        z = catalog_auto.bosh_ot_ziddiyati(h, p)
+        if z["ziddiyat"]:
+            ziddiyatlar.append((p, h, z))
+
+    n, k = len(nomzodlar), len(ziddiyatlar)
+    foiz = (100.0 * k / n) if n else 0.0
+    print(f"\n`kod` qarori:        {n}")
+    print(f"ziddiyat topildi:   {k}   ({foiz:.1f}%)")
+    print(f"ziddiyatsiz:        {n - k}")
+    print(f"ziddiyatlilar ortidagi ochiq tender: "
+          f"{sum(ochiq.get(p['id'], 0) for p, _h, _z in ziddiyatlar)}")
+
+    korsat = ziddiyatlar if k <= namuna else random.Random(20260912).sample(
+        ziddiyatlar, namuna)
+    if korsat:
+        print(f"\n--- ZIDDIYAT ({len(korsat)} ta ko'rsatildi) ---")
+        for p, h, z in korsat:
+            print(f"  {(p.get('name') or '')[:46]:<46} -> {h.get('code')} "
+                  f"[{','.join(z['golib_tokens'])}]")
+            print(f"        RAQIB {z['raqib']}.* "
+                  f"[{','.join(z['raqib_tokens'])}]  {str(z['raqib_nom'])[:46]}")
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Moslik qoidasi -- nima bo'lardi")
     ap.add_argument("--company", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--namuna", type=int, default=8)
+    ap.add_argument("--ziddiyat", action="store_true",
+                    help="BOSH SO'Z ziddiyatini o'lchaydi")
     ap.add_argument("--siyosat", action="store_true",
                     help="QOIDA emas, avtomatik tasdiq SIYOSATINI o'lchaydi")
     ap.add_argument("--qoida", default="",
@@ -214,6 +257,9 @@ def main() -> None:
         from api import auth
         cid = auth.sole_company_id()
     print(f"Ijarachi: {cid}")
+
+    if args.ziddiyat:
+        sys.exit(olch_ziddiyat(cid, args.limit, args.namuna))
 
     if args.siyosat:
         sys.exit(olch_siyosat(cid, args.limit, args.namuna))
