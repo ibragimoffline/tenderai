@@ -565,6 +565,25 @@ def test_soatlik_tahlil_xavfsiz():
           "make_interval(hours" in src and "v_catalog_code_active" in src)
 
 
+def test_etl_qolla_ni_chaqirmaydi():
+    bolim("4f. SOATLIK ETL `--qolla` NI CHAQIRMAYDI")
+    # QAROR (loyiha egasi, 2026-09-12): soatlik oqimga FAQAT tahlil
+    # ulanadi. `--qolla` bog'lanishni faollashtiradi va siyosat
+    # semantik xatoni to'liq ushlamaydi -- server SHKAFI holati
+    # TO'RTTA presetning hammasidan o'tib ketgandi. Inson ko'rmasdan
+    # faollashgan xato HAR SOATDA takrorlanardi.
+    src = io.open(os.path.join(ROOT, "run_etl.py"), encoding="utf-8").read()
+    # Izoh hisobga olinmaydi: yuqoridagi sabab matnida ham `--qolla`
+    # so'zi bor va oddiy qidiruv o'z izohini ushlab olardi.
+    kod = "\n".join(q.split("#")[0] for q in src.splitlines())
+    check("ETL `catalog_kodla.py` ni chaqiradi",
+          "catalog_kodla.py" in kod)
+    check("ETL da `--qolla` YO'Q", "--qolla" not in kod,
+          next((q.strip()[:60] for q in kod.splitlines()
+                if "--qolla" in q), ""))
+    check("ETL `--yangilash` bilan chaqiradi", '"--yangilash"' in kod)
+
+
 def test_qayta_baho_faollikka_tegmaydi():
     bolim("4d. QAYTA BAHOLASH FAOLLIKNI BEKOR QILMAYDI")
     import re
@@ -862,6 +881,7 @@ def main():
     test_tasdiq_ishonch_majburiy()
     test_qayta_baho_faollikka_tegmaydi()
     test_soatlik_tahlil_xavfsiz()
+    test_etl_qolla_ni_chaqirmaydi()
     test_qolla_qorovuli()
     test_ommaviy_ochirish()
     test_ommaviy_ochirish_xulqi()

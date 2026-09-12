@@ -1189,6 +1189,35 @@ def main() -> None:
         if not _ok:
             post_xatolar.append(f"etl_doc_text: {_err}")
 
+    # --- KATALOG KOD TAHLILI ------------------------------------------
+    #
+    # FAQAT TAHLIL. `--qolla` bu yerda ATAYLAB YO'Q.
+    #
+    # NEGA: `--qolla` bog'lanishni FAOLLASHTIRADI. Avtomatik tasdiq
+    # siyosati (`catalog_auto.siyosat_qarori`) uni ancha xavfsiz qildi,
+    # lekin u statistik signallarga tayanadi va semantik xatoni to'liq
+    # ushlamaydi -- o'lchandi: server SHKAFI `Сервер` deb kodlangan
+    # holat to'rtta presetning hammasidan o'tib ketgandi. Bunday xato
+    # inson ko'rmasdan faollashsa, u HAR SOATDA takrorlanardi.
+    #
+    # TAHLIL esa `catalog_kod_tahlil` ga UPSERT qiladi va
+    # `catalog_product_code` ga UMUMAN tegmaydi (buni
+    # `_tests/catalog_kod_test.py` mutatsiya bilan qo'riqlaydi).
+    # Ko'rik navbati shu jadvaldan oziqlanadi, ya'ni yangi mahsulot
+    # odamga KO'RINADI, lekin hech narsa o'z-o'zidan faollashmaydi.
+    #
+    # `--yangilash`: faqat yangi, o'zgargan yoki tahlili eskirgan
+    # KODSIZ mahsulotlar. O'LCHANDI (ishlab chiqarish, 1840 mahsulot):
+    # to'liq yurish 195.6s, o'zgarishsiz inkremental yurish 0.0s.
+    #
+    # IJARACHI: skript standarti -- yagona faol hisob. Qadam yiqilsa
+    # `post_xatolar` ga tushadi va ETL ning qolganini TO'XTATMAYDI.
+    _ok, _err, _dt, out, _kod = run_script(
+        "catalog_kodla.py", ["--tahlil", "--yangilash"])
+    emit(["\n===== post: katalog kod tahlili =====", *out])
+    if not _ok:
+        post_xatolar.append(f"catalog_kodla --tahlil: {_err}")
+
     # --- RAG QUVURI ---------------------------------------------------
     #
     # NEGA BU YERDA: bu qadamlarsiz chat YANGI tenderni umuman ko'rmaydi.
