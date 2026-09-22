@@ -120,11 +120,19 @@ export default function KodKorik({ onOpenTender }: {
                     </TableCell>
                     <TableCell className="tabular text-right">
                       {/* SON DALILGA OLIB BORADI. Raqamning o'zi
-                          ATAYLAB KENG (tokenlar YOKI bilan) va
-                          va'da emas -- odam ortidagi lotlarni
-                          ko'rmaguncha unga tayanmasligi kerak. */}
+                          ATAYLAB KENG (tokenlar YOKI bilan) va va'da
+                          emas -- odam ortidagi lotlarni ko'rmaguncha
+                          unga tayanmasligi kerak.
+
+                          KO'RINISHI BOSILADIGANDEK BO'LSIN: ilgari
+                          bu yerda faqat `hover:underline` turardi va
+                          raqam oddiy matndan FARQ QILMASDI. Imkoniyat
+                          BOR edi, lekin uni hech kim KO'RMASDI --
+                          foydalanuvchi uni "yo'q" deb xabar qildi.
+                          Uslub katalogdagi bosiladigan qiymatlar
+                          bilan AYNI (`CatalogView`). */}
                       <button type="button"
-                              className="underline-offset-2 hover:underline"
+                              className="tabular font-medium text-primary underline-offset-2 hover:underline"
                               title={t('dalil.open')}
                               onClick={() => setDalil(r)}>
                         {r.ochiq_tender}
