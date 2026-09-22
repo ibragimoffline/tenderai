@@ -41,4 +41,3 @@ req_qamrov_test	TEST_FIXTURE	v_requirement_qamrov da yagona kompaniya uchun qato
 requirement_test	TEST_FIXTURE	o'lchov bazasi yo'q: muddati o'tgan tender va katalogga mos tender topilmadi.
 review_butunlik_test	CROSS_SUITE_DEPENDENCY	navbat qatorlari boshqa to'plamlar tomonidan yaratiladi; yolg'iz yurganda bo'sh. migratsiya jurnali yozuvi SHARTLI (IF n_soxta>0 OR n_kutayot>0) va ko'chiriladigan qator bo'lmagan.
 routing_kelishuv_test	TEST_FIXTURE	inson qarori qatorlari yo'q -- kelishuv o'lchab bo'lmaydi.
-etl_coverage_test	NON_BLOCKING_ENVIRONMENT	Manba ko'p hududli area yubordi (33.34.35.89.90.91); FK buzilib 168 yozuvli paket qaytdi. Tuzatish SHU relizda (etl_tenders.area_tozala). Reliz o'tgach ETL yashil bo'ladi va bu qator OLIB TASHLANADI.
