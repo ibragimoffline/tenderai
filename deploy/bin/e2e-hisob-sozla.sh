@@ -71,7 +71,22 @@ hisob_sozla() {
                 | tender-kompaniya "$MUHIT" "$login" --password --parol-stdin 2>&1)" \
             || { printf '%s\n' "$chiq" | grep -vF "$parol" >&2 || true
                xato "$login: parol yangilanmadi"; }
-        echo "  $login — parol yangilandi"
+        # FAOLLIK HAM TA'MINLANADI. `--list` YOPIQ hisobni ham
+        # ko'rsatadi, ya'ni yopilgan hisob "mavjud" tarmog'iga
+        # tushib, yopiqligicha qolardi va E2E kirishda 401 olardi.
+        #
+        # O'LCHANGAN HOLAT (2026-09-22): staging da qoldiq sinov
+        # hisoblari tozalanayotganda `zze2e_a`/`zze2e_b` ham
+        # yopilgan va keyingi joylashtirish E2E da yiqilgan:
+        #
+        #     [XATO] login -> 200 -- 401
+        #     E2E YIQILDI — orqaga qaytarilmoqda
+        #
+        # Quvur o'z fiksturasini O'ZI tiklashi kerak: aks holda
+        # bitta ma'muriy amal relizni bloklab qo'yadi.
+        chiq="$(tender-kompaniya "$MUHIT" "$login" --faollashtir 2>&1)" \
+            || { printf '%s\n' "$chiq" >&2; xato "$login: faollashtirilmadi"; }
+        echo "  $login — parol yangilandi, faol"
     else
         chiq="$(printf '%s\n' "$parol" \
                 | tender-kompaniya "$MUHIT" "$login" "$kompaniya" --parol-stdin 2>&1)" \
