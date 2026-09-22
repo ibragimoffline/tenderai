@@ -343,6 +343,56 @@ def dedupe_by_key(rows: List[dict], key_cols: Tuple[str, ...], label: str) -> Li
     return list(seen.values())
 
 
+def area_tozala(cur, tenders) -> int:
+    """`area_leaf_id` ni `dim_area` ga solishtiradi; NOMA'LUMINI NULL qiladi.
+
+    --- O'LCHANGAN NOSOZLIK (ishlab chiqarish, 2026-09-22) -------------
+        DETAIL: Key (area_leaf_id)=(33.34.35.89.90.91) is not present
+                in table "dim_area".
+
+    Manba KO'P HUDUDLI tenderni yubordi: `33.34.35.89.90.91` --
+    ierarxik yo'l emas, olti alohida viloyat kodi. `dim_area` esa
+    ierarxiyani saqlaydi (`33.2137.2138.2140`) va bunday BIRIKMA u
+    yerda hech qachon bo'lmaydi.
+
+    OQIBATI NOMUTANOSIB: `load_to_db` BITTA tranzaksiya, shuning uchun
+    bitta yaroqsiz qiymat BUTUN paketni qaytaradi. O'lchandi: 168
+    yozuvdan hammasi yozilmay qoldi, va soatlik ETL shu sababli
+    `baza_xato` bilan to'xtab turgandi.
+
+    --- NEGA NULL, NEGA SOXTA QATOR EMAS ------------------------------
+    `dim_area` ga `33.34.35.89.90.91` qatorini qo'shish oson bo'lardi,
+    lekin bu YOLG'ON bo'lardi: bunday hudud YO'Q. Bizda esa "noma'lum
+    noma'lumligicha qoladi" qoidasi bor.
+
+    XOM QIYMAT YO'QOLMAYDI: `area_path` da (FK siz) va `raw_json` da
+    o'sha holicha turadi -- ya'ni ko'p hududli model qo'shilganda
+    ma'lumot qayta tiklanadi.
+
+    HALOL CHEKLOV: `area_leaf_id` NULL bo'lgan tender HUDUD bo'yicha
+    filtrlanmaydi. Bu yo'qotish, lekin butun paketni yo'qotishdan
+    kichik. To'liq yechim -- `tender_area` bog'lovchi jadval.
+    """
+    qiymatlar = {t.get("area_leaf_id") for t in tenders if t.get("area_leaf_id")}
+    if not qiymatlar:
+        return 0
+    cur.execute("SELECT area_id FROM dim_area WHERE area_id = ANY(%s)",
+                (list(qiymatlar),))
+    malum = {r[0] for r in cur.fetchall()}
+    noma = qiymatlar - malum
+    if not noma:
+        return 0
+    n = 0
+    for t in tenders:
+        if t.get("area_leaf_id") in noma:
+            t["area_leaf_id"] = None
+            n += 1
+    print(f"  ! area_leaf_id: {len(noma)} ta noma'lum qiymat, {n} ta tender "
+          f"NULL ga tushdi (area_path saqlandi): "
+          f"{', '.join(sorted(noma)[:3])}", file=sys.stderr)
+    return n
+
+
 def load_to_db(dsn: str, tenders, lots, goods, categories) -> None:
     # Yuklashdan oldin PK bo'yicha dedup — manba ma'lumotidagi takrorlar.
     # `tender` ham tekshiriladi: bitta INSERT ichida takror `id` bo'lsa Postgres
@@ -366,7 +416,10 @@ def load_to_db(dsn: str, tenders, lots, goods, categories) -> None:
                     [(c["category_uid"], c["code"], c["title_ru"], c["title_uz"])
                      for c in categories.values()])
 
-            # 2) tenders
+            # 2) tenders -- AVVAL hududni tozalaymiz. FK buzilishi
+            #    butun tranzaksiyani qaytaradi, ya'ni bitta yaroqsiz
+            #    qiymat 168 ta yaxshi yozuvni ham yo'qotardi.
+            area_tozala(cur, tenders)
             execute_values(cur,
                 f"""INSERT INTO tender ({",".join(TENDER_COLS)})
                     VALUES %s
