@@ -4132,6 +4132,65 @@ def kod_korik(request: Request, limit: int = 200):
     return {"jami": jami.get("n", 0), "qatorlar": qatorlar}
 
 
+@app.get("/catalog/{product_id}/ochiq-tenderlar")
+def kod_ochiq_tenderlar(product_id: int, request: Request, limit: int = 50):
+    """`Ochiq tender` ustunidagi raqam ORTIDAGI DALIL.
+
+    IKKI QISM, ikki xil savolga javob:
+
+        oilalar    "nega bu kod?" -- nomzod lotlar KOD OILASI bo'yicha
+        tenderlar  "qaysi tenderlar?" -- sonni bergan ochiq tenderlar
+
+    Ko'rikda ODATDA `oilalar` hal qiladi: "27.* Патч корд 50 lot"
+    va "26.* Кабель питания 15 lot" ni yonma-yon ko'rgan odam kod
+    to'g'rimi yoki yo'qmi darhol aytadi.
+
+    SON ATAYLAB KENG: tokenlar YOKI bilan bog'lanadi. O'lchangan
+    misol (#3041 Patch-kord, tokenlar `patch, kabel, kord, vita`):
+    22 ta ichiga quvvat kabeli va kabel yotqizish XIZMATI ham
+    kirgan. Shuning uchun har tender qatorida QAYSI lot va QAYSI
+    token olib kelgani ko'rsatiladi -- raqamning o'zi va'da emas.
+    """
+    cid = company_id_of(request)
+    k = kimlik_of(request, cid)
+    ruxsat(k, "korib_chiq")
+    p = db.query_one(
+        "SELECT id, name, category_code, keywords FROM catalog_product "
+        "WHERE id = %(p)s AND company_id = %(c)s",
+        {"p": product_id, "c": cid})
+    if not p:
+        raise xatolar.Xato("PRODUCT_NOT_FOUND")
+
+    bq = catalog_auto.biznes_qiymati(p)
+    tahl = catalog_auto.nomzod_oilalari(p)
+    oilalar = [{
+        "bolim": bolim,
+        "lot": o["lot"],
+        "qoplam": round(o["max_qoplam"], 2),
+        "tokens": sorted(o["tokens"]),
+        "nom": o["nom"],
+    } for bolim, o in sorted(tahl["oilalar"].items(),
+                             key=lambda kv: -kv[1]["lot"])]
+
+    tenderlar = [{
+        "id": r["id"], "source_id": r["source_id"], "name": r["name"],
+        "close_at": _iso(r["close_at"]), "lot": r["lot"],
+        "lotlar": r["lotlar"] or [], "tokens": r.get("tokens") or [],
+    } for r in catalog_auto.ochiq_tenderlar(p, limit)]
+
+    return {
+        "product_id": product_id,
+        "mahsulot": p["name"],
+        "tokens": tahl["tokens"],
+        # `jami` -- USTUNDAGI SON. `tenderlar` chegaralangan bo'lishi
+        # mumkin, shuning uchun ikkalasi ALOHIDA qaytadi: ro'yxat
+        # qisqa bo'lgani "tender kamaydi" degani emas.
+        "jami": bq["ochiq_tender"],
+        "oilalar": oilalar,
+        "tenderlar": tenderlar,
+    }
+
+
 @app.get("/catalog/{product_id}/kod-takliflar")
 def kod_takliflar(product_id: int, request: Request, limit: int = 6):
     """Mahsulot uchun nomzod kodlar (tasdiqlash ekrani uchun).

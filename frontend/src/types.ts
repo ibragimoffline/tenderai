@@ -1213,6 +1213,31 @@ export interface KodKorikQator {
   manba: 'faol' | 'taklif'
 }
 
+/** `Ochiq tender` soni ortidagi dalil. */
+export interface KodDalil {
+  product_id: number
+  mahsulot: string
+  tokens: string[]
+  /** USTUNDAGI son. `tenderlar` chegaralangan bo'lishi mumkin. */
+  jami: number
+  oilalar: {
+    bolim: string
+    lot: number
+    qoplam: number
+    tokens: string[]
+    nom: string | null
+  }[]
+  tenderlar: {
+    id: number
+    source_id: string | null
+    name: string | null
+    close_at: string | null
+    lot: number
+    lotlar: string[]
+    tokens: string[]
+  }[]
+}
+
 export interface KodAtama {
   kalit: string
   atama: string

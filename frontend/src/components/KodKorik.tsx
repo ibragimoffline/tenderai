@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import KodTasdiq from './KodTasdiq'
+import KodDalil from './KodDalil'
 
 /**
  * KO'RIK NAVBATI — siyosatdan o'tmagan, LEKIN hali FAOL kodlar.
@@ -29,13 +30,17 @@ import KodTasdiq from './KodTasdiq'
  *   Boshqa kod -> mavjud KodTasdiq paneli
  *   Rad etish  -> kodRad
  */
-export default function KodKorik() {
+export default function KodKorik({ onOpenTender }: {
+  /** Dalil panelidan tenderni ochish -- `BrokerQueue` bilan AYNI naqsh. */
+  onOpenTender?: (tenderId: number) => void
+} = {}) {
   const t = useT()
   const [qatorlar, setQatorlar] = useState<KodKorikQator[] | null>(null)
   const [jami, setJami] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [band, setBand] = useState<number | null>(null)
   const [boshqa, setBoshqa] = useState<KodKorikQator | null>(null)
+  const [dalil, setDalil] = useState<KodKorikQator | null>(null)
 
   const yukla = useCallback(() => {
     setError(null)
@@ -114,7 +119,16 @@ export default function KodKorik() {
                       {r.siyosat_sabab || '—'}
                     </TableCell>
                     <TableCell className="tabular text-right">
-                      {r.ochiq_tender}
+                      {/* SON DALILGA OLIB BORADI. Raqamning o'zi
+                          ATAYLAB KENG (tokenlar YOKI bilan) va
+                          va'da emas -- odam ortidagi lotlarni
+                          ko'rmaguncha unga tayanmasligi kerak. */}
+                      <button type="button"
+                              className="underline-offset-2 hover:underline"
+                              title={t('dalil.open')}
+                              onClick={() => setDalil(r)}>
+                        {r.ochiq_tender}
+                      </button>
                     </TableCell>
                     <TableCell className="space-x-2 text-right">
                       {/* `taklif` qatorida bazada bog'lanish YO'Q --
@@ -146,6 +160,15 @@ export default function KodKorik() {
             </Table>
           </div>
         </>
+      )}
+
+      {dalil && (
+        <KodDalil
+          productId={dalil.product_id}
+          ochiqTender={dalil.ochiq_tender}
+          onClose={() => setDalil(null)}
+          onOpenTender={onOpenTender}
+        />
       )}
 
       {boshqa && (

@@ -12,7 +12,7 @@ import type {
   Talab, TalabHolat, TalabNavbat,
   AiQaror, InsonQaror, MalakaNatija, NavbatFiltr, RoutingHolat,
   RoutingItem, TalabFiltr,
-  KodKorikQator, KodNavbat, KodQaror, KodQidiruv, KodOlchov,
+  KodDalil, KodKorikQator, KodNavbat, KodQaror, KodQidiruv, KodOlchov,
   MahsulotKodTakliflar, Manba,
   RoutingMoslik,
   TalabXulosa,
@@ -713,6 +713,10 @@ export const api = {
   kodKorik: (limit = 200) =>
     request<{ jami: number; qatorlar: KodKorikQator[] }>(
       'GET', '/catalog/kod-korik', { params: { limit } }),
+  /** `Ochiq tender` soni ortidagi dalil (oilalar + tenderlar). */
+  kodDalil: (productId: number, limit = 50) =>
+    request<KodDalil>('GET', `/catalog/${productId}/ochiq-tenderlar`,
+      { params: { limit } }),
   kodTasdiq: (productId: number, code: string) =>
     request<null>('POST', `/catalog/${productId}/kod-tasdiq`, { body: { code } }),
   kodRad: (productId: number, code: string) =>

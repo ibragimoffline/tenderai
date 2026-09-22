@@ -121,6 +121,20 @@ def _token_clauses(tokens: List[str]) -> tuple:
     return clauses, params
 
 
+#: "OCHIQ" TA'RIFI -- BITTA JOYDA.
+#:
+#: `biznes_qiymati()` SANAYDI, `ochiq_tenderlar()` esa RO'YXATLAYDI.
+#: Ikki nusxa bo'lsa son va ro'yxat bir kun ajralib ketardi va
+#: ekranda "37 ta" yozilib, ro'yxatda 31 tasi chiqardi -- foydalanuvchi
+#: qaysi biriga ishonishni bilmasdi.
+#:
+#: Faqat statusga qarash YETARLI EMAS: tender yopilgach manba
+#: ro'yxatidan chiqib ketadi va bizdagi 'open' abadiy qotib qoladi.
+#: Ta'rif loyihadagi yagona manbadan (`queries.build_tender_filters`).
+OCHIQ_SHART = ("t.status = 'open' "
+               "AND (t.close_at IS NULL OR t.close_at > now())")
+
+
 def biznes_qiymati(product: Dict[str, Any]) -> Dict[str, int]:
     """Mahsulot QANCHA muhim: ochiq tender va tarixiy lot soni.
 
@@ -139,16 +153,8 @@ def biznes_qiymati(product: Dict[str, Any]) -> Dict[str, int]:
         return {"ochiq_tender": 0, "tarixiy_lot": 0}
     shart = " OR ".join(clauses)
     row = db.query_one(f"""
-        SELECT count(DISTINCT g.tender_id) FILTER (
-                   -- "OCHIQ" ta'rifi loyihadagi yagona manbadan
-                   -- (`queries.build_tender_filters`): status 'open'
-                   -- VA muddat o'tmagan. Faqat statusga qarash
-                   -- yetarli emas — tender yopilgach manba
-                   -- ro'yxatidan chiqib ketadi va bizdagi 'open'
-                   -- abadiy qotib qoladi.
-                   WHERE t.status = 'open'
-                     AND (t.close_at IS NULL OR t.close_at > now())
-               ) AS ochiq,
+        SELECT count(DISTINCT g.tender_id)
+                   FILTER (WHERE {OCHIQ_SHART}) AS ochiq,
                count(*) AS lot
           FROM tender_good g
           JOIN tender t ON t.id = g.tender_id
@@ -156,6 +162,54 @@ def biznes_qiymati(product: Dict[str, Any]) -> Dict[str, int]:
     """, params) or {}
     return {"ochiq_tender": int(row.get("ochiq") or 0),
             "tarixiy_lot": int(row.get("lot") or 0)}
+
+
+def ochiq_tenderlar(product: Dict[str, Any],
+                    limit: int = 50) -> List[Dict[str, Any]]:
+    """`ochiq_tender` SONI ORTIDAGI tenderlar (faqat o'qish).
+
+    `biznes_qiymati()` bilan AYNI shart va AYNI token to'plami --
+    shuning uchun ro'yxat uzunligi (chegaragacha) songa mos keladi.
+
+    HALOL ESLATMA: bu son ATAYLAB KENG. Tokenlar YOKI bilan
+    bog'lanadi, ya'ni bitta umumiy so'z (`kabel`) butunlay boshqa
+    tenderni ham olib keladi. O'lchangan misol (#3041 Patch-kord):
+    tokenlar `patch, kabel, kord, vita`, va 22 ta ichiga quvvat
+    kabeli hamda kabel yotqizish XIZMATI ham kirgan. Shuning uchun
+    har qatorda QAYSI lot mos kelgani ko'rsatiladi -- odam raqamga
+    emas, dalilga qarasin.
+    """
+    tokens = _tokens(product)
+    if not tokens:
+        return []
+    clauses, params = _token_clauses(tokens)
+    if not clauses:
+        return []
+    params["l"] = max(1, min(int(limit), 200))
+    rows = db.query(f"""
+        SELECT t.id, t.source_id, t.name, t.close_at,
+               count(*) AS lot,
+               (array_agg(DISTINCT g.name))[1:3] AS lotlar
+          FROM tender_good g
+          JOIN tender t ON t.id = g.tender_id
+         WHERE g.name IS NOT NULL
+           AND ({' OR '.join(clauses)})
+           AND {OCHIQ_SHART}
+         GROUP BY t.id, t.source_id, t.name, t.close_at
+         -- Muddati yaqini birinchi: ko'rikdan keyin harakat qilishga
+         -- vaqt qolishi kerak.
+         ORDER BY t.close_at NULLS LAST, t.id
+         LIMIT %(l)s
+    """, params)
+    tok_set = set(tokens)
+    for r in rows:
+        # QAYSI TOKEN olib keldi -- odam soxta moslikni darhol ko'radi.
+        mos = set()
+        for nom in (r.get("lotlar") or []):
+            for w in _mazmunli(set(atama.normal(nom or "").split())):
+                mos |= {t for t in tok_set if _soz_bor(w, {t})}
+        r["tokens"] = sorted(mos)
+    return rows
 
 
 def suggest_exact_code(product: Dict[str, Any]) -> Optional[Dict[str, Any]]:

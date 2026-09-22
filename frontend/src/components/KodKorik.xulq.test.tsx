@@ -25,6 +25,7 @@ const kodKorik = vi.fn()
 const kodTasdiq = vi.fn()
 const kodRad = vi.fn()
 const kodTakliflar = vi.fn()
+const kodDalil = vi.fn()
 
 vi.mock('@/api', () => ({
   api: {
@@ -32,6 +33,7 @@ vi.mock('@/api', () => ({
     kodTasdiq: (...a: unknown[]) => kodTasdiq(...a),
     kodRad: (...a: unknown[]) => kodRad(...a),
     kodTakliflar: (...a: unknown[]) => kodTakliflar(...a),
+    kodDalil: (...a: unknown[]) => kodDalil(...a),
   },
 }))
 
@@ -55,9 +57,46 @@ beforeEach(() => {
   kodTasdiq.mockReset().mockResolvedValue(null)
   kodRad.mockReset().mockResolvedValue(null)
   kodTakliflar.mockReset().mockResolvedValue({ product_id: 2850, keng: [], aniq: [] })
+  kodDalil.mockReset().mockResolvedValue({
+    product_id: 2850, mahsulot: QATOR.mahsulot, tokens: ['server', 'shkaf'],
+    jami: 37,
+    oilalar: [
+      { bolim: '31', lot: 43, qoplam: 0.5, tokens: ['shkaf'], nom: 'Шкаф для книг' },
+      { bolim: '26', lot: 11, qoplam: 1, tokens: ['server'], nom: 'Сервер' },
+    ],
+    tenderlar: [
+      { id: 9001, source_id: 'A-1', name: 'Server shkaflari xaridi',
+        close_at: '2026-10-01T00:00:00+05:00', lot: 2,
+        lotlar: ['Шкаф серверный'], tokens: ['shkaf'] },
+    ],
+  })
 })
 
 describe('KodKorik', () => {
+  it('SONNI bosish dalilni ochadi va HECH NARSANI o`zgartirmaydi', async () => {
+    render(<KodKorik />)
+    await screen.findByText(QATOR.mahsulot)
+    await userEvent.click(screen.getByRole('button', { name: '37' }))
+    await waitFor(() => expect(kodDalil).toHaveBeenCalledWith(2850))
+    // Dalil FAQAT O'QISH. Ustun soni ortidagi lotlarni ko'rish
+    // bog'lanishga tegmasligi kerak.
+    expect(kodTasdiq).not.toHaveBeenCalled()
+    expect(kodRad).not.toHaveBeenCalled()
+    // Ikki qism ham ko'rinadi: oila va tender.
+    expect(await screen.findByText(/Шкаф для книг/)).toBeTruthy()
+    expect(screen.getByText(/Server shkaflari xaridi/)).toBeTruthy()
+  })
+
+  it('dalildagi tenderni bosish `onOpenTender` ni chaqiradi', async () => {
+    const onOpenTender = vi.fn()
+    render(<KodKorik onOpenTender={onOpenTender} />)
+    await screen.findByText(QATOR.mahsulot)
+    await userEvent.click(screen.getByRole('button', { name: '37' }))
+    await screen.findByText(/Server shkaflari xaridi/)
+    await userEvent.click(screen.getByText(/Server shkaflari xaridi/))
+    await waitFor(() => expect(onOpenTender).toHaveBeenCalledWith(9001))
+  })
+
   it('`taklif` qatorida TASDIQ/RAD tugmasi YO`Q (bazada bog`lanish yo`q)', async () => {
     kodKorik.mockResolvedValue({
       jami: 1,

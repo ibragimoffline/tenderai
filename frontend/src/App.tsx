@@ -549,7 +549,7 @@ export default function App() {
                 yon menyudan bosish React #426 beradi -- sinxron
                 yangilanish paytida komponent uzilib qoladi va butun
                 bo'lim xato ekraniga tushadi. */}
-            <KodKorik />
+            <KodKorik onOpenTender={(id) => setSelected({ id })} />
           </Suspense>
         )}
         {/* Saqlangach yon paneldagi ism/email darhol yangilanadi */}
