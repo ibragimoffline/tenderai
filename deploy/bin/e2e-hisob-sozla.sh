@@ -82,8 +82,13 @@ hisob_sozla() {
         #     [XATO] login -> 200 -- 401
         #     E2E YIQILDI — orqaga qaytarilmoqda
         #
-        # Quvur o'z fiksturasini O'ZI tiklashi kerak: aks holda
-        # bitta ma'muriy amal relizni bloklab qo'yadi.
+        # DIQQAT -- QAMROVI: bu skript joylashtirish tomonidan
+        # CHAQIRILMAYDI, u QO'LDA bir marta yurgiziladi. Ya'ni bu
+        # tuzatish joylashtirish yo'lini HIMOYA QILMAYDI; u faqat
+        # qayta sozlashda yopiq hisob tiklanishini ta'minlaydi.
+        # Joylashtirish yo'lida xato xabari tushuntiradi
+        # (`e2e-fayl.sh`), chunki darvoza NUSXADA ishlaydi va jonli
+        # bazadagi faollikni ko'rmaydi.
         chiq="$(tender-kompaniya "$MUHIT" "$login" --faollashtir 2>&1)" \
             || { printf '%s\n' "$chiq" >&2; xato "$login: faollashtirilmadi"; }
         echo "  $login — parol yangilandi, faol"

@@ -177,7 +177,21 @@ KOD="$(curl -sS -o "$ISH/login.json" -w '%{http_code}' \
     -d "{\"username\":\"$LOGIN\",\"password\":\"$PAROL\"}" \
     "$URL/auth/login")"
 check "$([ "$KOD" = "200" ] && echo 1 || echo 0)" "login -> 200" "$KOD"
-[ "$KOD" = "200" ] || { echo "Kirish yiqildi, davom etib bo'lmaydi."; exit 1; }
+[ "$KOD" = "200" ] || {
+    echo "Kirish yiqildi, davom etib bo'lmaydi."
+    # XATO O'ZINI TUSHUNTIRSIN. 401 ning eng ko'p uchraydigan sababi --
+    # fikstura hisobi YOPILGAN. O'LCHANGAN HOLAT (2026-09-22): staging
+    # da qoldiq sinov hisoblari tozalanayotganda `zze2e_a` ham yopilgan
+    # va joylashtirish shu yerda 401 bilan yiqilib, orqaga qaytgan.
+    # Sabab jurnalda KO'RINMASDI: "login -> 200 -- 401" dan hisob
+    # yopiqligini taxmin qilish kerak edi.
+    if [ "$KOD" = "401" ]; then
+        echo "  Ehtimoliy sabab: '$LOGIN' hisobi YOPILGAN (active=false)."
+        echo "  Tekshirish:    sudo tender-kompaniya <muhit> --list"
+        echo "  Tiklash:       sudo tender-kompaniya <muhit> $LOGIN --faollashtir"
+    fi
+    exit 1
+}
 
 CSRF="$(jsonf csrf < "$ISH/login.json")"
 check "$([ -n "$CSRF" ] && echo 1 || echo 0)" "CSRF tokeni berildi"
