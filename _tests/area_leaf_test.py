@@ -105,13 +105,31 @@ def main() -> int:
     check("`dim_area` ga YOZILMAYDI (soxta hudud yaratilmaydi)",
           not yozuv, str(yozuv[:1]))
 
-    # Chaqiruv tender INSERT idan OLDIN turishi shart.
+    # CHAQIRUV tender INSERT idan OLDIN turishi shart.
+    #
+    # MATN QIDIRUVI EMAS, AST. Ilgari bu yerda
+    # `kod.find("area_tozala(cur, tenders)")` turardi va u
+    # `def area_tozala(cur, tenders)` SATRINI topardi -- ya'ni
+    # chaqiruv butunlay o'chirilganda ham YASHIL berardi. Mutatsiya
+    # buni ochib berdi: chaqiruv olib tashlandi, sinov 8/8 qoldi.
+    import ast
     src = io.open(os.path.join(ROOT, "etl_tenders.py"), encoding="utf-8").read()
-    kod = "\n".join(q.split("#")[0] for q in src.splitlines())
-    i_toza = kod.find("area_tozala(cur, tenders)")
-    i_ins = kod.find("INSERT INTO tender (")
-    check("tozalash tender INSERT idan OLDIN chaqiriladi",
-          0 < i_toza < i_ins, f"{i_toza} / {i_ins}")
+    daraxt = ast.parse(src)
+    fn = next((n for n in ast.walk(daraxt)
+               if isinstance(n, ast.FunctionDef) and n.name == "load_to_db"), None)
+    check("`load_to_db` topildi", fn is not None)
+    chaqiruv = [n.lineno for n in ast.walk(fn or ast.Module(body=[], type_ignores=[]))
+                if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name) and n.func.id == "area_tozala"]
+    check("`load_to_db` ichida `area_tozala` CHAQIRILADI",
+          bool(chaqiruv), str(chaqiruv))
+    ins = [n.lineno for n in ast.walk(fn or ast.Module(body=[], type_ignores=[]))
+           if isinstance(n, ast.Constant) and isinstance(n.value, str)
+           and "INSERT INTO tender (" in n.value]
+    check("tender INSERT topildi", bool(ins), str(ins))
+    check("tozalash INSERT dan OLDIN",
+          bool(chaqiruv) and bool(ins) and min(chaqiruv) < min(ins),
+          f"{chaqiruv} / {ins}")
 
     print("\n" + "=" * 70)
     print(f"NATIJA: {pass_}/{pass_ + fail_} o'tdi")
